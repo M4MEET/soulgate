@@ -1,0 +1,91 @@
+# SoulGate Code Ownership
+#
+# This file defines code ownership for different components of SoulGate.
+# Each agent is responsible for their designated components.
+#
+# Format: <path pattern> @owner
+# Owners will be automatically requested for reviews on PRs touching their code.
+
+# Global ownership (default)
+* @soulgate-maintainers
+
+# Documentation
+/docs/ @soulgate-maintainers
+/README.md @soulgate-maintainers
+/CONTRIBUTING.md @soulgate-maintainers
+
+# Agent 1: Audit Specialist
+/internal/audit/ @audit-agent
+/internal/audit/*.go @audit-agent
+/internal/audit/*_test.go @audit-agent
+
+# Agent 2: Policy Specialist
+/internal/policy/ @policy-agent
+/internal/policy/*.go @policy-agent
+/internal/policy/*_test.go @policy-agent
+
+# Agent 3: Config Specialist
+/internal/config/ @config-agent
+/internal/config/*.go @config-agent
+/internal/config/*_test.go @config-agent
+
+# Agent 4: Security/FileBroker Specialist
+/internal/brokers/ @broker-agent
+/internal/brokers/files/ @broker-agent
+/internal/brokers/*.go @broker-agent
+/internal/brokers/files/*.go @broker-agent
+/internal/brokers/files/*_test.go @broker-agent
+
+# Security-critical files require additional review
+/internal/brokers/files/permissions.go @broker-agent @security-reviewer
+/internal/brokers/files/security_test.go @broker-agent @security-reviewer
+
+# Agent 5: Plugin Specialist
+/internal/plugins/ @plugin-agent
+/internal/plugins/**/*.go @plugin-agent
+/internal/plugins/**/*_test.go @plugin-agent
+/examples/plugins/ @plugin-agent
+
+# Security-critical plugin files
+/internal/plugins/runtime/ @plugin-agent @security-reviewer
+/internal/plugins/security_test.go @plugin-agent @security-reviewer
+
+# Agent 6: Model Integration Specialist
+/internal/model/ @model-agent
+/internal/model/**/*.go @model-agent
+/internal/model/**/*_test.go @model-agent
+
+# Agent 7: Orchestration Specialist
+/internal/core/ @orchestration-agent
+/internal/core/*.go @orchestration-agent
+/internal/core/*_test.go @orchestration-agent
+
+# Agent 8: CLI/UX Specialist
+/cmd/soulgate/ @cli-agent
+/cmd/soulgate/**/*.go @cli-agent
+/cmd/soulgate/**/*_test.go @cli-agent
+
+# Critical interface files (require coordination - multiple reviewers)
+/internal/audit/event.go @audit-agent @orchestration-agent @broker-agent
+/internal/policy/policy.go @policy-agent @broker-agent
+/internal/plugins/sdk/manifest.go @plugin-agent @orchestration-agent
+/internal/model/schema.go @model-agent @orchestration-agent @plugin-agent
+/internal/brokers/broker.go @broker-agent @orchestration-agent @plugin-agent
+
+# Test infrastructure (shared by all agents)
+/internal/testutil/ @soulgate-maintainers
+/testdata/ @soulgate-maintainers
+/tests/ @soulgate-maintainers
+
+# Build and CI/CD
+/Makefile @soulgate-maintainers
+/.github/ @soulgate-maintainers
+/go.mod @soulgate-maintainers
+/go.sum @soulgate-maintainers
+
+# Security policies and audit
+/.github/workflows/security.yml @security-reviewer
+/internal/policy/security_test.go @policy-agent @security-reviewer
+
+# Integration tests (require review from affected agents)
+/tests/integration/ @orchestration-agent @soulgate-maintainers
