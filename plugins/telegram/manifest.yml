@@ -1,0 +1,50 @@
+name: telegram
+version: 1.0.0
+description: Telegram Bot integration for SoulGate
+author: SoulGate Team
+type: channel
+
+# Plugin provides a messaging channel
+provides:
+  channel:
+    name: telegram
+    description: Telegram messaging platform
+    capabilities:
+      - send_message
+      - receive_message
+      - send_photo
+      - send_document
+
+# Required permissions
+permissions:
+  - network.request:api.telegram.org/*  # Telegram API access
+  - messaging.send:telegram:*           # Send messages
+  - messaging.receive:telegram:*        # Receive messages
+
+# Configuration
+config:
+  required:
+    - name: bot_token
+      description: Telegram bot token from @BotFather
+      env: TELEGRAM_BOT_TOKEN
+      sensitive: true
+
+# Commands provided by this plugin
+commands:
+  - name: start
+    description: Start listening for Telegram messages
+    usage: soulgate plugin run telegram start
+
+  - name: send
+    description: Send a message via Telegram
+    usage: soulgate plugin run telegram send <chat-id> <message>
+    args:
+      - name: chat_id
+        required: true
+      - name: message
+        required: true
+
+# Dependencies
+dependencies:
+  go_modules:
+    - github.com/go-telegram/bot@v1.18.0
