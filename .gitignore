@@ -53,8 +53,8 @@ dist/
 build/
 out/
 target/
-soulgate
-soulgate.exe
+/soulgate
+/soulgate.exe
 *.exe
 *.exe~
 *.dll
