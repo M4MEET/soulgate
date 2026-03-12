@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════
+# SoulGate Configuration Template
+# Copy this to config.yml and fill in your actual values
+# ═══════════════════════════════════════════════════════════
+
+workspace:
+  root: .
+  config_dir: .soulgate
+
+model:
+  # Supported providers: openai, anthropic, ollama
+  default_provider: openai
+
+  # OpenAI Configuration
+  openai:
+    # DO NOT commit your actual API key here!
+    # Use environment variable: export OPENAI_API_KEY="sk-..."
+    api_key: ""
+    model: gpt-4
+    base_url: ""  # Leave empty for default
+    max_tokens: 4096
+    temperature: 0.7
+
+  # Anthropic Configuration
+  anthropic:
+    # DO NOT commit your actual API key here!
+    # Use environment variable: export ANTHROPIC_API_KEY="sk-ant-..."
+    api_key: ""
+    model: claude-3-5-sonnet-20241022
+    base_url: ""  # Leave empty for default
+    max_tokens: 4096
+    temperature: 0.7
+
+plugins:
+  dir: plugins
+  timeout: 30           # seconds
+  max_memory: 67108864  # 64MB in bytes
+
+audit:
+  database_path: .soulgate/audit.db
+  enabled: true
+
+policy:
+  file_path: .soulgate/policy.yml
+
+# ═══════════════════════════════════════════════════════════
+# SECURITY NOTES:
+#
+# 1. NEVER commit API keys to version control
+# 2. Use environment variables for secrets:
+#    export OPENAI_API_KEY="sk-..."
+#    export ANTHROPIC_API_KEY="sk-ant-..."
+#
+# 3. The actual config.yml is in .gitignore for safety
+# ═══════════════════════════════════════════════════════════

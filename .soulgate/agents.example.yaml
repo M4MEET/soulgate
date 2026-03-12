@@ -1,0 +1,124 @@
+version: "1"
+
+# Define multiple agents with different configurations
+agents:
+  # General-purpose agent using GPT-4
+  - id: gpt4-general
+    name: GPT-4 General
+    description: General-purpose assistant using GPT-4
+    enabled: true
+    model:
+      provider: openai
+      model: gpt-4
+      temperature: 0.7
+      max_tokens: 4096
+      api_key: ${OPENAI_API_KEY}  # Reference environment variable
+    tools:
+      - read_file
+      - list_files
+    max_iterations: 20
+    system_prompt: |
+      You are a helpful AI assistant with access to file operations.
+      Be concise and accurate in your responses.
+
+  # Fast agent using GPT-3.5
+  - id: gpt35-fast
+    name: GPT-3.5 Fast
+    description: Quick responses for simple queries
+    enabled: true
+    model:
+      provider: openai
+      model: gpt-3.5-turbo
+      temperature: 0.5
+      max_tokens: 2048
+      api_key: ${OPENAI_API_KEY}
+    tools:
+      - read_file
+      - list_files
+    max_iterations: 10
+    system_prompt: |
+      You are a fast, efficient assistant. Keep responses brief.
+
+  # Code specialist using Claude
+  - id: claude-code
+    name: Claude Code Specialist
+    description: Expert at code review and programming tasks
+    enabled: false  # Disabled by default
+    model:
+      provider: anthropic
+      model: claude-3-opus-20240229
+      temperature: 0.3
+      max_tokens: 8192
+      api_key: ${ANTHROPIC_API_KEY}
+    tools:
+      - read_file
+      - list_files
+      - write_file
+    skills:
+      - code_review
+      - debugging
+    max_iterations: 30
+    system_prompt: |
+      You are an expert software engineer specializing in code review
+      and debugging. Provide detailed, technical responses.
+    metadata:
+      specialty: coding
+      language: python
+
+  # Research agent
+  - id: research-agent
+    name: Research Specialist
+    description: Deep research and analysis
+    enabled: true
+    model:
+      provider: openai
+      model: gpt-4
+      temperature: 0.2  # Lower temperature for factual responses
+      max_tokens: 8192
+      api_key: ${OPENAI_API_KEY}
+    tools:
+      - read_file
+      - list_files
+      - web_search
+    skills:
+      - research
+      - analysis
+    max_iterations: 25
+    system_prompt: |
+      You are a research specialist. Provide thorough, well-researched
+      responses with citations when possible.
+
+# Routing configuration
+routing:
+  # Strategy: round_robin, load_balance, rule_based
+  strategy: rule_based
+
+  # Routing rules (evaluated in priority order)
+  rules:
+    # Code-related messages go to Claude
+    - name: code_specialist
+      condition: contains:code,bug,error,function
+      agent_ids:
+        - claude-code
+      priority: 100
+
+    # Research queries
+    - name: research_queries
+      condition: contains:research,analyze,study
+      agent_ids:
+        - research-agent
+      priority: 90
+
+    # Quick queries go to fast agent
+    - name: simple_queries
+      condition: word_count:<10
+      agent_ids:
+        - gpt35-fast
+      priority: 80
+
+    # Default: use general agent
+    - name: default
+      condition: always
+      agent_ids:
+        - gpt4-general
+      priority: 1
