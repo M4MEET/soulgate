@@ -148,6 +148,10 @@ temp/
 # │ IDE & EDITOR FILES                                      │
 # └─────────────────────────────────────────────────────────┘
 
+# Claude Code
+.claude/
+CLAUDE.md
+
 # Visual Studio Code
 .vscode/
 *.code-workspace
