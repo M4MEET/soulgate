@@ -1,0 +1,3842 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/M4MEET/soulgate/internal/core"
+	"github.com/M4MEET/soulgate/internal/model"
+	"github.com/M4MEET/soulgate/internal/onboarding"
+	"github.com/M4MEET/soulgate/internal/setup"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// InteractiveChatModel is the Bubble Tea model for interactive chat
+type InteractiveChatModel struct {
+	orch              *core.Orchestrator
+	input             textinput.Model
+	output            viewport.Model
+	messages          []string
+	history           []string
+	historyIndex      int
+	autocomplete      []string
+	showAutocomplete  bool
+	autocompleteIndex int // Selected suggestion index
+	width             int
+	height            int
+	status            string
+	thinking          bool
+	err               error
+	// Model info
+	currentProvider string
+	currentModel    string
+	modelDiscovery  *model.ModelDiscovery
+	// Confirmation dialog
+	showConfirmation    bool
+	confirmationMessage string
+	pendingCommand      string
+	pendingAction       func() tea.Cmd
+	// Permission prompt
+	showPermissionPrompt bool
+	permissionRequest    *core.PermissionRequest
+	permissionResponse   chan core.PermissionResponse
+	// Visual enhancements
+	spinnerFrame int
+	lastUpdate   time.Time
+	// Model selection mode
+	showModelSelector    bool
+	modelSelectionStep   int    // 1 = provider selection, 2 = model selection
+	selectedProvider     string // Provider selected in step 1
+	modelOptions         []modelOption
+	selectedModelIndex   int // For arrow key navigation
+	// Setup wizard mode
+	showSetupWizard     bool
+	setupStep           int
+	setupIntegrationID  string
+	setupFieldValues    map[string]string
+	setupCurrentField   int
+	// Onboarding mode
+	showOnboarding   bool
+	onboardingState  *onboarding.OnboardingState
+	onboardingInput  string
+	// API key prompt
+	showAPIKeyPrompt bool
+	apiKeyProvider   string
+	apiKeyInput      textinput.Model
+}
+
+// modelOption represents a selectable model option
+type modelOption struct {
+	number      int
+	name        string
+	provider    string
+	model       string
+	description string
+}
+
+// Message types
+type (
+	responseMsg struct {
+		text string
+		err  error
+	}
+	thinkingMsg struct{}
+	permissionRequestMsg struct {
+		request  core.PermissionRequest
+		response chan core.PermissionResponse
+	}
+)
+
+// NewInteractiveChatModel creates a new interactive chat model
+func NewInteractiveChatModel(orch *core.Orchestrator) InteractiveChatModel {
+	ti := textinput.New()
+	ti.Placeholder = "Type your message..."
+	ti.Focus()
+	ti.CharLimit = 500
+	ti.Width = 100
+	ti.Prompt = ">>> "
+	ti.PromptStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Bold(true) // Make prompt bold and orange
+	ti.TextStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")) // Light gray for better visibility
+	ti.PlaceholderStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")) // Dim gray for placeholder
+
+	vp := viewport.New(100, 25)
+	vp.SetContent(welcomeMessage())
+
+	// Get current provider and model
+	provider, modelName := orch.GetCurrentProvider()
+
+	// Initialize model discovery
+	discovery := model.NewModelDiscovery()
+
+	return InteractiveChatModel{
+		orch:            orch,
+		input:           ti,
+		output:          vp,
+		messages:        []string{welcomeMessage()},
+		history:         []string{},
+		historyIndex:    -1,
+		currentProvider: provider,
+		currentModel:    modelName,
+		modelDiscovery:  discovery,
+	}
+}
+
+func welcomeMessage() string {
+	var sb strings.Builder
+
+	// Welcome box with gradient border
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  ╭─ Welcome to SoulGate "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Render(strings.Repeat("─", 28)))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Render("Your secure AI agent gateway") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Quick Start:") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Render("  • ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Type your message and press Enter") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Render("  • ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Press Ctrl+H for help") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Render("  • ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Try: /status, /tools, /hub") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Render("  ╰"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Render(strings.Repeat("─", 54)))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m InteractiveChatModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	var cmds []tea.Cmd
+
+	// Update time tracking for animations
+	m.lastUpdate = time.Now()
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		// Handle onboarding (absolute highest priority)
+		if m.showOnboarding {
+			return m.handleOnboardingInput(msg.String())
+		}
+
+		// Handle setup wizard (highest priority)
+		if m.showSetupWizard {
+			return m.handleSetupWizardInput(msg.String())
+		}
+
+		// Handle API key prompt (high priority)
+		if m.showAPIKeyPrompt {
+			return m.handleAPIKeyInput(msg)
+		}
+
+		// Handle model selector (highest priority after permission)
+		if m.showModelSelector {
+			if m.modelSelectionStep == 1 {
+				// Step 1: Provider selection
+				return m.handleProviderSelection(msg.String())
+			} else {
+				// Step 2: Model selection
+				return m.handleModelSelection(msg.String())
+			}
+		}
+
+		// Handle permission prompt first (highest priority)
+		if m.showPermissionPrompt && m.permissionResponse != nil {
+			switch msg.String() {
+			case "a", "A":
+				// Allow once
+				m.showPermissionPrompt = false
+				m.addMessage(colorSuccess("✓ Permission granted (this time)"))
+				m.permissionResponse <- core.PermissionResponse{Approved: true, LearnPattern: false}
+				m.permissionResponse = nil
+				return m, nil
+
+			case "l", "L":
+				// Learn and always allow
+				m.showPermissionPrompt = false
+				m.addMessage(colorSuccess("✓ Permission granted and learned!"))
+				m.permissionResponse <- core.PermissionResponse{Approved: true, LearnPattern: true}
+				m.permissionResponse = nil
+				return m, nil
+
+			case "d", "D", "n", "N", "esc":
+				// Deny
+				m.showPermissionPrompt = false
+				m.addMessage(colorError("✗ Permission denied"))
+				m.permissionResponse <- core.PermissionResponse{Approved: false, LearnPattern: false}
+				m.permissionResponse = nil
+				return m, nil
+			}
+			// Ignore other keys when permission prompt is showing
+			return m, nil
+		}
+
+		// Handle confirmation dialog
+		if m.showConfirmation {
+			switch msg.String() {
+			case "y", "Y":
+				// Confirm - execute pending action
+				m.showConfirmation = false
+				m.addMessage(colorSuccess("✓ Confirmed"))
+				if m.pendingAction != nil {
+					cmd := m.pendingAction()
+					m.pendingAction = nil
+					return m, cmd
+				}
+				return m, nil
+
+			case "n", "N", "esc":
+				// Cancel
+				m.showConfirmation = false
+				m.addMessage(colorMuted("✗ Cancelled"))
+				m.pendingAction = nil
+				return m, nil
+			}
+			// Ignore other keys when confirmation is showing
+			return m, nil
+		}
+
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyCtrlD:
+			return m, tea.Quit
+
+		case tea.KeyCtrlL:
+			// Clear screen
+			m.messages = []string{welcomeMessage()}
+			m.output.SetContent(strings.Join(m.messages, "\n\n"))
+			return m, nil
+
+		case tea.KeyCtrlH:
+			// Show help
+			m.addMessage(renderHelp())
+			return m, nil
+
+		case tea.KeyUp:
+			// If autocomplete is showing, navigate suggestions
+			if m.showAutocomplete && len(m.autocomplete) > 0 {
+				if m.autocompleteIndex > 0 {
+					m.autocompleteIndex--
+				} else {
+					m.autocompleteIndex = len(m.autocomplete) - 1 // Wrap to bottom
+				}
+				return m, nil
+			}
+
+			// Otherwise, navigate command history (up = older)
+			if len(m.history) > 0 {
+				if m.historyIndex < len(m.history)-1 {
+					m.historyIndex++
+					m.input.SetValue(m.history[len(m.history)-1-m.historyIndex])
+					m.input.CursorEnd() // Move cursor to end
+				}
+			}
+			return m, nil
+
+		case tea.KeyDown:
+			// If autocomplete is showing, navigate suggestions
+			if m.showAutocomplete && len(m.autocomplete) > 0 {
+				if m.autocompleteIndex < len(m.autocomplete)-1 {
+					m.autocompleteIndex++
+				} else {
+					m.autocompleteIndex = 0 // Wrap to top
+				}
+				return m, nil
+			}
+
+			// Otherwise, navigate command history (down = newer)
+			if m.historyIndex > 0 {
+				m.historyIndex--
+				m.input.SetValue(m.history[len(m.history)-1-m.historyIndex])
+				m.input.CursorEnd()
+			} else if m.historyIndex == 0 {
+				m.historyIndex = -1
+				m.input.SetValue("")
+			}
+			return m, nil
+
+		case tea.KeyLeft, tea.KeyRight:
+			// Let textinput handle left/right navigation within input
+			// This moves cursor position in the text
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+
+		case tea.KeyHome:
+			// Jump to start of input
+			m.input.CursorStart()
+			return m, nil
+
+		case tea.KeyEnd:
+			// Jump to end of input
+			m.input.CursorEnd()
+			return m, nil
+
+		case tea.KeyCtrlA:
+			// Jump to start (alternative)
+			m.input.CursorStart()
+			return m, nil
+
+		case tea.KeyCtrlE:
+			// Jump to end (alternative)
+			m.input.CursorEnd()
+			return m, nil
+
+		case tea.KeyCtrlU:
+			// Clear entire line
+			m.input.SetValue("")
+			return m, nil
+
+		case tea.KeyCtrlK:
+			// Delete from cursor to end
+			pos := m.input.Position()
+			current := m.input.Value()
+			if pos < len(current) {
+				m.input.SetValue(current[:pos])
+			}
+			return m, nil
+
+		case tea.KeyCtrlW:
+			// Delete word backwards
+			pos := m.input.Position()
+			current := m.input.Value()
+			if pos > 0 {
+				// Find previous word boundary
+				newPos := pos - 1
+				for newPos > 0 && current[newPos] == ' ' {
+					newPos--
+				}
+				for newPos > 0 && current[newPos-1] != ' ' {
+					newPos--
+				}
+				m.input.SetValue(current[:newPos] + current[pos:])
+				m.input.SetCursor(newPos)
+			}
+			return m, nil
+
+		case tea.KeyPgUp:
+			// Scroll output up
+			m.output.ViewUp()
+			return m, nil
+
+		case tea.KeyPgDown:
+			// Scroll output down
+			m.output.ViewDown()
+			return m, nil
+
+		case tea.KeyEsc:
+			// Close autocomplete suggestions
+			if m.showAutocomplete {
+				m.showAutocomplete = false
+				m.autocompleteIndex = 0
+				return m, nil
+			}
+			return m, nil
+
+		case tea.KeyTab:
+			// Autocomplete - use selected suggestion
+			if m.showAutocomplete && len(m.autocomplete) > 0 {
+				m.input.SetValue(m.autocomplete[m.autocompleteIndex])
+				m.input.CursorEnd()
+				m.showAutocomplete = false
+				m.autocompleteIndex = 0
+			}
+			return m, nil
+
+		case tea.KeyEnter:
+			// If autocomplete is showing, select highlighted suggestion
+			if m.showAutocomplete && len(m.autocomplete) > 0 {
+				m.input.SetValue(m.autocomplete[m.autocompleteIndex])
+				m.input.CursorEnd()
+				m.showAutocomplete = false
+				m.autocompleteIndex = 0
+				return m, nil
+			}
+
+			value := m.input.Value()
+			if value == "" {
+				return m, nil
+			}
+
+			// Add to history
+			m.history = append(m.history, value)
+			m.historyIndex = -1
+
+			// Clear input
+			m.input.SetValue("")
+			m.showAutocomplete = false
+			m.autocompleteIndex = 0
+
+			// Add user message to output
+			m.addMessage(colorAccent(">>> ") + value)
+
+			// Handle commands
+			if strings.HasPrefix(value, "/") {
+				return m.handleCommand(value)
+			}
+
+			// Handle shell commands
+			if strings.HasPrefix(value, "!") {
+				return m.handleShellCommand(value)
+			}
+
+			// Send to AI
+			m.thinking = true
+			m.status = "Thinking..."
+			m.spinnerFrame = 0
+			// Start both the AI request and thinking animation
+			return m, tea.Batch(
+				m.sendToAI(value),
+				tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
+					return thinkingMsg{}
+				}),
+			)
+		}
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.output.Width = msg.Width - 4
+		m.output.Height = msg.Height - 10
+		m.input.Width = msg.Width - 8
+		return m, nil
+
+	case responseMsg:
+		m.thinking = false
+		m.status = "Ready"
+		if msg.err != nil {
+			// Show detailed error
+			var sb strings.Builder
+			sb.WriteString(colorError("╭─ ✗ Error ") + colorError(strings.Repeat("─", 43)) + "\n")
+			sb.WriteString(colorError("│") + "\n")
+			sb.WriteString(colorError("│ ") + msg.err.Error() + "\n")
+			sb.WriteString(colorError("│") + "\n")
+			sb.WriteString(colorError("│ ") + colorMuted("Troubleshooting:") + "\n")
+			sb.WriteString(colorError("│ ") + colorMuted("1. Check API key: echo $OPENAI_API_KEY") + "\n")
+			sb.WriteString(colorError("│ ") + colorMuted("2. Check config: cat ~/.soulgate/config.yml") + "\n")
+			sb.WriteString(colorError("│ ") + colorMuted("3. Test connection: curl https://api.openai.com") + "\n")
+			sb.WriteString(colorError("│") + "\n")
+			sb.WriteString(colorError("╰") + colorError(strings.Repeat("─", 54)))
+			m.addMessage(sb.String())
+		} else {
+			// Format AI response elegantly
+			m.addMessage(formatAIResponse(msg.text))
+		}
+		return m, nil
+
+	case thinkingMsg:
+		if m.thinking {
+			// Advance spinner frame
+			m.spinnerFrame = (m.spinnerFrame + 1) % 10
+			// Update thinking animation
+			return m, tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
+				return thinkingMsg{}
+			})
+		}
+		return m, nil
+
+	case permissionRequestMsg:
+		// Show permission prompt
+		m.showPermissionPrompt = true
+		m.permissionRequest = &msg.request
+		m.permissionResponse = msg.response
+		return m, nil
+
+	case dependencyInstallCompleteMsg:
+		// Dependency installation completed
+		// Just trigger a re-render - the onboarding state has been updated
+		return m, nil
+	}
+
+	// Update input
+	if !m.thinking {
+		m.input, cmd = m.input.Update(msg)
+		cmds = append(cmds, cmd)
+
+		// Update autocomplete
+		m.updateAutocomplete()
+	}
+
+	// Update viewport
+	m.output, cmd = m.output.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m InteractiveChatModel) View() string {
+	var sb strings.Builder
+
+	// Header (fixed height: 3 lines)
+	sb.WriteString(renderHeader())
+	sb.WriteString("\n\n")
+
+	// Output viewport
+	sb.WriteString(m.output.View())
+	sb.WriteString("\n\n")
+
+	// Onboarding (absolute highest priority overlay)
+	if m.showOnboarding {
+		sb.WriteString("\n")
+		sb.WriteString(m.renderOnboarding())
+		return sb.String()
+	}
+
+	// Setup wizard (highest priority overlay)
+	if m.showSetupWizard {
+		sb.WriteString("\n")
+		sb.WriteString(m.renderSetupWizard())
+		return sb.String()
+	}
+
+	// API key prompt (high priority overlay)
+	if m.showAPIKeyPrompt {
+		sb.WriteString(m.renderAPIKeyPrompt())
+		return sb.String()
+	}
+
+	// Model selector (highest priority overlay)
+	if m.showModelSelector {
+		sb.WriteString("\n")
+		sb.WriteString(m.renderModelSelectorPrompt())
+		return sb.String()
+	}
+
+	// Permission prompt (highest priority overlay)
+	if m.showPermissionPrompt && m.permissionRequest != nil {
+		sb.WriteString("\n")
+		sb.WriteString(m.renderPermissionPrompt())
+		return sb.String()
+	}
+
+	// Confirmation dialog (overlays everything if shown)
+	if m.showConfirmation {
+		sb.WriteString("\n")
+		sb.WriteString(m.renderConfirmation())
+		return sb.String()
+	}
+
+	// Status bar
+	sb.WriteString(m.renderStatusBar())
+	sb.WriteString("\n")
+
+	// Input separator for better visibility
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render(strings.Repeat("─", 100)))
+	sb.WriteString("\n")
+
+	// Input
+	sb.WriteString(m.input.View())
+
+	// Autocomplete suggestions
+	if m.showAutocomplete && len(m.autocomplete) > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(m.renderAutocomplete())
+	}
+
+	// Hints
+	sb.WriteString("\n")
+	sb.WriteString(m.renderHints())
+
+	return sb.String()
+}
+
+// Helper methods
+
+func (m *InteractiveChatModel) addMessage(text string) {
+	m.messages = append(m.messages, text)
+	content := strings.Join(m.messages, "\n\n")
+	m.output.SetContent(content)
+	m.output.GotoBottom()
+}
+
+func (m *InteractiveChatModel) updateAutocomplete() {
+	value := m.input.Value()
+	if strings.HasPrefix(value, "/") {
+		// Command autocomplete
+		commands := []string{"/status", "/tools", "/history", "/clear", "/help", "/model", "/debug", "/hub", "/setup", "/onboarding", "/exit", "/quit"}
+		newAutocomplete := filterStrings(commands, value)
+
+		// Only show if there are suggestions and not exact match
+		wasShowing := m.showAutocomplete
+		m.showAutocomplete = len(newAutocomplete) > 0 && value != newAutocomplete[0]
+
+		// Reset index if suggestions changed
+		if !wasShowing && m.showAutocomplete {
+			m.autocompleteIndex = 0
+		}
+
+		m.autocomplete = newAutocomplete
+	} else {
+		m.showAutocomplete = false
+		m.autocomplete = []string{}
+		m.autocompleteIndex = 0
+	}
+}
+
+func (m InteractiveChatModel) handleCommand(cmd string) (InteractiveChatModel, tea.Cmd) {
+	// Parse command and args
+	parts := strings.Fields(strings.TrimSpace(cmd))
+	if len(parts) == 0 {
+		return m, nil
+	}
+
+	cmdName := strings.ToLower(parts[0])
+	cmdArgs := parts[1:]
+
+	// Check if this is a sensitive command that requires confirmation
+	if isSensitiveCommand(cmd) {
+		m.showConfirmation = true
+		m.confirmationMessage = getSensitiveMessage(cmd)
+		m.pendingCommand = cmd
+		m.pendingAction = func() tea.Cmd {
+			return m.executeCommand(cmdName, cmdArgs)
+		}
+		return m, nil
+	}
+
+	// Execute non-sensitive command directly
+	return m, m.executeCommand(cmdName, cmdArgs)
+}
+
+func (m *InteractiveChatModel) executeCommand(cmdName string, args []string) tea.Cmd {
+	switch cmdName {
+	case "/exit", "/quit":
+		return tea.Quit
+
+	case "/clear":
+		m.messages = []string{welcomeMessage()}
+		m.output.SetContent(strings.Join(m.messages, "\n\n"))
+		return nil
+
+	case "/history":
+		if len(m.history) == 0 {
+			m.addMessage(colorMuted("  (no history)"))
+		} else {
+			var sb strings.Builder
+			sb.WriteString(colorAccentBright("Command History:\n"))
+			for i := len(m.history) - 1; i >= 0 && i >= len(m.history)-10; i-- {
+				sb.WriteString(colorMuted(fmt.Sprintf("  %d. %s\n", len(m.history)-i, m.history[i])))
+			}
+			m.addMessage(sb.String())
+		}
+		return nil
+
+	case "/status":
+		m.addMessage(m.renderStatus())
+		return nil
+
+	case "/tools":
+		m.addMessage(renderToolsList())
+		return nil
+
+	case "/help":
+		m.addMessage(renderHelp())
+		return nil
+
+	case "/model":
+		// If no args, show interactive provider selector (step 1)
+		if len(args) == 0 {
+			m.showModelSelector = true
+			m.modelSelectionStep = 1 // Start with provider selection
+			m.selectedProvider = ""
+			m.selectedModelIndex = 0
+			m.addMessage(colorAccent("Select an LLM provider..."))
+			return nil
+		}
+
+		// If arg is a number, it might be from model selection
+		if len(args) == 1 && len(args[0]) == 1 && args[0][0] >= '1' && args[0][0] <= '9' {
+			number := int(args[0][0] - '0')
+			for _, opt := range m.modelOptions {
+				if opt.number == number {
+					if err := m.orch.SetProvider(opt.provider, opt.model); err != nil {
+						m.addMessage(colorError(fmt.Sprintf("✗ Failed to switch model: %s", err.Error())))
+					} else {
+						m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
+						// Save config to persist the change
+						if err := m.orch.GetWorkspace().SaveConfig(); err != nil {
+							m.addMessage(colorWarn(fmt.Sprintf("⚠ Model switched but config save failed: %s", err.Error())))
+						}
+						m.addMessage(colorSuccess(fmt.Sprintf("✓ Switched to %s - %s", opt.name, opt.description)))
+					}
+					return nil
+				}
+			}
+		}
+
+		// Dynamic model switching: /model <provider> [model-name]
+		provider := strings.ToLower(args[0])
+		modelName := ""
+		if len(args) > 1 {
+			modelName = args[1]
+		}
+
+		// Switch model
+		if err := m.orch.SetProvider(provider, modelName); err != nil {
+			m.addMessage(colorError(fmt.Sprintf("✗ Failed to switch model: %s", err.Error())))
+			return nil
+		}
+
+		// Update current provider/model
+		m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
+
+		// Save config to persist the change
+		if err := m.orch.GetWorkspace().SaveConfig(); err != nil {
+			m.addMessage(colorWarn(fmt.Sprintf("⚠ Model switched but config save failed: %s", err.Error())))
+		}
+
+		m.addMessage(colorSuccess(fmt.Sprintf("✓ Switched to %s (%s)", provider, m.currentModel)))
+		return nil
+
+	case "/debug":
+		m.addMessage(m.renderDebugInfo())
+		return nil
+
+	case "/hub":
+		// Hub browser
+		if len(args) == 0 {
+			m.addMessage(renderHubOverview())
+		} else {
+			subCmd := args[0]
+			switch subCmd {
+			case "plugins":
+				m.addMessage(renderHubPlugins())
+			case "skills":
+				m.addMessage(renderHubSkills())
+			case "installed":
+				m.addMessage(renderHubInstalled())
+			case "install":
+				if len(args) > 1 {
+					m.addMessage(colorAccent(fmt.Sprintf("Installing %s... (use CLI for actual installation)", args[1])))
+					m.addMessage(colorMuted(fmt.Sprintf("Run: soulgate hub install %s", args[1])))
+				} else {
+					m.addMessage(colorError("Usage: /hub install <name>"))
+				}
+			case "search":
+				if len(args) > 1 {
+					query := strings.Join(args[1:], " ")
+					m.addMessage(colorAccent(fmt.Sprintf("Searching for: %s... (use CLI for full results)", query)))
+					m.addMessage(colorMuted(fmt.Sprintf("Run: soulgate hub search %s", query)))
+				} else {
+					m.addMessage(colorError("Usage: /hub search <query>"))
+				}
+			default:
+				m.addMessage(colorError("Unknown hub command: " + subCmd))
+			}
+		}
+		return nil
+
+	case "/setup":
+		// Interactive setup wizard
+		if len(args) == 0 {
+			// Show all integrations
+			m.showSetupWizard = true
+			m.setupStep = 0 // Integration selection
+			m.setupFieldValues = make(map[string]string)
+			m.addMessage(colorAccent("Starting setup wizard..."))
+			return nil
+		} else {
+			// Setup specific integration
+			integrationID := args[0]
+			m.showSetupWizard = true
+			m.setupStep = 1 // Field input
+			m.setupIntegrationID = integrationID
+			m.setupCurrentField = 0
+			m.setupFieldValues = make(map[string]string)
+			m.addMessage(colorAccent(fmt.Sprintf("Setting up %s integration...", integrationID)))
+			return nil
+		}
+
+	case "/onboarding":
+		// Start interactive onboarding wizard
+		m.showOnboarding = true
+		m.onboardingState = onboarding.NewOnboardingState(m.orch.GetWorkspace())
+		m.onboardingInput = ""
+		m.addMessage(colorAccent("Starting onboarding wizard..."))
+		return nil
+
+	default:
+		m.addMessage(colorError("Unknown command: " + cmdName))
+		return nil
+	}
+}
+
+func (m InteractiveChatModel) handleShellCommand(cmd string) (InteractiveChatModel, tea.Cmd) {
+	shellCmd := strings.TrimPrefix(cmd, "!")
+
+	// Check if this is a sensitive shell command that requires confirmation
+	if isSensitiveCommand(cmd) || isSensitiveCommand(shellCmd) {
+		m.showConfirmation = true
+		m.confirmationMessage = getSensitiveMessage(cmd)
+		m.pendingCommand = cmd
+		m.pendingAction = func() tea.Cmd {
+			return m.executeShellCommand(shellCmd)
+		}
+		return m, nil
+	}
+
+	// Execute non-sensitive command directly
+	return m, m.executeShellCommand(shellCmd)
+}
+
+func (m *InteractiveChatModel) executeShellCommand(shellCmd string) tea.Cmd {
+	m.addMessage(colorMuted("Executing: " + shellCmd))
+
+	// Execute shell command via orchestrator's exec_command tool
+	return func() tea.Msg {
+		result, err := m.orch.Run(context.Background(), fmt.Sprintf("Execute this shell command: %s", shellCmd))
+		if err != nil {
+			return responseMsg{
+				text: colorError("✗ Command failed: " + err.Error()),
+			}
+		}
+		return responseMsg{
+			text: colorSuccess("✓ Command executed\n") + result.Response,
+		}
+	}
+}
+
+func (m *InteractiveChatModel) sendToAI(prompt string) tea.Cmd {
+	return func() tea.Msg {
+		// Create context with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		result, err := m.orch.Run(ctx, prompt)
+		if err != nil {
+			// Return detailed error
+			return responseMsg{
+				text: "",
+				err:  fmt.Errorf("AI request failed: %w", err),
+			}
+		}
+
+		if result == nil {
+			return responseMsg{
+				text: "",
+				err:  fmt.Errorf("no response from AI (result is nil)"),
+			}
+		}
+
+		return responseMsg{text: result.Response}
+	}
+}
+
+// installDependenciesCmd installs dependencies for configured integrations
+func (m *InteractiveChatModel) installDependenciesCmd() tea.Cmd {
+	return func() tea.Msg {
+		if m.onboardingState == nil {
+			return nil
+		}
+
+		// Create context with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		// Install dependencies
+		if err := m.onboardingState.InstallDependencies(ctx); err != nil {
+			// Log error but don't fail onboarding
+			m.onboardingState.DependencyErrors = append(
+				m.onboardingState.DependencyErrors,
+				fmt.Sprintf("Installation error: %v", err),
+			)
+		}
+
+		// Return a message to trigger re-render
+		return dependencyInstallCompleteMsg{}
+	}
+}
+
+// dependencyInstallCompleteMsg signals that dependency installation is complete
+type dependencyInstallCompleteMsg struct{}
+
+func (m *InteractiveChatModel) renderStatusBar() string {
+	statusStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Padding(0, 1)
+
+	status := "Ready"
+	statusColor := "82" // Green
+
+	if m.thinking {
+		// Animated spinner frames
+		spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		spinner := spinners[m.spinnerFrame%len(spinners)]
+		status = fmt.Sprintf("%s Thinking", spinner)
+		statusColor = "208" // Orange
+	}
+
+	// Show current model in status bar with gradient effect
+	modelInfo := fmt.Sprintf("%s:%s", m.currentProvider, m.currentModel)
+
+	// Create colored status
+	coloredStatus := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(statusColor)).
+		Bold(true).
+		Render(status)
+
+	return statusStyle.Render(fmt.Sprintf("%s  •  Model: %s  •  Messages: %d", coloredStatus, modelInfo, len(m.history)))
+}
+
+func (m *InteractiveChatModel) renderAutocomplete() string {
+	if len(m.autocomplete) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Box top with gradient
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("45")).
+		Render("  ┌─ ✨ Suggestions "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("39")).
+		Render(strings.Repeat("─", 35)))
+	sb.WriteString("\n")
+
+	// Suggestions list (max 6 items)
+	maxItems := 6
+	displayCount := len(m.autocomplete)
+	if displayCount > maxItems {
+		displayCount = maxItems
+	}
+
+	for i := 0; i < displayCount; i++ {
+		suggestion := m.autocomplete[i]
+
+		if i == m.autocompleteIndex {
+			// Highlighted item (selected) with gradient
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("45")).
+				Render("  │ "))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Bold(true).
+				Render("► "))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("220")).
+				Bold(true).
+				Background(lipgloss.Color("236")).
+				Render(" "+suggestion+" "))
+		} else {
+			// Normal item
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("39")).
+				Render("  │ "))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render("  "))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Render(suggestion))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Show indicator if more items
+	if len(m.autocomplete) > maxItems {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("39")).
+			Render("  │   "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true).
+			Render(fmt.Sprintf("... (%d more)", len(m.autocomplete)-maxItems)))
+		sb.WriteString("\n")
+	}
+
+	// Box bottom
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("39")).
+		Render("  └"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("39")).
+		Render(strings.Repeat("─", 54)))
+
+	// Hint with icons
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render("  ↑↓ navigate • "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("Enter/Tab"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(" select • "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196")).
+		Render("Esc"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(" close"))
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderHints() string {
+	var sb strings.Builder
+
+	// Build hints with color-coded shortcuts
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render("  "))
+
+	// History
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("45")).
+		Render("↑↓"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(": History  •  "))
+
+	// Navigate
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("45")).
+		Render("←→"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(": Navigate  •  "))
+
+	// Complete
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("Tab"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(": Complete  •  "))
+
+	// Help
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Render("Ctrl+H"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(": Help  •  "))
+
+	// Clear
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Render("Ctrl+L"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(": Clear  •  "))
+
+	// Exit
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196")).
+		Render("Ctrl+C"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(": Exit"))
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderPermissionPrompt() string {
+	if m.permissionRequest == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Permission box
+	sb.WriteString("\n")
+	sb.WriteString(colorInfo("  ╭─ 🔐 Permission Required "))
+	sb.WriteString(colorInfo(strings.Repeat("─", 27)))
+	sb.WriteString("\n")
+	sb.WriteString(colorInfo("  │") + "\n")
+	sb.WriteString(colorInfo("  │  ") + colorBold("The AI wants to:") + "\n")
+	sb.WriteString(colorInfo("  │  ") + "→ " + m.permissionRequest.Description + "\n")
+	sb.WriteString(colorInfo("  │") + "\n")
+	sb.WriteString(colorInfo("  │  ") + colorMuted("Action: ") + m.permissionRequest.Action + "\n")
+	sb.WriteString(colorInfo("  │  ") + colorMuted("Resource: ") + m.permissionRequest.Resource + "\n")
+	if m.permissionRequest.Reason != "" {
+		sb.WriteString(colorInfo("  │  ") + colorMuted("Reason: ") + m.permissionRequest.Reason + "\n")
+	}
+	sb.WriteString(colorInfo("  │") + "\n")
+
+	// Show what pattern will be learned
+	pattern := core.GenerateSmartPattern(m.permissionRequest.Action, m.permissionRequest.Resource)
+	sb.WriteString(colorInfo("  │  ") + colorBold("Grant permission?") + "\n")
+	sb.WriteString(colorInfo("  │  ") + colorSuccess("(A)") + " Allow Once\n")
+	sb.WriteString(colorInfo("  │  ") + colorAccentBright("(L)") + " Learn & Always Allow " + colorMuted("(saves: "+pattern+")") + "\n")
+	sb.WriteString(colorInfo("  │  ") + colorError("(D)") + " Deny\n")
+	sb.WriteString(colorInfo("  │") + "\n")
+	sb.WriteString(colorInfo("  ╰"))
+	sb.WriteString(colorInfo(strings.Repeat("─", 54)))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderConfirmation() string {
+	var sb strings.Builder
+
+	// Warning box
+	sb.WriteString("\n")
+	sb.WriteString(colorWarn("  ╭─ ⚠  Confirmation Required "))
+	sb.WriteString(colorWarn(strings.Repeat("─", 25)))
+	sb.WriteString("\n")
+	sb.WriteString(colorWarn("  │") + "\n")
+	sb.WriteString(colorWarn("  │  ") + m.confirmationMessage + "\n")
+	sb.WriteString(colorWarn("  │") + "\n")
+	sb.WriteString(colorWarn("  │  ") + colorBold("Command: ") + colorAccent(m.pendingCommand) + "\n")
+	sb.WriteString(colorWarn("  │") + "\n")
+	sb.WriteString(colorWarn("  │  ") + colorBold("Are you sure? ") + colorSuccess("(Y)es") + " / " + colorError("(N)o") + "\n")
+	sb.WriteString(colorWarn("  │") + "\n")
+	sb.WriteString(colorWarn("  ╰"))
+	sb.WriteString(colorWarn(strings.Repeat("─", 54)))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// isSensitiveCommand checks if a command requires confirmation
+func isSensitiveCommand(cmd string) bool {
+	cmdLower := strings.ToLower(strings.TrimSpace(cmd))
+	cmdLower = strings.TrimPrefix(cmdLower, "!") // Remove ! prefix for shell commands
+
+	// Dangerous deletion patterns
+	deletionPatterns := []string{
+		"rm -rf",
+		"rm -r",
+		"rm ",
+		"sudo rm",
+		"delete",
+		"files_delete",
+		"rmdir",
+		"unlink",
+	}
+
+	// Privilege escalation
+	privilegePatterns := []string{
+		"sudo ",
+		"su ",
+		"doas ",
+	}
+
+	// System modification
+	systemPatterns := []string{
+		"mkfs",
+		"dd if=",
+		"format",
+		"fdisk",
+		"parted",
+		"shutdown",
+		"reboot",
+		"halt",
+		"poweroff",
+		"systemctl stop",
+		"systemctl disable",
+		"kill -9",
+		"pkill",
+		"killall",
+	}
+
+	// Network/security sensitive
+	networkPatterns := []string{
+		"chmod 777",
+		"chmod -r 777",
+		"chown",
+		"curl | sh",
+		"wget | sh",
+		"curl | bash",
+		"wget | bash",
+	}
+
+	allPatterns := append(deletionPatterns, privilegePatterns...)
+	allPatterns = append(allPatterns, systemPatterns...)
+	allPatterns = append(allPatterns, networkPatterns...)
+
+	for _, pattern := range allPatterns {
+		if strings.Contains(cmdLower, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getSensitiveMessage returns a warning message for sensitive commands
+func getSensitiveMessage(cmd string) string {
+	cmdLower := strings.ToLower(cmd)
+
+	// Check for different types of dangerous operations
+	if strings.Contains(cmdLower, "rm -rf") {
+		return "⚠️  DANGER: Recursive force delete - files CANNOT be recovered!"
+	}
+	if strings.Contains(cmdLower, "rm -r") || strings.Contains(cmdLower, "rmdir") {
+		return "⚠️  WARNING: This will delete directories and their contents."
+	}
+	if strings.Contains(cmdLower, "rm ") || strings.Contains(cmdLower, "delete") {
+		return "⚠️  This command will DELETE files permanently."
+	}
+	if strings.Contains(cmdLower, "sudo") || strings.Contains(cmdLower, "su ") {
+		return "⚠️  This command requires ELEVATED PRIVILEGES."
+	}
+	if strings.Contains(cmdLower, "shutdown") || strings.Contains(cmdLower, "reboot") ||
+	   strings.Contains(cmdLower, "halt") || strings.Contains(cmdLower, "poweroff") {
+		return "⚠️  This will SHUTDOWN or REBOOT your system."
+	}
+	if strings.Contains(cmdLower, "kill") || strings.Contains(cmdLower, "pkill") {
+		return "⚠️  This will TERMINATE running processes."
+	}
+	if strings.Contains(cmdLower, "mkfs") || strings.Contains(cmdLower, "format") ||
+	   strings.Contains(cmdLower, "fdisk") || strings.Contains(cmdLower, "dd if=") {
+		return "⚠️  EXTREME DANGER: This can DESTROY entire disk partitions!"
+	}
+	if strings.Contains(cmdLower, "chmod 777") {
+		return "⚠️  SECURITY RISK: This makes files world-writable!"
+	}
+	if strings.Contains(cmdLower, "curl | sh") || strings.Contains(cmdLower, "wget | bash") {
+		return "⚠️  SECURITY RISK: Executing remote scripts without review!"
+	}
+
+	return "⚠️  This is a potentially dangerous operation."
+}
+
+// Rendering functions
+
+func renderHeader() string {
+	// Gradient text effect for "SoulGate"
+	soul := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")). // Orange
+		Bold(true).
+		Render("Soul")
+
+	gate := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")). // Lighter orange
+		Bold(true).
+		Render("Gate")
+
+	tagline := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")). // Gray
+		Italic(true).
+		Render("Your AI Guardian")
+
+	// Build header with gradient
+	header := fmt.Sprintf("  🐙  %s%s  -  %s", soul, gate, tagline)
+
+	// Center it
+	headerStyle := lipgloss.NewStyle().
+		Align(lipgloss.Center).
+		Width(60)
+
+	return headerStyle.Render(header)
+}
+
+func renderHelp() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ Help ─────────────────────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Commands:") + "\n")
+	sb.WriteString(colorAccent("│") + "   /status              Show status\n")
+	sb.WriteString(colorAccent("│") + "   /tools               List tools\n")
+	sb.WriteString(colorAccent("│") + "   /model [provider]    Show/switch AI model\n")
+	sb.WriteString(colorAccent("│") + "   /history             Show history\n")
+	sb.WriteString(colorAccent("│") + "   /clear               Clear screen\n")
+	sb.WriteString(colorAccent("│") + "   /help                Show this help\n")
+	sb.WriteString(colorAccent("│") + "   /exit                Exit\n")
+	sb.WriteString(colorAccent("│") + "   !command             Execute shell command\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Examples:") + "\n")
+	sb.WriteString(colorAccent("│") + "   /model               List all models\n")
+	sb.WriteString(colorAccent("│") + "   /model openai        Switch to OpenAI\n")
+	sb.WriteString(colorAccent("│") + "   /model anthropic     Switch to Claude\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Navigation:") + "\n")
+	sb.WriteString(colorAccent("│") + "   ↑↓         Navigate command history\n")
+	sb.WriteString(colorAccent("│") + "   ←→         Move cursor in input\n")
+	sb.WriteString(colorAccent("│") + "   Home/End   Jump to start/end of line\n")
+	sb.WriteString(colorAccent("│") + "   PgUp/PgDn  Scroll output\n")
+	sb.WriteString(colorAccent("│") + "   Tab        Autocomplete command\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Shortcuts:") + "\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+A/E   Jump to start/end\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+U     Clear line\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+K     Delete to end\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+W     Delete word\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+H     Show this help\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+L     Clear screen\n")
+	sb.WriteString(colorAccent("│") + "   Ctrl+C/D   Exit\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderStatus() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ Status ───────────────────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " Provider: " + colorAccent(m.currentProvider) + "\n")
+	sb.WriteString(colorAccent("│") + " Model: " + colorMuted(m.currentModel) + "\n")
+	sb.WriteString(colorAccent("│") + " Status: " + colorSuccess("Ready") + "\n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+func renderToolsList() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ Available Tools ──────────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " Core Tools (9):\n")
+	sb.WriteString(colorAccent("│") + "   • files_read, files_write, files_list\n")
+	sb.WriteString(colorAccent("│") + "   • exec_command, net_request\n")
+	sb.WriteString(colorAccent("│") + "   • memory_write, memory_search, memory_get\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " Integration Tools: " + colorMuted("46 tools") + "\n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+func renderHubOverview() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ 🐙 SoulHub - Community Marketplace ───────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Categories:") + "\n")
+	sb.WriteString(colorAccent("│") + "   🔌 Plugins       - WASM extensions\n")
+	sb.WriteString(colorAccent("│") + "   ⚡ Skills        - Automation workflows\n")
+	sb.WriteString(colorAccent("│") + "   🔗 Integrations - Ready-to-use services\n")
+	sb.WriteString(colorAccent("│") + "   📦 Recipes       - Complete solutions\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Browse:") + "\n")
+	sb.WriteString(colorAccent("│") + "   /hub plugins     - View all plugins\n")
+	sb.WriteString(colorAccent("│") + "   /hub skills      - View all skills\n")
+	sb.WriteString(colorAccent("│") + "   /hub installed   - Show installed items\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Install:") + "\n")
+	sb.WriteString(colorAccent("│") + "   /hub install <name>\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorMuted("Or use CLI: soulgate hub") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+func renderHubPlugins() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ 🔌 Hub Plugins ───────────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Featured Plugins:") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + "   1. ⭐⭐⭐⭐⭐ " + colorSuccess("awesome-github") + "\n")
+	sb.WriteString(colorAccent("│") + "      Advanced GitHub integration\n")
+	sb.WriteString(colorAccent("│") + "      1.2k downloads\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + "   2. ⭐⭐⭐⭐⭐ " + colorInfo("notion-sync") + "\n")
+	sb.WriteString(colorAccent("│") + "      Sync notes to Notion\n")
+	sb.WriteString(colorAccent("│") + "      890 downloads\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + "   3. ⭐⭐⭐⭐ " + colorInfo("whatsapp-bot") + "\n")
+	sb.WriteString(colorAccent("│") + "      WhatsApp automation\n")
+	sb.WriteString(colorAccent("│") + "      567 downloads\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorMuted("For full list: soulgate hub plugins") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+func renderHubSkills() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ ⚡ Hub Skills ─────────────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Popular Skills:") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + "   1. ⭐⭐⭐⭐⭐ " + colorSuccess("auto-commit") + "\n")
+	sb.WriteString(colorAccent("│") + "      Auto-commit and push changes\n")
+	sb.WriteString(colorAccent("│") + "      2.3k downloads\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + "   2. ⭐⭐⭐⭐⭐ " + colorInfo("daily-standup") + "\n")
+	sb.WriteString(colorAccent("│") + "      Automated standup reports\n")
+	sb.WriteString(colorAccent("│") + "      1.5k downloads\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + "   3. ⭐⭐⭐⭐ " + colorInfo("code-review") + "\n")
+	sb.WriteString(colorAccent("│") + "      AI code review automation\n")
+	sb.WriteString(colorAccent("│") + "      890 downloads\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorMuted("For full list: soulgate hub skills") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+func renderHubInstalled() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ 📦 Installed Items ───────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorMuted("No items installed yet.") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorBold("Get Started:") + "\n")
+	sb.WriteString(colorAccent("│") + "   /hub plugins     - Browse plugins\n")
+	sb.WriteString(colorAccent("│") + "   /hub install <name>\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccent("│") + " " + colorMuted("Or: soulgate hub install <name>") + "\n")
+	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+// Utility functions
+
+func filterStrings(items []string, prefix string) []string {
+	var filtered []string
+	for _, s := range items {
+		if strings.HasPrefix(s, prefix) && s != prefix {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
+// formatAIResponse formats AI response with elegant styling
+func formatAIResponse(text string) string {
+	if text == "" {
+		return colorMuted("(empty response)")
+	}
+
+	var sb strings.Builder
+
+	// Header with gradient effect
+	sb.WriteString(colorAccent("╭─ 🐙 "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Bold(true).
+		Render("AI Response"))
+	sb.WriteString(colorAccent(" "))
+	sb.WriteString(colorAccent(strings.Repeat("─", 30)))
+	sb.WriteString("\n")
+	sb.WriteString(colorAccent("│") + "\n")
+
+	// Process text for code blocks and formatting
+	lines := strings.Split(text, "\n")
+	inCodeBlock := false
+	codeLanguage := ""
+
+	for _, line := range lines {
+		// Detect code blocks
+		if strings.HasPrefix(line, "```") {
+			inCodeBlock = !inCodeBlock
+			if inCodeBlock {
+				// Extract language
+				codeLanguage = strings.TrimPrefix(line, "```")
+				codeLanguage = strings.TrimSpace(codeLanguage)
+				if codeLanguage == "" {
+					codeLanguage = "code"
+				}
+
+				// Pretty code block header
+				sb.WriteString(colorAccent("│ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("39")).
+						Render("┌─ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("45")).
+						Bold(true).
+						Render(codeLanguage+" ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("39")).
+						Render(strings.Repeat("─", 42-len(codeLanguage))) + "\n")
+			} else {
+				// Code block footer
+				sb.WriteString(colorAccent("│ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("39")).
+						Render("└"+strings.Repeat("─", 48)) + "\n")
+			}
+			continue
+		}
+
+		// Format based on context
+		if inCodeBlock {
+			// Code block - syntax highlighting by color
+			styledLine := highlightCodeLine(line, codeLanguage)
+			sb.WriteString(colorAccent("│ ") + "  " + styledLine + "\n")
+		} else if strings.HasPrefix(line, "✓") || strings.HasPrefix(line, "✅") {
+			// Success message with icon
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("82")).
+					Bold(true).
+					Render(line) + "\n")
+		} else if strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "❌") {
+			// Error message with icon
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("196")).
+					Bold(true).
+					Render(line) + "\n")
+		} else if strings.HasPrefix(line, "⚠") || strings.HasPrefix(line, "⚠️") {
+			// Warning message
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("226")).
+					Bold(true).
+					Render(line) + "\n")
+		} else if strings.HasPrefix(line, "##") {
+			// H2 Heading
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("214")).
+					Bold(true).
+					Render(line) + "\n")
+		} else if strings.HasPrefix(line, "#") {
+			// H1 Heading
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Bold(true).
+					Underline(true).
+					Render(line) + "\n")
+		} else if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "•") {
+			// List item with prettier bullet
+			trimmed := strings.TrimLeft(line, "- *•")
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("45")).
+					Render("  • ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("252")).
+					Render(trimmed) + "\n")
+		} else if strings.HasPrefix(line, ">") {
+			// Quote/blockquote
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("244")).
+					Italic(true).
+					Render(line) + "\n")
+		} else if strings.Contains(line, "`") && !inCodeBlock {
+			// Inline code
+			styledLine := highlightInlineCode(line)
+			sb.WriteString(colorAccent("│ ") + styledLine + "\n")
+		} else {
+			// Normal text
+			sb.WriteString(colorAccent("│ ") +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("252")).
+					Render(line) + "\n")
+		}
+	}
+
+	// Footer
+	sb.WriteString(colorAccent("│") + "\n")
+	sb.WriteString(colorAccent("╰"))
+	sb.WriteString(colorAccent(strings.Repeat("─", 54)))
+
+	return sb.String()
+}
+
+// highlightCodeLine adds basic syntax highlighting to code
+func highlightCodeLine(line string, language string) string {
+	// Keywords by language
+	keywords := map[string][]string{
+		"go":     {"func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range"},
+		"python": {"def", "class", "import", "from", "return", "if", "else", "for", "while", "try", "except"},
+		"javascript": {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class"},
+		"bash":   {"if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac"},
+	}
+
+	// Apply basic coloring
+	styledLine := line
+
+	// Comments
+	if strings.Contains(line, "//") || strings.Contains(line, "#") {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true).
+			Render(line)
+	}
+
+	// Strings
+	if strings.Contains(line, "\"") || strings.Contains(line, "'") {
+		styledLine = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("179")).
+			Render(line)
+		return styledLine
+	}
+
+	// Numbers
+	for _, char := range line {
+		if char >= '0' && char <= '9' {
+			return lipgloss.NewStyle().
+				Foreground(lipgloss.Color("141")).
+				Render(line)
+		}
+	}
+
+	// Check for keywords
+	lang := strings.ToLower(language)
+	if kwList, ok := keywords[lang]; ok {
+		for _, kw := range kwList {
+			if strings.Contains(line, kw) {
+				return lipgloss.NewStyle().
+					Foreground(lipgloss.Color("213")).
+					Bold(true).
+					Render(line)
+			}
+		}
+	}
+
+	// Default code color
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117")).
+		Render(line)
+}
+
+// highlightInlineCode highlights `code` in text
+func highlightInlineCode(text string) string {
+	parts := strings.Split(text, "`")
+	result := ""
+
+	for i, part := range parts {
+		if i%2 == 1 {
+			// Inside backticks
+			result += lipgloss.NewStyle().
+				Foreground(lipgloss.Color("117")).
+				Background(lipgloss.Color("236")).
+				Render(part)
+		} else {
+			result += lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Render(part)
+		}
+	}
+
+	return result
+}
+
+func (m *InteractiveChatModel) renderDebugInfo() string {
+	var sb strings.Builder
+	sb.WriteString(colorAccentBright("╭─ Debug Information ────────────────────────────────╮\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+
+	// Current model
+	sb.WriteString(colorAccent("│") + " " + colorBold("Current Model:") + "\n")
+	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Provider: %s\n", m.currentProvider))
+	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Model: %s\n", m.currentModel))
+	sb.WriteString(colorAccent("│") + " \n")
+
+	// API Keys
+	sb.WriteString(colorAccent("│") + " " + colorBold("API Keys:") + "\n")
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	if openaiKey != "" {
+		sb.WriteString(colorAccent("│") + "   OPENAI_API_KEY: " + colorSuccess("✓ Set ("+openaiKey[:8]+"...)") + "\n")
+	} else {
+		sb.WriteString(colorAccent("│") + "   OPENAI_API_KEY: " + colorError("✗ Not set") + "\n")
+	}
+
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+	if anthropicKey != "" {
+		sb.WriteString(colorAccent("│") + "   ANTHROPIC_API_KEY: " + colorSuccess("✓ Set ("+anthropicKey[:8]+"...)") + "\n")
+	} else {
+		sb.WriteString(colorAccent("│") + "   ANTHROPIC_API_KEY: " + colorError("✗ Not set") + "\n")
+	}
+	sb.WriteString(colorAccent("│") + " \n")
+
+	// Working directory
+	cwd, _ := os.Getwd()
+	sb.WriteString(colorAccent("│") + " " + colorBold("Environment:") + "\n")
+	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Working Dir: %s\n", cwd))
+	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Config Dir: ~/.soulgate/\n"))
+	sb.WriteString(colorAccent("│") + " \n")
+
+	// Quick fixes
+	sb.WriteString(colorAccent("│") + " " + colorBold("Quick Fixes:") + "\n")
+	if openaiKey == "" {
+		sb.WriteString(colorAccent("│") + "   " + colorMuted("export OPENAI_API_KEY='sk-...'") + "\n")
+	}
+	if anthropicKey == "" {
+		sb.WriteString(colorAccent("│") + "   " + colorMuted("export ANTHROPIC_API_KEY='sk-ant-...'") + "\n")
+	}
+	sb.WriteString(colorAccent("│") + " \n")
+
+	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+	return sb.String()
+}
+
+
+// handleOnboardingInput handles input during onboarding
+func (m *InteractiveChatModel) handleOnboardingInput(key string) (InteractiveChatModel, tea.Cmd) {
+	if m.onboardingState == nil {
+		m.showOnboarding = false
+		return *m, nil
+	}
+
+	currentStep := m.onboardingState.GetCurrentStep()
+
+	switch currentStep.Name {
+	case "welcome":
+		// Press any key to continue
+		if key == "enter" || key == " " {
+			m.onboardingState.NextStep()
+		}
+
+	case "model_selection":
+		// Select model by number
+		if key >= "1" && key <= "4" {
+			options := onboarding.GetModelOptions()
+			idx := int(key[0] - '1')
+			if idx < len(options) {
+				m.onboardingState.SelectedModel = options[idx].ID
+				m.onboardingState.SelectedProvider = options[idx].Provider
+				m.onboardingState.NextStep()
+			}
+		}
+
+	case "api_keys":
+		// Handled by normal input - just advance on Enter
+		if key == "enter" {
+			m.onboardingState.NextStep()
+		}
+
+	case "test_connection":
+		// Auto-advance after testing
+		m.onboardingState.NextStep()
+
+	case "integrations":
+		// Skip or select integrations
+		if key == "s" || key == "S" {
+			m.onboardingState.NextStep()
+		} else if key >= "1" && key <= "4" {
+			// Add integration to setup list
+			recommendations := onboarding.GetIntegrationRecommendations()
+			idx := int(key[0] - '1')
+			if idx < len(recommendations) {
+				m.onboardingState.IntegrationsToSetup = append(
+					m.onboardingState.IntegrationsToSetup,
+					recommendations[idx].ID,
+				)
+			}
+		} else if key == "enter" {
+			// Advance to dependency installation step
+			m.onboardingState.NextStep()
+			// Start installing dependencies in background
+			return *m, m.installDependenciesCmd()
+		}
+
+	case "dependencies":
+		// Auto-advance after installation (or on Enter to skip if errored)
+		if key == "enter" || !m.onboardingState.InstallingDependencies {
+			m.onboardingState.NextStep()
+		}
+
+	case "tutorial":
+		// Press Enter to continue
+		if key == "enter" || key == " " || key == "s" || key == "S" {
+			m.onboardingState.NextStep()
+		}
+
+	case "complete":
+		// Finish onboarding
+		if key == "enter" || key == " " {
+			m.onboardingState.MarkComplete()
+			m.onboardingState.SaveAPIKeys()
+			m.showOnboarding = false
+			m.addMessage(colorSuccess("✓ Onboarding complete! Welcome to SoulGate! 🎉"))
+		}
+	}
+
+	return *m, nil
+}
+
+// renderOnboarding renders the onboarding wizard UI
+func (m *InteractiveChatModel) renderOnboarding() string {
+	if m.onboardingState == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	currentStep := m.onboardingState.GetCurrentStep()
+	progress := m.onboardingState.GetProgress()
+
+	// Header with progress
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Bold(true).
+		Render(fmt.Sprintf("  ╭─ 🎯 %s ", currentStep.Title)))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render(strings.Repeat("─", 40-len(currentStep.Title))))
+	sb.WriteString("\n")
+
+	// Progress bar
+	progressBarWidth := 50
+	filledWidth := int(float64(progressBarWidth) * float64(progress) / 100)
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render(strings.Repeat("█", filledWidth)))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(strings.Repeat("░", progressBarWidth-filledWidth)))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(fmt.Sprintf(" %d%%", progress)))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Step-specific content
+	switch currentStep.Name {
+	case "welcome":
+		sb.WriteString(m.renderWelcomeStep())
+	case "model_selection":
+		sb.WriteString(m.renderModelSelectionStep())
+	case "api_keys":
+		sb.WriteString(m.renderAPIKeysStep())
+	case "test_connection":
+		sb.WriteString(m.renderTestConnectionStep())
+	case "integrations":
+		sb.WriteString(m.renderIntegrationsStep())
+	case "dependencies":
+		sb.WriteString(m.renderDependenciesStep())
+	case "tutorial":
+		sb.WriteString(m.renderTutorialStep())
+	case "complete":
+		sb.WriteString(m.renderCompleteStep())
+	}
+
+	// Footer
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  ╰"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render(strings.Repeat("─", 54)))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// Step rendering functions
+func (m *InteractiveChatModel) renderWelcomeStep() string {
+	var sb strings.Builder
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("220")).
+		Bold(true).
+		Render("Welcome to SoulGate! 🐙"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Render("Your secure AI agent gateway is ready to set up!"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render("This wizard will help you:"))
+	sb.WriteString("\n")
+
+	features := []string{
+		"Choose your AI model",
+		"Configure API keys",
+		"Setup integrations",
+		"Learn the basics",
+	}
+
+	for _, feature := range features {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │   "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Render("✓ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Render(feature))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("Press Enter to get started!"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderModelSelectionStep() string {
+	var sb strings.Builder
+	options := onboarding.GetModelOptions()
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Render("Choose your default AI model:"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	for i, opt := range options {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true).
+			Render(fmt.Sprintf(" %d. ", i+1)))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Render(opt.Icon + " " + opt.Name))
+		if opt.Recommended {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("82")).
+				Render(" ⭐ Recommended"))
+		}
+		sb.WriteString("\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │    "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true).
+			Render(opt.Description))
+		sb.WriteString("\n")
+
+		if i < len(options)-1 {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render("  │") + "\n")
+		}
+	}
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderAPIKeysStep() string {
+	var sb strings.Builder
+	provider := m.onboardingState.SelectedProvider
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Render(fmt.Sprintf("Configure your %s API key:", strings.ToUpper(provider))))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	if provider == "openai" {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Get your API key from: "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Underline(true).
+			Render("https://platform.openai.com/api-keys"))
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Get your API key from: "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Underline(true).
+			Render("https://console.anthropic.com/keys"))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("Paste your API key below and press Enter"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderTestConnectionStep() string {
+	var sb strings.Builder
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("✓ Testing connection..."))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("✓ API key validated"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("✓ Connection successful!"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderIntegrationsStep() string {
+	var sb strings.Builder
+	recommendations := onboarding.GetIntegrationRecommendations()
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Render("Setup integrations (optional):"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	for i, rec := range recommendations {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true).
+			Render(fmt.Sprintf(" %d. ", i+1)))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Render(rec.Icon + " " + rec.Name))
+		if rec.Popular {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214")).
+				Render(" 🔥"))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render("Press number to setup, "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("S"))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render(" to skip"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderDependenciesStep() string {
+	var sb strings.Builder
+
+	if len(m.onboardingState.IntegrationsToSetup) == 0 {
+		// No integrations selected, skip this step
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("No integrations selected. Skipping dependency installation..."))
+		sb.WriteString("\n")
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Render("Press Enter to continue"))
+		sb.WriteString("\n")
+		return sb.String()
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Bold(true).
+		Render("Installing Dependencies..."))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Show installation status for each integration
+	for _, integrationID := range m.onboardingState.IntegrationsToSetup {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+
+		// Get integration name
+		integrationName := strings.Title(integrationID)
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Bold(true).
+			Render(integrationName + ": "))
+
+		// Get status
+		status, ok := m.onboardingState.DependencyStatus[integrationID]
+		if !ok {
+			status = "pending..."
+		}
+
+		// Color status based on result
+		var statusStyle lipgloss.Style
+		if strings.HasPrefix(status, "✓") {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+		} else if strings.HasPrefix(status, "✗") {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+		} else {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+		}
+
+		sb.WriteString(statusStyle.Render(status))
+		sb.WriteString("\n")
+	}
+
+	// Show errors if any
+	if len(m.onboardingState.DependencyErrors) > 0 {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true).
+			Render("⚠ Some dependencies failed to install:"))
+		sb.WriteString("\n")
+
+		for _, err := range m.onboardingState.DependencyErrors {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render("  │   "))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render("• " + err))
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Show completion message
+	if m.onboardingState.InstallingDependencies {
+		// Still installing
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("Installing... Please wait..."))
+		sb.WriteString("\n")
+	} else {
+		// Installation complete
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Render("Press Enter to continue"))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderTutorialStep() string {
+	var sb strings.Builder
+	steps := onboarding.GetTutorialSteps()
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Bold(true).
+		Render("Quick Start Guide:"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	for _, step := range steps {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Render("▶ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Bold(true).
+			Render(step.Title))
+		sb.WriteString("\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │   "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Background(lipgloss.Color("236")).
+			Render(" "+step.Command+" "))
+		sb.WriteString("\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │   "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true).
+			Render(step.Desc))
+		sb.WriteString("\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("Press Enter to finish!"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m *InteractiveChatModel) renderCompleteStep() string {
+	var sb strings.Builder
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Bold(true).
+		Render("🎉 You're All Set!"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Render("SoulGate is configured and ready to use!"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	completedItems := []string{
+		"AI model configured",
+		"API keys saved",
+		"Ready to chat!",
+	}
+
+	for _, item := range completedItems {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Render("✓ "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Render(item))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ "))
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Render("Press Enter to start chatting!"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// handleSetupWizardInput handles input during setup wizard
+func (m *InteractiveChatModel) handleSetupWizardInput(key string) (InteractiveChatModel, tea.Cmd) {
+	wizard := setup.NewWizard(m.orch.GetWorkspace())
+	integrations := wizard.GetAvailableIntegrations()
+
+	switch m.setupStep {
+	case 0: // Integration selection
+		switch key {
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+			number := int(key[0] - '0')
+			if number > 0 && number <= len(integrations) {
+				m.setupIntegrationID = integrations[number-1].ID
+				m.setupStep = 1
+				m.setupCurrentField = 0
+				m.addMessage(colorSuccess(fmt.Sprintf("Selected: %s %s", integrations[number-1].Icon, integrations[number-1].Name)))
+			}
+			return *m, nil
+
+		case "esc", "q", "Q":
+			m.showSetupWizard = false
+			m.addMessage(colorMuted("Setup cancelled"))
+			return *m, nil
+		}
+
+	case 1: // Field input (handled by text input)
+		// Let the normal input handler capture the value
+		// When user presses Enter, it will be processed in handleCommand
+		return *m, nil
+	}
+
+	return *m, nil
+}
+
+// renderSetupWizard renders the setup wizard UI
+func (m *InteractiveChatModel) renderSetupWizard() string {
+	wizard := setup.NewWizard(m.orch.GetWorkspace())
+	integrations := wizard.GetAvailableIntegrations()
+
+	var sb strings.Builder
+
+	if m.setupStep == 0 {
+		// Step 1: Select integration
+		sb.WriteString("\n")
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Bold(true).
+			Render("  ╭─ 🔧 Setup Wizard - Select Integration "))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render(strings.Repeat("─", 16)))
+		sb.WriteString("\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ ") +
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render("Configure integrations with ease!") + "\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+
+		// Group by category
+		categories := make(map[string][]setup.IntegrationSetup)
+		for _, integ := range integrations {
+			categories[integ.Category] = append(categories[integ.Category], integ)
+		}
+
+		num := 1
+		for _, category := range []string{"Communication", "Development", "Productivity", "Project Management", "Cloud"} {
+			if integrationsInCat, ok := categories[category]; ok && len(integrationsInCat) > 0 {
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("45")).
+						Bold(true).
+						Render(category+":") + "\n")
+
+				for _, integ := range integrationsInCat {
+					sb.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color("208")).
+						Render("  │ ") +
+						lipgloss.NewStyle().
+							Foreground(lipgloss.Color("214")).
+							Bold(true).
+							Render(fmt.Sprintf(" %d. ", num)) +
+						lipgloss.NewStyle().
+							Foreground(lipgloss.Color("220")).
+							Render(integ.Icon+" "+integ.Name) + "\n")
+
+					sb.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color("208")).
+						Render("  │    ") +
+						lipgloss.NewStyle().
+							Foreground(lipgloss.Color("244")).
+							Italic(true).
+							Render(integ.Description) + "\n")
+
+					num++
+				}
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │") + "\n")
+			}
+		}
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ ") +
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render("Type a number to select, or ") +
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("196")).
+				Render("Esc") +
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render(" to cancel") + "\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  ╰"))
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render(strings.Repeat("─", 54)))
+		sb.WriteString("\n")
+
+	} else if m.setupStep == 1 {
+		// Step 2: Enter field values
+		var selectedIntegration *setup.IntegrationSetup
+		for _, integ := range integrations {
+			if integ.ID == m.setupIntegrationID {
+				selectedIntegration = &integ
+				break
+			}
+		}
+
+		if selectedIntegration != nil {
+			sb.WriteString("\n")
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Bold(true).
+				Render(fmt.Sprintf("  ╭─ 🔧 Setup: %s %s ", selectedIntegration.Icon, selectedIntegration.Name)))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render(strings.Repeat("─", 20))+ "\n")
+
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render("  │") + "\n")
+
+			// Show current field
+			if m.setupCurrentField < len(selectedIntegration.Fields) {
+				field := selectedIntegration.Fields[m.setupCurrentField]
+
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("220")).
+						Bold(true).
+						Render(field.Label) +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("196")).
+						Render(func() string {
+							if field.Required {
+								return " *"
+							}
+							return ""
+						}()) + "\n")
+
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("244")).
+						Italic(true).
+						Render(field.Description) + "\n")
+
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │") + "\n")
+
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("244")).
+						Render("Type your value and press Enter") + "\n")
+
+				if field.Default != "" {
+					sb.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color("208")).
+						Render("  │ ") +
+						lipgloss.NewStyle().
+							Foreground(lipgloss.Color("244")).
+							Render(fmt.Sprintf("(Default: %s)", field.Default)) + "\n")
+				}
+			} else {
+				// All fields collected - show summary
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("82")).
+						Bold(true).
+						Render("✓ All fields collected!") + "\n")
+
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │") + "\n")
+
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Render("  │ ") +
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("244")).
+						Render("Testing connection...") + "\n")
+			}
+
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render("  │") + "\n")
+
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render("  ╰"))
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Render(strings.Repeat("─", 54)))
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
+// buildModelOptions builds the list of selectable models
+func (m *InteractiveChatModel) buildModelOptions() []modelOption {
+	// Use static list for now (dynamic discovery can be enabled later)
+	// This ensures /model always works
+	return m.buildStaticModelOptions()
+
+	/* Dynamic discovery (disabled for now - needs debugging)
+	options := []modelOption{}
+	num := 1
+
+	// Check if modelDiscovery is initialized
+	if m.modelDiscovery == nil {
+		return m.buildStaticModelOptions()
+	}
+
+	// Use dynamic model discovery
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	allModels, err := m.modelDiscovery.GetAllModels(ctx)
+	if err != nil || len(allModels) == 0 {
+		// Fallback to static list if discovery fails
+		return m.buildStaticModelOptions()
+	}
+
+	// Convert discovered models to modelOption format
+	for _, modelInfo := range allModels {
+		options = append(options, modelOption{
+			number:      num,
+			name:        modelInfo.Name,
+			provider:    modelInfo.Provider,
+			model:       modelInfo.ID,
+			description: modelInfo.Description,
+		})
+		num++
+	}
+
+	return options
+	*/
+}
+
+// buildStaticModelOptions returns hardcoded model list as fallback
+func (m *InteractiveChatModel) buildStaticModelOptions() []modelOption {
+	// Check which API keys are available
+	hasOpenAI := os.Getenv("OPENAI_API_KEY") != ""
+	hasAnthropic := os.Getenv("ANTHROPIC_API_KEY") != ""
+	hasGroq := os.Getenv("GROQ_API_KEY") != ""
+	hasGoogle := os.Getenv("GOOGLE_API_KEY") != ""
+	hasMistral := os.Getenv("MISTRAL_API_KEY") != ""
+	hasCohere := os.Getenv("COHERE_API_KEY") != ""
+	hasDeepSeek := os.Getenv("DEEPSEEK_API_KEY") != ""
+	hasOpenRouter := os.Getenv("OPENROUTER_API_KEY") != ""
+	hasTogether := os.Getenv("TOGETHER_API_KEY") != ""
+	hasPerplexity := os.Getenv("PERPLEXITY_API_KEY") != ""
+
+	options := []modelOption{}
+	num := 1
+
+	// OpenAI models (if API key available)
+	if hasOpenAI {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "GPT-4o",
+			provider:    "openai",
+			model:       "gpt-4o",
+			description: "Most capable OpenAI - Complex coding & analysis",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "GPT-4o-mini",
+			provider:    "openai",
+			model:       "gpt-4o-mini",
+			description: "Fast & economical - Simple tasks",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "GPT-4-Turbo",
+			provider:    "openai",
+			model:       "gpt-4-turbo",
+			description: "Previous gen - Reliable for most tasks",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "GPT-3.5-Turbo",
+			provider:    "openai",
+			model:       "gpt-3.5-turbo",
+			description: "Budget friendly - Quick responses",
+		})
+		num++
+	}
+
+	// Anthropic models (if API key available)
+	if hasAnthropic {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Claude Opus 4",
+			provider:    "anthropic",
+			model:       "claude-opus-4-20250514",
+			description: "Most capable Claude - Deep reasoning",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Claude Sonnet 4",
+			provider:    "anthropic",
+			model:       "claude-sonnet-4-20250514",
+			description: "Balanced - Great for most tasks",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Claude Haiku 4",
+			provider:    "anthropic",
+			model:       "claude-haiku-4-20250501",
+			description: "Fast & efficient - Quick responses",
+		})
+		num++
+	}
+
+	// Groq models (if API key available)
+	if hasGroq {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Llama 3.3 70B (Groq)",
+			provider:    "groq",
+			model:       "llama-3.3-70b-versatile",
+			description: "Meta's latest - Lightning fast inference",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Mixtral 8x7B (Groq)",
+			provider:    "groq",
+			model:       "mixtral-8x7b-32768",
+			description: "Mistral MoE - Large context window",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Gemma 2 9B (Groq)",
+			provider:    "groq",
+			model:       "gemma2-9b-it",
+			description: "Google's efficient model - Fast",
+		})
+		num++
+	}
+
+	// Google models (if API key available)
+	if hasGoogle {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Gemini 2.0 Flash",
+			provider:    "google",
+			model:       "gemini-2.0-flash-exp",
+			description: "Latest Gemini - Experimental features",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Gemini 1.5 Pro",
+			provider:    "google",
+			model:       "gemini-1.5-pro",
+			description: "Powerful - 2M context window",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Gemini 1.5 Flash",
+			provider:    "google",
+			model:       "gemini-1.5-flash",
+			description: "Fast & efficient - Quick tasks",
+		})
+		num++
+	}
+
+	// Mistral models (if API key available)
+	if hasMistral {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Mistral Large",
+			provider:    "mistral",
+			model:       "mistral-large-latest",
+			description: "Most capable Mistral - Complex reasoning",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Mistral Medium",
+			provider:    "mistral",
+			model:       "mistral-medium-latest",
+			description: "Balanced - Good for most tasks",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Mistral Small",
+			provider:    "mistral",
+			model:       "mistral-small-latest",
+			description: "Fast & economical - Simple tasks",
+		})
+		num++
+	}
+
+	// Cohere models (if API key available)
+	if hasCohere {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Command R+",
+			provider:    "cohere",
+			model:       "command-r-plus",
+			description: "Most capable Cohere - RAG & tools",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Command R",
+			provider:    "cohere",
+			model:       "command-r",
+			description: "Balanced - Good performance",
+		})
+		num++
+	}
+
+	// DeepSeek models (if API key available)
+	if hasDeepSeek {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "DeepSeek V3",
+			provider:    "deepseek",
+			model:       "deepseek-chat",
+			description: "Chinese model - Strong coding ability",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "DeepSeek Coder",
+			provider:    "deepseek",
+			model:       "deepseek-coder",
+			description: "Specialized for code generation",
+		})
+		num++
+	}
+
+	// OpenRouter models (if API key available)
+	if hasOpenRouter {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Auto (OpenRouter)",
+			provider:    "openrouter",
+			model:       "openrouter/auto",
+			description: "Best available model - Auto-selected",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "GPT-4o (OpenRouter)",
+			provider:    "openrouter",
+			model:       "openai/gpt-4o",
+			description: "OpenAI via OpenRouter - Fallback routing",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Claude Opus 4 (OpenRouter)",
+			provider:    "openrouter",
+			model:       "anthropic/claude-opus-4",
+			description: "Claude via OpenRouter - Fallback routing",
+		})
+		num++
+	}
+
+	// Together AI models (if API key available)
+	if hasTogether {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Llama 3.1 405B (Together)",
+			provider:    "together",
+			model:       "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+			description: "Largest open model - Powerful",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Qwen 2.5 72B (Together)",
+			provider:    "together",
+			model:       "Qwen/Qwen2.5-72B-Instruct-Turbo",
+			description: "Alibaba's model - Strong multilingual",
+		})
+		num++
+	}
+
+	// Perplexity models (if API key available)
+	if hasPerplexity {
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Perplexity Sonar",
+			provider:    "perplexity",
+			model:       "sonar",
+			description: "Real-time web search - Current info",
+		})
+		num++
+
+		options = append(options, modelOption{
+			number:      num,
+			name:        "Perplexity Sonar Pro",
+			provider:    "perplexity",
+			model:       "sonar-pro",
+			description: "Advanced search - Deep research",
+		})
+		num++
+	}
+
+	// Ollama (local models - always available)
+	options = append(options, modelOption{
+		number:      num,
+		name:        "Llama 3.2 (Ollama)",
+		provider:    "ollama",
+		model:       "llama3.2",
+		description: "Local - Privacy & no API costs",
+	})
+	num++
+
+	options = append(options, modelOption{
+		number:      num,
+		name:        "Mistral (Ollama)",
+		provider:    "ollama",
+		model:       "mistral",
+		description: "Local - Fast inference",
+	})
+	num++
+
+	options = append(options, modelOption{
+		number:      num,
+		name:        "CodeLlama (Ollama)",
+		provider:    "ollama",
+		model:       "codellama",
+		description: "Local - Code generation",
+	})
+
+	return options
+}
+
+// handleAPIKeyInput handles API key input
+func (m *InteractiveChatModel) handleAPIKeyInput(msg tea.KeyMsg) (InteractiveChatModel, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		// Save API key and proceed
+		apiKey := m.apiKeyInput.Value()
+		if apiKey == "" {
+			m.addMessage(colorError("✗ API key cannot be empty"))
+			return *m, nil
+		}
+
+		// Save to workspace config
+		if err := m.saveAPIKey(m.apiKeyProvider, apiKey); err != nil {
+			m.addMessage(colorError(fmt.Sprintf("✗ Failed to save API key: %s", err.Error())))
+			m.showAPIKeyPrompt = false
+			return *m, nil
+		}
+
+		// Close API key prompt
+		m.showAPIKeyPrompt = false
+
+		// Show success message
+		providerName := strings.Title(m.apiKeyProvider)
+		m.addMessage(colorSuccess(fmt.Sprintf("✓ API key saved for %s", providerName)))
+
+		// Proceed to model selection
+		m.showModelSelector = true
+		m.modelSelectionStep = 2
+		m.selectedModelIndex = 0
+		m.modelOptions = m.buildModelOptionsForProvider(m.apiKeyProvider)
+
+		return *m, nil
+
+	case "esc":
+		// Cancel API key input
+		m.showAPIKeyPrompt = false
+		m.showModelSelector = true  // Go back to provider selection
+		m.modelSelectionStep = 1
+		m.selectedModelIndex = 0
+		m.addMessage(colorMuted("API key entry cancelled"))
+		return *m, nil
+
+	default:
+		// Update text input with the key message
+		var cmd tea.Cmd
+		m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
+		return *m, cmd
+	}
+}
+
+// saveAPIKey saves an API key to the workspace config
+func (m *InteractiveChatModel) saveAPIKey(provider string, apiKey string) error {
+	// Save to environment variable for current session
+	envVarName := strings.ToUpper(provider) + "_API_KEY"
+	os.Setenv(envVarName, apiKey)
+
+	// Also save to workspace config for persistence
+	switch provider {
+	case "openai":
+		m.orch.GetWorkspace().Config.Model.OpenAI.APIKey = apiKey
+	case "anthropic":
+		m.orch.GetWorkspace().Config.Model.Anthropic.APIKey = apiKey
+	case "groq", "google", "mistral", "cohere", "deepseek", "openrouter", "together", "perplexity", "xai":
+		// These use OpenAI-compatible config
+		m.orch.GetWorkspace().Config.Model.OpenAI.APIKey = apiKey
+	}
+
+	// Save config to file
+	return m.orch.GetWorkspace().SaveConfig()
+}
+
+// handleProviderSelection handles provider selection (step 1)
+func (m *InteractiveChatModel) handleProviderSelection(key string) (InteractiveChatModel, tea.Cmd) {
+	providers := m.getAvailableProviders()
+
+	switch key {
+	case "up", "k":
+		if m.selectedModelIndex > 0 {
+			m.selectedModelIndex--
+		}
+		return *m, nil
+
+	case "down", "j":
+		if m.selectedModelIndex < len(providers)-1 {
+			m.selectedModelIndex++
+		}
+		return *m, nil
+
+	case "enter", " ":
+		// Select provider and check if API key is needed
+		if m.selectedModelIndex >= 0 && m.selectedModelIndex < len(providers) {
+			selectedProvider := providers[m.selectedModelIndex]
+			m.selectedProvider = selectedProvider.id
+
+			// Check if API key is available
+			if !selectedProvider.hasAPIKey {
+				// Show API key prompt
+				m.showAPIKeyPrompt = true
+				m.apiKeyProvider = selectedProvider.id
+				m.showModelSelector = false
+
+				// Initialize API key input
+				apiKeyInput := textinput.New()
+				apiKeyInput.Placeholder = "Enter your API key..."
+				apiKeyInput.Focus()
+				apiKeyInput.CharLimit = 200
+				apiKeyInput.Width = 60
+				apiKeyInput.EchoMode = textinput.EchoPassword
+				apiKeyInput.EchoCharacter = '•'
+				m.apiKeyInput = apiKeyInput
+			} else {
+				// API key available, proceed to model selection
+				m.modelSelectionStep = 2
+				m.selectedModelIndex = 0 // Reset for model selection
+				m.modelOptions = m.buildModelOptionsForProvider(m.selectedProvider)
+			}
+		}
+		return *m, nil
+
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// Quick number selection
+		number := int(key[0] - '0')
+		if number > 0 && number <= len(providers) {
+			selectedProvider := providers[number-1]
+			m.selectedProvider = selectedProvider.id
+
+			// Check if API key is available
+			if !selectedProvider.hasAPIKey {
+				// Show API key prompt
+				m.showAPIKeyPrompt = true
+				m.apiKeyProvider = selectedProvider.id
+				m.showModelSelector = false
+
+				// Initialize API key input
+				apiKeyInput := textinput.New()
+				apiKeyInput.Placeholder = "Enter your API key..."
+				apiKeyInput.Focus()
+				apiKeyInput.CharLimit = 200
+				apiKeyInput.Width = 60
+				apiKeyInput.EchoMode = textinput.EchoPassword
+				apiKeyInput.EchoCharacter = '•'
+				m.apiKeyInput = apiKeyInput
+			} else {
+				// API key available, proceed to model selection
+				m.modelSelectionStep = 2
+				m.selectedModelIndex = 0
+				m.modelOptions = m.buildModelOptionsForProvider(m.selectedProvider)
+			}
+		}
+		return *m, nil
+
+	case "esc", "q", "Q":
+		m.showModelSelector = false
+		m.addMessage(colorMuted("Model selection cancelled"))
+		return *m, nil
+	}
+
+	return *m, nil
+}
+
+// handleModelSelection handles model selection (step 2) with grid navigation
+func (m *InteractiveChatModel) handleModelSelection(key string) (InteractiveChatModel, tea.Cmd) {
+	numColumns := 3 // Match the column count in renderModelSelector
+
+	switch key {
+	case "up", "k":
+		// Move up one row (3 positions back)
+		newIndex := m.selectedModelIndex - numColumns
+		if newIndex >= 0 {
+			m.selectedModelIndex = newIndex
+		} else {
+			// Wrap to bottom row, same column
+			col := m.selectedModelIndex % numColumns
+			numRows := (len(m.modelOptions) + numColumns - 1) / numColumns
+			lastRowIndex := (numRows-1)*numColumns + col
+			if lastRowIndex < len(m.modelOptions) {
+				m.selectedModelIndex = lastRowIndex
+			}
+		}
+		return *m, nil
+
+	case "down", "j":
+		// Move down one row (3 positions forward)
+		newIndex := m.selectedModelIndex + numColumns
+		if newIndex < len(m.modelOptions) {
+			m.selectedModelIndex = newIndex
+		} else {
+			// Wrap to top row, same column
+			m.selectedModelIndex = m.selectedModelIndex % numColumns
+		}
+		return *m, nil
+
+	case "left", "h":
+		// Move left one column
+		if m.selectedModelIndex > 0 {
+			m.selectedModelIndex--
+		} else {
+			// Wrap to last item
+			m.selectedModelIndex = len(m.modelOptions) - 1
+		}
+		return *m, nil
+
+	case "right", "l":
+		// Move right one column
+		if m.selectedModelIndex < len(m.modelOptions)-1 {
+			m.selectedModelIndex++
+		} else {
+			// Wrap to first item
+			m.selectedModelIndex = 0
+		}
+		return *m, nil
+
+	case "enter", " ":
+		// Select model and switch
+		if m.selectedModelIndex >= 0 && m.selectedModelIndex < len(m.modelOptions) {
+			opt := m.modelOptions[m.selectedModelIndex]
+			m.showModelSelector = false
+			if err := m.orch.SetProvider(opt.provider, opt.model); err != nil {
+				m.addMessage(colorError(fmt.Sprintf("✗ Failed to switch: %s", err.Error())))
+			} else {
+				m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
+				// Save config to persist the change
+				if err := m.orch.GetWorkspace().SaveConfig(); err != nil {
+					m.addMessage(colorWarn(fmt.Sprintf("⚠ Model switched but config save failed: %s", err.Error())))
+				}
+				m.addMessage(colorSuccess(fmt.Sprintf("✓ Switched to %s - %s", opt.name, opt.description)))
+			}
+		}
+		return *m, nil
+
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// Quick number selection
+		number := int(key[0] - '0')
+		for _, opt := range m.modelOptions {
+			if opt.number == number {
+				m.showModelSelector = false
+				if err := m.orch.SetProvider(opt.provider, opt.model); err != nil {
+					m.addMessage(colorError(fmt.Sprintf("✗ Failed to switch: %s", err.Error())))
+				} else {
+					m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
+					// Save config to persist the change
+					if err := m.orch.GetWorkspace().SaveConfig(); err != nil {
+						m.addMessage(colorWarn(fmt.Sprintf("⚠ Model switched but config save failed: %s", err.Error())))
+					}
+					m.addMessage(colorSuccess(fmt.Sprintf("✓ Switched to %s - %s", opt.name, opt.description)))
+				}
+				return *m, nil
+			}
+		}
+		return *m, nil
+
+	case "esc", "q", "Q", "backspace":
+		// Go back to provider selection
+		m.modelSelectionStep = 1
+		m.selectedModelIndex = 0
+		m.selectedProvider = ""
+		return *m, nil
+	}
+
+	return *m, nil
+}
+
+// renderModelSelectorPrompt renders the interactive model selector
+func (m *InteractiveChatModel) renderModelSelectorPrompt() string {
+	if m.modelSelectionStep == 1 {
+		return m.renderProviderSelector()
+	}
+	return m.renderModelSelector()
+}
+
+// Provider info struct
+type providerInfo struct {
+	id          string
+	name        string
+	description string
+	modelCount  int
+	hasAPIKey   bool
+}
+
+// getAvailableProviders returns list of all supported providers
+func (m *InteractiveChatModel) getAvailableProviders() []providerInfo {
+	// Return ALL providers - user should see all options
+	// We'll show which ones need API key configuration
+	return []providerInfo{
+		{id: "openai", name: "OpenAI", description: "GPT-4o, GPT-4o-mini, GPT-4-Turbo", modelCount: 4, hasAPIKey: os.Getenv("OPENAI_API_KEY") != ""},
+		{id: "anthropic", name: "Anthropic", description: "Claude Opus, Sonnet, Haiku", modelCount: 3, hasAPIKey: os.Getenv("ANTHROPIC_API_KEY") != ""},
+		{id: "groq", name: "Groq", description: "Llama 3.3, Mixtral - Lightning fast", modelCount: 3, hasAPIKey: os.Getenv("GROQ_API_KEY") != ""},
+		{id: "google", name: "Google", description: "Gemini 3, 2.5 Pro/Flash - Multimodal", modelCount: 8, hasAPIKey: os.Getenv("GOOGLE_API_KEY") != ""},
+		{id: "mistral", name: "Mistral AI", description: "Large, Medium, Small", modelCount: 3, hasAPIKey: os.Getenv("MISTRAL_API_KEY") != ""},
+		{id: "cohere", name: "Cohere", description: "Command R+, Command R", modelCount: 2, hasAPIKey: os.Getenv("COHERE_API_KEY") != ""},
+		{id: "deepseek", name: "DeepSeek", description: "V3, Coder - Strong coding", modelCount: 2, hasAPIKey: os.Getenv("DEEPSEEK_API_KEY") != ""},
+		{id: "openrouter", name: "OpenRouter", description: "Access 100+ models", modelCount: 3, hasAPIKey: os.Getenv("OPENROUTER_API_KEY") != ""},
+		{id: "together", name: "Together AI", description: "Llama 3.1 405B, Qwen 2.5", modelCount: 2, hasAPIKey: os.Getenv("TOGETHER_API_KEY") != ""},
+		{id: "perplexity", name: "Perplexity", description: "Sonar - Real-time web search", modelCount: 2, hasAPIKey: os.Getenv("PERPLEXITY_API_KEY") != ""},
+		{id: "xai", name: "xAI (Grok)", description: "Grok 4.1, Grok 3, Vision - Real-time", modelCount: 7, hasAPIKey: os.Getenv("XAI_API_KEY") != ""},
+		{id: "ollama", name: "Ollama (Local)", description: "Run models locally - Private", modelCount: 3, hasAPIKey: true}, // Always available
+	}
+}
+
+// buildModelOptionsForProvider builds model list for a specific provider
+// Uses dynamic discovery to fetch latest models from provider APIs
+func (m *InteractiveChatModel) buildModelOptionsForProvider(provider string) []modelOption {
+	options := []modelOption{}
+
+	// Try dynamic discovery first (to get latest models automatically)
+	if m.modelDiscovery != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		discoveredModels, err := m.modelDiscovery.DiscoverModels(ctx, provider)
+		if err == nil && len(discoveredModels) > 0 {
+			// Successfully discovered models dynamically
+			for i, modelInfo := range discoveredModels {
+				options = append(options, modelOption{
+					number:      i + 1,
+					name:        modelInfo.Name,
+					provider:    provider,
+					model:       modelInfo.ID,
+					description: modelInfo.Description,
+				})
+			}
+			return options
+		}
+		// If discovery failed, fall through to static list
+	}
+
+	// Fallback: Use static model list
+	providerModels := model.BuildModelOptionsForProvider(provider)
+	for i, pm := range providerModels {
+		options = append(options, modelOption{
+			number:      i + 1,
+			name:        pm.Name,
+			provider:    provider,
+			model:       pm.ID,
+			description: pm.Description,
+		})
+	}
+
+	return options
+}
+
+// renderProviderSelector renders the provider selection UI (step 1)
+func (m *InteractiveChatModel) renderProviderSelector() string {
+	var sb strings.Builder
+	providers := m.getAvailableProviders()
+
+	// Header with proper border
+	borderWidth := 58
+	titleText := " 🤖 Select LLM Provider (Step 1/2) "
+	titleLen := len(titleText)
+	remainingDashes := borderWidth - titleLen - 2
+
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Bold(true).
+		Render("  ╭─" + titleText + strings.Repeat("─", remainingDashes) + "╮"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Provider list
+	for i, provider := range providers {
+		isSelected := (i == m.selectedModelIndex)
+
+		// Highlight selected provider
+		prefix := "  │ "
+		if isSelected {
+			prefix = "  │ " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")).
+				Background(lipgloss.Color("236")).
+				Render("►")
+		} else {
+			prefix = "  │  "
+		}
+
+		nameStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Bold(true)
+		if isSelected {
+			nameStyle = nameStyle.
+				Background(lipgloss.Color("236")).
+				Foreground(lipgloss.Color("208"))
+		}
+
+		// API key status indicator
+		var statusIndicator string
+		var statusStyle lipgloss.Style
+		if provider.hasAPIKey {
+			statusIndicator = " ✓ Ready"
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82")) // Green
+		} else {
+			statusIndicator = " ⚠ Needs API Key"
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
+		}
+		if isSelected {
+			statusStyle = statusStyle.Background(lipgloss.Color("236"))
+		}
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render(prefix) +
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214")).
+				Bold(true).
+				Render(fmt.Sprintf("%d. ", i+1)) +
+			nameStyle.Render(provider.name) +
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render(fmt.Sprintf(" (%d models)", provider.modelCount)) +
+			statusStyle.Render(statusIndicator) + "\n")
+
+		descPrefix := "  │    "
+		if isSelected {
+			descPrefix = "  │     "
+		}
+
+		descStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true)
+		if isSelected {
+			descStyle = descStyle.
+				Background(lipgloss.Color("236")).
+				Foreground(lipgloss.Color("252"))
+		}
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render(descPrefix) +
+			descStyle.Render(provider.description) + "\n")
+
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │") + "\n")
+	}
+
+	// Instructions
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Bold(true).
+			Render("↑↓") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Navigate  •  ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Bold(true).
+			Render("Enter/Space") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Select  •  ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true).
+			Render("Esc") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Cancel") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Add API key setup hint
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true).
+			Render("Tip: Set API keys with ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Render("export OPENAI_API_KEY=\"sk-...\"") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Footer with proper border matching header
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  ╰" + strings.Repeat("─", borderWidth) + "╯"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// renderModelSelector renders the model selection UI (step 2) with compact multi-column layout
+func (m *InteractiveChatModel) renderModelSelector() string {
+	var sb strings.Builder
+
+	// Header with proper border - wider for 3 columns
+	borderWidth := 110
+	providerName := strings.Title(m.selectedProvider)
+	titleText := fmt.Sprintf(" %s Models (Step 2/2) ", providerName)
+	titleLen := len(titleText)
+	remainingDashes := borderWidth - titleLen - 2
+
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Bold(true).
+		Render("  ╭─" + titleText + strings.Repeat("─", remainingDashes) + "╮"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Display models in 3 columns for compact view
+	numColumns := 3
+	columnWidth := 35 // Width per column
+
+	// Process models in rows of 3
+	for rowStart := 0; rowStart < len(m.modelOptions); rowStart += numColumns {
+		rowEnd := rowStart + numColumns
+		if rowEnd > len(m.modelOptions) {
+			rowEnd = len(m.modelOptions)
+		}
+
+		// Build the row with up to 3 columns
+		var columns []string
+		for col := rowStart; col < rowEnd; col++ {
+			opt := m.modelOptions[col]
+			isCurrent := (m.currentProvider == opt.provider && strings.Contains(m.currentModel, opt.model))
+			isSelected := (col == m.selectedModelIndex)
+
+			var cellContent strings.Builder
+
+			// Selection indicator
+			if isSelected {
+				cellContent.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Background(lipgloss.Color("236")).
+					Render("►"))
+			} else {
+				cellContent.WriteString(" ")
+			}
+
+			// Number and name
+			numStr := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214")).
+				Bold(true).
+				Render(fmt.Sprintf("%2d.", opt.number))
+
+			nameStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("220")).
+				Bold(true)
+			if isSelected {
+				nameStyle = nameStyle.
+					Background(lipgloss.Color("236")).
+					Foreground(lipgloss.Color("208"))
+			}
+
+			// Truncate name if too long
+			displayName := opt.name
+			maxNameLen := 25
+			if len(displayName) > maxNameLen {
+				displayName = displayName[:maxNameLen-3] + "..."
+			}
+
+			marker := ""
+			if isCurrent {
+				marker = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("82")).
+					Render("✓")
+			}
+
+			cellContent.WriteString(numStr)
+			cellContent.WriteString(" ")
+
+			if isSelected {
+				cellContent.WriteString(lipgloss.NewStyle().
+					Background(lipgloss.Color("236")).
+					Width(columnWidth - 5).
+					Render(nameStyle.Render(displayName) + marker))
+			} else {
+				cellContent.WriteString(nameStyle.Render(displayName) + marker)
+			}
+
+			// Pad to column width
+			cell := cellContent.String()
+			// Remove ANSI codes for width calculation
+			plainLen := len(stripAnsi(cell))
+			if plainLen < columnWidth {
+				cell += strings.Repeat(" ", columnWidth-plainLen)
+			}
+
+			columns = append(columns, cell)
+		}
+
+		// Render the row
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render("  │ "))
+		sb.WriteString(strings.Join(columns, " "))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Instructions
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("45")).
+			Bold(true).
+			Render("↑↓←→") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Navigate  •  ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Bold(true).
+			Render("Enter/Space") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Select  •  ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true).
+			Render("Esc") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Back") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Footer with proper border matching header
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  ╰" + strings.Repeat("─", borderWidth) + "╯"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// stripAnsi removes ANSI escape codes for length calculation
+func stripAnsi(str string) string {
+	const ansi = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
+	re := regexp.MustCompile(ansi)
+	return re.ReplaceAllString(str, "")
+}
+
+// renderAPIKeyPrompt renders the API key input prompt
+func (m *InteractiveChatModel) renderAPIKeyPrompt() string {
+	var sb strings.Builder
+
+	// Get provider name
+	providerName := strings.Title(m.apiKeyProvider)
+	envVarName := strings.ToUpper(m.apiKeyProvider) + "_API_KEY"
+
+	// Header
+	borderWidth := 70
+	titleText := fmt.Sprintf(" 🔑 Enter API Key for %s ", providerName)
+	titleLen := len(titleText)
+	remainingDashes := borderWidth - titleLen - 2
+
+	sb.WriteString("\n\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Bold(true).
+		Render("  ╭─" + titleText + strings.Repeat("─", remainingDashes) + "╮"))
+	sb.WriteString("\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Info message
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(fmt.Sprintf("This provider requires an API key to use. Your key will be")) + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("saved to your workspace config for future sessions.") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Environment variable hint
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true).
+			Render(fmt.Sprintf("Environment variable: %s", envVarName)) + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Input field
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
+			Bold(true).
+			Render("API Key: ") +
+		m.apiKeyInput.View() + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Instructions
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │ ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Bold(true).
+			Render("Enter") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Save & Continue  •  ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true).
+			Render("Esc") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render(" Cancel") + "\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  │") + "\n")
+
+	// Footer
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Render("  ╰" + strings.Repeat("─", borderWidth) + "╯"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// RunInteractiveTUI starts the interactive TUI
+func RunInteractiveTUI(orch *core.Orchestrator) error {
+	m := NewInteractiveChatModel(orch)
+
+	// Create program first
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// Set up permission callback
+	orch.SetPermissionCallback(func(req core.PermissionRequest) core.PermissionResponse {
+		// Create response channel
+		responseChan := make(chan core.PermissionResponse, 1)
+
+		// Send permission request message to TUI
+		p.Send(permissionRequestMsg{
+			request:  req,
+			response: responseChan,
+		})
+
+		// Wait for user response
+		response := <-responseChan
+
+		return response
+	})
+
+	_, err := p.Run()
+	return err
+}
