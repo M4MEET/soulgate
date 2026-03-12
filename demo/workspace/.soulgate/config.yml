@@ -1,0 +1,26 @@
+workspace:
+    root: /Users/demon/soulGate/demo/workspace
+    config_dir: /Users/demon/soulGate/demo/workspace/.soulgate
+model:
+    default_provider: openai
+    openai:
+        api_key: ""
+        model: gpt-4
+        base_url: ""
+        max_tokens: 4096
+        temperature: 0.7
+    anthropic:
+        api_key: ""
+        model: claude-3-5-sonnet-20241022
+        base_url: ""
+        max_tokens: 4096
+        temperature: 0.7
+plugins:
+    dir: /Users/demon/soulGate/demo/workspace/plugins
+    timeout: 30
+    max_memory: 67108864
+audit:
+    database_path: /Users/demon/soulGate/demo/workspace/.soulgate/audit.db
+    enabled: true
+policy:
+    file_path: /Users/demon/soulGate/demo/workspace/.soulgate/policy.yml

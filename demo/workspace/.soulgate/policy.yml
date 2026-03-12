@@ -1,0 +1,33 @@
+version: "1"
+
+# Default policy: allow workspace reads, deny everything else
+policies:
+  - name: "allow-workspace-reads"
+    description: "Allow reading files within the workspace"
+    action: "files.read"
+    resource: "./**"
+    decision: allow
+
+  - name: "allow-workspace-list"
+    description: "Allow listing directories within the workspace"
+    action: "files.list"
+    resource: "./**"
+    decision: allow
+
+  - name: "allow-workspace-stat"
+    description: "Allow stat operations within the workspace"
+    action: "files.stat"
+    resource: "./**"
+    decision: allow
+
+  - name: "deny-parent-access"
+    description: "Deny access to parent directories"
+    action: "files.*"
+    resource: "../**"
+    decision: deny
+
+  - name: "deny-absolute-paths"
+    description: "Deny absolute paths outside workspace"
+    action: "files.*"
+    resource: "/**"
+    decision: deny
