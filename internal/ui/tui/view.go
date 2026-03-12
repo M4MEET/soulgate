@@ -11,56 +11,63 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// View rendering methods
-// These methods render the main view and various UI overlays
-
 // View renders the main TUI view
 func (m InteractiveChatModel) View() string {
 	var sb strings.Builder
 
-	// Header (fixed height: 3 lines)
+	// Header
 	sb.WriteString(renderHeader())
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
+
+	// Thin separator
+	sepWidth := m.width
+	if sepWidth < 40 {
+		sepWidth = 80
+	}
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("236")).
+		Render(strings.Repeat("─", sepWidth)))
+	sb.WriteString("\n")
 
 	// Output viewport
 	sb.WriteString(m.output.View())
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
 
-	// Onboarding (absolute highest priority overlay)
+	// Onboarding overlay
 	if m.ShowOnboarding {
 		sb.WriteString("\n")
 		sb.WriteString(m.renderOnboarding())
 		return sb.String()
 	}
 
-	// Setup wizard (highest priority overlay)
+	// Setup wizard overlay
 	if m.showSetupWizard {
 		sb.WriteString("\n")
 		sb.WriteString(m.renderSetupWizard())
 		return sb.String()
 	}
 
-	// API key prompt (high priority overlay)
+	// API key prompt overlay
 	if m.showAPIKeyPrompt {
 		sb.WriteString(m.renderAPIKeyPrompt())
 		return sb.String()
 	}
 
-	// Model selector (highest priority overlay)
+	// Model selector overlay
 	if m.showModelSelector {
 		sb.WriteString("\n")
 		sb.WriteString(m.renderModelSelectorPrompt())
 		return sb.String()
 	}
 
-	// Permission prompt (highest priority overlay)
+	// Permission prompt overlay
 	if m.showPermissionPrompt && m.permissionRequest != nil {
 		sb.WriteString("\n")
 		sb.WriteString(m.renderPermissionPrompt())
 		return sb.String()
 	}
 
-	// Confirmation dialog (overlays everything if shown)
+	// Confirmation dialog overlay
 	if m.showConfirmation {
 		sb.WriteString("\n")
 		sb.WriteString(m.renderConfirmation())
@@ -71,10 +78,10 @@ func (m InteractiveChatModel) View() string {
 	sb.WriteString(m.renderStatusBar())
 	sb.WriteString("\n")
 
-	// Input separator for better visibility
+	// Input separator
 	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Render(strings.Repeat("─", 100)))
+		Foreground(lipgloss.Color("236")).
+		Render(strings.Repeat("─", sepWidth)))
 	sb.WriteString("\n")
 
 	// Input
@@ -93,93 +100,40 @@ func (m InteractiveChatModel) View() string {
 	return sb.String()
 }
 
-// renderStatusBar renders the status bar with current state
+// renderStatusBar renders the status bar
 func (m *InteractiveChatModel) renderStatusBar() string {
-	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Padding(0, 1)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	dot := dim.Render(" · ")
 
-	status := "Ready"
-	statusColor := "82" // Green
-
+	var status string
 	if m.thinking {
-		// Animated spinner frames
 		spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		spinner := spinners[m.spinnerFrame%len(spinners)]
-		status = fmt.Sprintf("%s Thinking", spinner)
-		statusColor = "208" // Orange
+		status = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")).
+			Render(spinner+" thinking...")
+	} else {
+		status = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("242")).
+			Render("ready")
 	}
 
-	// Show current model in status bar with gradient effect
-	modelInfo := fmt.Sprintf("%s:%s", m.currentProvider, m.currentModel)
+	model := dim.Render(fmt.Sprintf("%s:%s", m.currentProvider, m.currentModel))
+	msgs := dim.Render(fmt.Sprintf("%d messages", len(m.history)))
 
-	// Create colored status
-	coloredStatus := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(statusColor)).
-		Bold(true).
-		Render(status)
-
-	return statusStyle.Render(fmt.Sprintf("%s  •  Model: %s  •  Messages: %d", coloredStatus, modelInfo, len(m.history)))
+	return "  " + status + dot + model + dot + msgs
 }
 
 // renderHints renders keyboard shortcut hints
 func (m *InteractiveChatModel) renderHints() string {
-	var sb strings.Builder
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	key := lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 
-	// Build hints with color-coded shortcuts
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render("  "))
-
-	// History
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("45")).
-		Render("↑↓"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(": History  •  "))
-
-	// Navigate
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("45")).
-		Render("←→"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(": Navigate  •  "))
-
-	// Complete
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82")).
-		Render("Tab"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(": Complete  •  "))
-
-	// Help
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Render("Ctrl+H"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(": Help  •  "))
-
-	// Clear
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Render("Ctrl+L"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(": Clear  •  "))
-
-	// Exit
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196")).
-		Render("Ctrl+C"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(": Exit"))
-
-	return sb.String()
+	return dim.Render("  ") +
+		key.Render("tab") + dim.Render(" complete  ") +
+		key.Render("ctrl+h") + dim.Render(" help  ") +
+		key.Render("ctrl+l") + dim.Render(" clear  ") +
+		key.Render("ctrl+c") + dim.Render(" exit")
 }
 
 // renderPermissionPrompt renders the permission request dialog
@@ -190,239 +144,225 @@ func (m *InteractiveChatModel) renderPermissionPrompt() string {
 
 	var sb strings.Builder
 
-	// Permission box
-	sb.WriteString("\n")
-	sb.WriteString(colorInfo("  ╭─ 🔐 Permission Required "))
-	sb.WriteString(colorInfo(strings.Repeat("─", 27)))
-	sb.WriteString("\n")
-	sb.WriteString(colorInfo("  │") + "\n")
-	sb.WriteString(colorInfo("  │  ") + colorBold("The AI wants to:") + "\n")
-	sb.WriteString(colorInfo("  │  ") + "→ " + m.permissionRequest.Description + "\n")
-	sb.WriteString(colorInfo("  │") + "\n")
-	sb.WriteString(colorInfo("  │  ") + colorMuted("Action: ") + m.permissionRequest.Action + "\n")
-	sb.WriteString(colorInfo("  │  ") + colorMuted("Resource: ") + m.permissionRequest.Resource + "\n")
-	if m.permissionRequest.Reason != "" {
-		sb.WriteString(colorInfo("  │  ") + colorMuted("Reason: ") + m.permissionRequest.Reason + "\n")
-	}
-	sb.WriteString(colorInfo("  │") + "\n")
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	key := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
 
-	// Show what pattern will be learned
-	pattern := core.GenerateSmartPattern(m.permissionRequest.Action, m.permissionRequest.Resource)
-	sb.WriteString(colorInfo("  │  ") + colorBold("Grant permission?") + "\n")
-	sb.WriteString(colorInfo("  │  ") + colorSuccess("(A)") + " Allow Once\n")
-	sb.WriteString(colorInfo("  │  ") + colorAccentBright("(L)") + " Learn & Always Allow " + colorMuted("(saves: "+pattern+")") + "\n")
-	sb.WriteString(colorInfo("  │  ") + colorError("(D)") + " Deny\n")
-	sb.WriteString(colorInfo("  │") + "\n")
-	sb.WriteString(colorInfo("  ╰"))
-	sb.WriteString(colorInfo(strings.Repeat("─", 54)))
+	sb.WriteString("  " + title.Render("Permission Required") + "\n\n")
+	sb.WriteString("  " + m.permissionRequest.Description + "\n\n")
+	sb.WriteString("  " + dim.Render("Action:   ") + m.permissionRequest.Action + "\n")
+	sb.WriteString("  " + dim.Render("Resource: ") + m.permissionRequest.Resource + "\n")
+	if m.permissionRequest.Reason != "" {
+		sb.WriteString("  " + dim.Render("Reason:   ") + m.permissionRequest.Reason + "\n")
+	}
 	sb.WriteString("\n")
+
+	pattern := core.GenerateSmartPattern(m.permissionRequest.Action, m.permissionRequest.Resource)
+	sb.WriteString("  " + key.Render("a") + dim.Render(" allow once   "))
+	sb.WriteString(key.Render("l") + dim.Render(" learn ("+pattern+")   "))
+	sb.WriteString(key.Render("d") + dim.Render(" deny") + "\n")
 
 	return sb.String()
 }
 
-// renderConfirmation renders the confirmation dialog for sensitive commands
+// renderConfirmation renders the confirmation dialog
 func (m *InteractiveChatModel) renderConfirmation() string {
 	var sb strings.Builder
 
-	// Warning box
-	sb.WriteString("\n")
-	sb.WriteString(colorWarn("  ╭─ ⚠  Confirmation Required "))
-	sb.WriteString(colorWarn(strings.Repeat("─", 25)))
-	sb.WriteString("\n")
-	sb.WriteString(colorWarn("  │") + "\n")
-	sb.WriteString(colorWarn("  │  ") + m.confirmationMessage + "\n")
-	sb.WriteString(colorWarn("  │") + "\n")
-	sb.WriteString(colorWarn("  │  ") + colorBold("Command: ") + colorAccent(m.pendingCommand) + "\n")
-	sb.WriteString(colorWarn("  │") + "\n")
-	sb.WriteString(colorWarn("  │  ") + colorBold("Are you sure? ") + colorSuccess("(Y)es") + " / " + colorError("(N)o") + "\n")
-	sb.WriteString(colorWarn("  │") + "\n")
-	sb.WriteString(colorWarn("  ╰"))
-	sb.WriteString(colorWarn(strings.Repeat("─", 54)))
-	sb.WriteString("\n")
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	key := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("  " + title.Render("Confirm") + "\n\n")
+	sb.WriteString("  " + m.confirmationMessage + "\n")
+	sb.WriteString("  " + dim.Render("Command: ") + cmd.Render(m.pendingCommand) + "\n\n")
+	sb.WriteString("  " + key.Render("y") + dim.Render(" yes   ") + key.Render("n") + dim.Render(" no") + "\n")
 
 	return sb.String()
 }
 
-// renderStatus renders the status information screen
+// renderStatus renders the status information
 func (m *InteractiveChatModel) renderStatus() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ Status ───────────────────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " Provider: " + colorAccent(m.currentProvider) + "\n")
-	sb.WriteString(colorAccent("│") + " Model: " + colorMuted(m.currentModel) + "\n")
-	sb.WriteString(colorAccent("│") + " Status: " + colorSuccess("Ready") + "\n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	val := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Status") + "\n\n")
+	sb.WriteString("  " + dim.Render("Provider  ") + val.Render(m.currentProvider) + "\n")
+	sb.WriteString("  " + dim.Render("Model     ") + val.Render(m.currentModel) + "\n")
+	sb.WriteString("  " + dim.Render("Status    ") + lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("ready") + "\n")
+
 	return sb.String()
 }
 
-// renderDebugInfo renders debug information about the environment
+// renderDebugInfo renders debug information
 func (m *InteractiveChatModel) renderDebugInfo() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ Debug Information ────────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " \n")
 
-	// Current model
-	sb.WriteString(colorAccent("│") + " " + colorBold("Current Model:") + "\n")
-	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Provider: %s\n", m.currentProvider))
-	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Model: %s\n", m.currentModel))
-	sb.WriteString(colorAccent("│") + " \n")
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	val := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	bad := lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 
-	// API Keys
-	sb.WriteString(colorAccent("│") + " " + colorBold("API Keys:") + "\n")
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	if openaiKey != "" {
-		sb.WriteString(colorAccent("│") + "   OPENAI_API_KEY: " + colorSuccess("✓ Set ("+openaiKey[:8]+"...)") + "\n")
-	} else {
-		sb.WriteString(colorAccent("│") + "   OPENAI_API_KEY: " + colorError("✗ Not set") + "\n")
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Debug") + "\n\n")
+
+	sb.WriteString("  " + dim.Render("Model") + "\n")
+	sb.WriteString("    " + dim.Render("Provider: ") + val.Render(m.currentProvider) + "\n")
+	sb.WriteString("    " + dim.Render("Model:    ") + val.Render(m.currentModel) + "\n\n")
+
+	sb.WriteString("  " + dim.Render("API Keys") + "\n")
+	for _, env := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY"} {
+		v := os.Getenv(env)
+		if v != "" {
+			sb.WriteString("    " + dim.Render(env+": ") + ok.Render("set ("+v[:8]+"...)") + "\n")
+		} else {
+			sb.WriteString("    " + dim.Render(env+": ") + bad.Render("not set") + "\n")
+		}
 	}
+	sb.WriteString("\n")
 
-	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
-	if anthropicKey != "" {
-		sb.WriteString(colorAccent("│") + "   ANTHROPIC_API_KEY: " + colorSuccess("✓ Set ("+anthropicKey[:8]+"...)") + "\n")
-	} else {
-		sb.WriteString(colorAccent("│") + "   ANTHROPIC_API_KEY: " + colorError("✗ Not set") + "\n")
-	}
-	sb.WriteString(colorAccent("│") + " \n")
-
-	// Working directory
 	cwd, _ := os.Getwd()
-	sb.WriteString(colorAccent("│") + " " + colorBold("Environment:") + "\n")
-	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Working Dir: %s\n", cwd))
-	sb.WriteString(colorAccent("│") + fmt.Sprintf("   Config Dir: ~/.soulgate/\n"))
-	sb.WriteString(colorAccent("│") + " \n")
+	sb.WriteString("  " + dim.Render("Environment") + "\n")
+	sb.WriteString("    " + dim.Render("Working Dir: ") + val.Render(cwd) + "\n")
+	sb.WriteString("    " + dim.Render("Config Dir:  ") + val.Render("~/.soulgate/") + "\n")
 
-	// Quick fixes
-	sb.WriteString(colorAccent("│") + " " + colorBold("Quick Fixes:") + "\n")
-	if openaiKey == "" {
-		sb.WriteString(colorAccent("│") + "   " + colorMuted("export OPENAI_API_KEY='sk-...'") + "\n")
-	}
-	if anthropicKey == "" {
-		sb.WriteString(colorAccent("│") + "   " + colorMuted("export ANTHROPIC_API_KEY='sk-ant-...'") + "\n")
-	}
-	sb.WriteString(colorAccent("│") + " \n")
-
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
 	return sb.String()
 }
 
 // renderSkillsList renders available skills
 func (m *InteractiveChatModel) renderSkillsList() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("+----- Skills -------------------------------------------+\n"))
 
-	// Load skills from workspace
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	name := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+
 	workspace := m.orch.GetWorkspace()
 	skillsDir := filepath.Join(workspace.Root, workspace.Config.Skills.Dir)
 	loader := skills.NewLoader(skillsDir)
 
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Skills") + "\n\n")
+
 	skillIDs, err := loader.ListSkills()
 	if err != nil || len(skillIDs) == 0 {
-		sb.WriteString(colorAccent("|") + " No skills found.\n")
-		sb.WriteString(colorAccent("|") + "\n")
-		sb.WriteString(colorAccent("|") + " Create skills:\n")
-		sb.WriteString(colorAccent("|") + "   soulgate skills create <name>\n")
-		sb.WriteString(colorAccent("|") + "\n")
-		sb.WriteString(colorAccent("|") + " Skills directory: " + colorMuted(skillsDir) + "\n")
-	} else {
-		sb.WriteString(colorAccent("|") + fmt.Sprintf(" Available Skills (%d):\n", len(skillIDs)))
-		sb.WriteString(colorAccent("|") + "\n")
+		sb.WriteString("  " + dim.Render("No skills found.") + "\n\n")
+		sb.WriteString("  " + dim.Render("Create one: soulgate skills create <name>") + "\n")
+		sb.WriteString("  " + dim.Render("Directory:  "+skillsDir) + "\n")
+		return sb.String()
+	}
 
-		loadedSkills, _ := loader.LoadByIDs(skillIDs)
-		enabled := workspace.Config.Skills.EnabledSkills
+	loadedSkills, _ := loader.LoadByIDs(skillIDs)
+	enabled := workspace.Config.Skills.EnabledSkills
 
-		for _, skill := range loadedSkills {
-			status := colorSuccess("active")
-			if len(enabled) > 0 {
-				isEnabled := false
-				for _, e := range enabled {
-					if e == skill.ID {
-						isEnabled = true
-						break
-					}
-				}
-				if !isEnabled {
-					status = colorMuted("disabled")
+	for _, skill := range loadedSkills {
+		status := ok.Render("active")
+		if len(enabled) > 0 {
+			isEnabled := false
+			for _, e := range enabled {
+				if e == skill.ID {
+					isEnabled = true
+					break
 				}
 			}
-
-			sb.WriteString(colorAccent("|") + fmt.Sprintf("   %s [%s]\n", colorBold(skill.Name), status))
-			if skill.Description != "" {
-				desc := skill.Description
-				if len(desc) > 60 {
-					desc = desc[:57] + "..."
-				}
-				sb.WriteString(colorAccent("|") + fmt.Sprintf("     %s\n", colorMuted(desc)))
+			if !isEnabled {
+				status = dim.Render("disabled")
 			}
 		}
+
+		sb.WriteString("  " + name.Render(skill.Name) + "  " + status + "\n")
+		if skill.Description != "" {
+			desc := skill.Description
+			if len(desc) > 60 {
+				desc = desc[:57] + "..."
+			}
+			sb.WriteString("  " + dim.Render(desc) + "\n")
+		}
+		sb.WriteString("\n")
 	}
-	sb.WriteString(colorAccentBright("+-------------------------------------------------------+"))
+
 	return sb.String()
 }
 
 // renderMemoryList renders memory entries
 func (m *InteractiveChatModel) renderMemoryList() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("+----- Memory -------------------------------------------+\n"))
+
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	key := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Memory") + "\n\n")
 
 	memories := m.orch.GetMemoryStore().List()
 	if len(memories) == 0 {
-		sb.WriteString(colorAccent("|") + " No memory entries yet.\n")
-		sb.WriteString(colorAccent("|") + "\n")
-		sb.WriteString(colorAccent("|") + " The AI will save memories automatically, or you can ask it to\n")
-		sb.WriteString(colorAccent("|") + " remember things during conversation.\n")
-	} else {
-		sb.WriteString(colorAccent("|") + fmt.Sprintf(" Memory Entries (%d):\n", len(memories)))
-		sb.WriteString(colorAccent("|") + "\n")
-		count := 0
-		for _, entry := range memories {
-			if count >= 15 {
-				sb.WriteString(colorAccent("|") + fmt.Sprintf("   ... and %d more\n", len(memories)-count))
-				break
-			}
-			value := entry.Value
-			if len(value) > 50 {
-				value = value[:47] + "..."
-			}
-			sb.WriteString(colorAccent("|") + fmt.Sprintf("   %s = %s\n", colorBold(entry.Key), colorMuted(value)))
-			count++
-		}
+		sb.WriteString("  " + dim.Render("No memory entries yet.") + "\n")
+		sb.WriteString("  " + dim.Render("The AI will save memories during conversation.") + "\n")
+		return sb.String()
 	}
-	sb.WriteString(colorAccentBright("+-------------------------------------------------------+"))
+
+	count := 0
+	for _, entry := range memories {
+		if count >= 15 {
+			sb.WriteString("  " + dim.Render(fmt.Sprintf("... and %d more", len(memories)-count)) + "\n")
+			break
+		}
+		value := entry.Value
+		if len(value) > 50 {
+			value = value[:47] + "..."
+		}
+		sb.WriteString("  " + key.Render(entry.Key) + "  " + dim.Render(value) + "\n")
+		count++
+	}
+
 	return sb.String()
 }
 
 // renderSoulInfo shows the current soul configuration
 func (m *InteractiveChatModel) renderSoulInfo() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("+----- AI Persona (SOUL.md) ----------------------------+\n"))
+
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	section := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("AI Persona") + dim.Render("  SOUL.md") + "\n\n")
 
 	workspace := m.orch.GetWorkspace()
 	soul, err := core.LoadSoulConfig(workspace.ConfigDir)
 	if err != nil || soul == nil {
-		sb.WriteString(colorAccent("|") + " No SOUL.md configured.\n")
-		sb.WriteString(colorAccent("|") + "\n")
-		sb.WriteString(colorAccent("|") + " Create one with: /soul init\n")
-		sb.WriteString(colorAccent("|") + "\n")
-		sb.WriteString(colorAccent("|") + " SOUL.md defines your AI's persona, personality,\n")
-		sb.WriteString(colorAccent("|") + " communication style, and behavior boundaries.\n")
-	} else {
-		sections := core.ParseSoulSections(soul.Content)
-		for name, content := range sections {
-			sb.WriteString(colorAccent("|") + " " + colorBold(name) + "\n")
-			lines := strings.Split(content, "\n")
-			for i, line := range lines {
-				if i >= 3 {
-					sb.WriteString(colorAccent("|") + "   " + colorMuted("...") + "\n")
-					break
-				}
-				if strings.TrimSpace(line) != "" {
-					sb.WriteString(colorAccent("|") + "   " + colorMuted(line) + "\n")
-				}
+		sb.WriteString("  " + dim.Render("No SOUL.md configured.") + "\n\n")
+		sb.WriteString("  " + dim.Render("Create one with /soul init") + "\n")
+		sb.WriteString("  " + dim.Render("Defines personality, style, and boundaries.") + "\n")
+		return sb.String()
+	}
+
+	sections := core.ParseSoulSections(soul.Content)
+	for name, content := range sections {
+		sb.WriteString("  " + section.Render(name) + "\n")
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
+			if i >= 3 {
+				sb.WriteString("  " + dim.Render("  ...") + "\n")
+				break
+			}
+			if strings.TrimSpace(line) != "" {
+				sb.WriteString("  " + dim.Render("  "+line) + "\n")
 			}
 		}
-		sb.WriteString(colorAccent("|") + "\n")
-		sb.WriteString(colorAccent("|") + " Path: " + colorMuted(soul.Path) + "\n")
+		sb.WriteString("\n")
 	}
-	sb.WriteString(colorAccentBright("+-------------------------------------------------------+"))
+
+	sb.WriteString("  " + dim.Render("Path: "+soul.Path) + "\n")
 	return sb.String()
 }
 
@@ -430,129 +370,91 @@ func (m *InteractiveChatModel) renderSoulInfo() string {
 func (m *InteractiveChatModel) initSoul() string {
 	workspace := m.orch.GetWorkspace()
 	if err := core.CreateSoulFile(workspace.ConfigDir); err != nil {
-		return colorError("Error: " + err.Error())
+		return colorError("  Error: " + err.Error())
 	}
-	return colorSuccess("Created SOUL.md! Edit it to customize your AI's persona.\nPath: " + workspace.ConfigDir + "/SOUL.md")
+	return colorSuccess("  Created SOUL.md at " + workspace.ConfigDir + "/SOUL.md")
 }
 
 // resetSoul resets SOUL.md to defaults
 func (m *InteractiveChatModel) resetSoul() string {
 	workspace := m.orch.GetWorkspace()
 	if err := core.UpdateSoulFile(workspace.ConfigDir, core.DefaultSoulTemplate()); err != nil {
-		return colorError("Error: " + err.Error())
+		return colorError("  Error: " + err.Error())
 	}
-	return colorSuccess("SOUL.md reset to default template.")
+	return colorSuccess("  SOUL.md reset to default template.")
 }
 
 // renderScheduleInfo shows scheduled tasks
 func (m *InteractiveChatModel) renderScheduleInfo() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("+----- Scheduled Tasks ---------------------------------+\n"))
-	sb.WriteString(colorAccent("|") + " No active schedules.\n")
-	sb.WriteString(colorAccent("|") + "\n")
-	sb.WriteString(colorAccent("|") + " Add schedules via CLI:\n")
-	sb.WriteString(colorAccent("|") + "   soulgate schedule add --type skill --target review --interval 1h\n")
-	sb.WriteString(colorAccent("|") + "   soulgate schedule add --type prompt --target \"check status\" --interval 30m\n")
-	sb.WriteString(colorAccent("|") + "\n")
-	sb.WriteString(colorAccent("|") + " Types: skill, agent, prompt\n")
-	sb.WriteString(colorAccentBright("+-------------------------------------------------------+"))
+
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Scheduled Tasks") + "\n\n")
+	sb.WriteString("  " + dim.Render("No active schedules.") + "\n\n")
+	sb.WriteString("  " + dim.Render("Add via CLI:") + "\n")
+	sb.WriteString("  " + cmd.Render("soulgate schedule add --type skill --target review --interval 1h") + "\n")
+	sb.WriteString("  " + cmd.Render("soulgate schedule add --type prompt --target \"check status\" --interval 30m") + "\n")
+
 	return sb.String()
 }
 
-// renderAutocomplete renders autocomplete suggestions dropdown
+// renderAutocomplete renders autocomplete suggestions with a scrolling window
 func (m *InteractiveChatModel) renderAutocomplete() string {
-	if len(m.autocomplete) == 0 {
+	total := len(m.autocomplete)
+	if total == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	hl := lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
 
-	// Box top with gradient
-	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("45")).
-		Render("  ┌─ ✨ Suggestions "))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
-		Render(strings.Repeat("─", 35)))
-	sb.WriteString("\n")
-
-	// Suggestions list (max 6 items)
-	maxItems := 6
-	displayCount := len(m.autocomplete)
-	if displayCount > maxItems {
-		displayCount = maxItems
-	}
-
-	for i := 0; i < displayCount; i++ {
-		suggestion := m.autocomplete[i]
-
-		if i == m.autocompleteIndex {
-			// Highlighted item (selected) with gradient
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("45")).
-				Render("  │ "))
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Bold(true).
-				Render("► "))
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("220")).
-				Bold(true).
-				Background(lipgloss.Color("236")).
-				Render(" "+suggestion+" "))
-		} else {
-			// Normal item
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("39")).
-				Render("  │ "))
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				Render("  "))
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
-				Render(suggestion))
+	maxVisible := 12
+	if total <= maxVisible {
+		// Show all items
+		for i, suggestion := range m.autocomplete {
+			if i == m.autocompleteIndex {
+				sb.WriteString(hl.Render("  > " + suggestion))
+			} else {
+				sb.WriteString(dim.Render("    " + suggestion))
+			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
+	} else {
+		// Scrolling window that follows the selection
+		start := m.autocompleteIndex - maxVisible/2
+		if start < 0 {
+			start = 0
+		}
+		end := start + maxVisible
+		if end > total {
+			end = total
+			start = end - maxVisible
+		}
+
+		if start > 0 {
+			sb.WriteString(dim.Render(fmt.Sprintf("    ... %d above", start)))
+			sb.WriteString("\n")
+		}
+
+		for i := start; i < end; i++ {
+			if i == m.autocompleteIndex {
+				sb.WriteString(hl.Render("  > " + m.autocomplete[i]))
+			} else {
+				sb.WriteString(dim.Render("    " + m.autocomplete[i]))
+			}
+			sb.WriteString("\n")
+		}
+
+		if end < total {
+			sb.WriteString(dim.Render(fmt.Sprintf("    ... %d below", total-end)))
+			sb.WriteString("\n")
+		}
 	}
-
-	// Show indicator if more items
-	if len(m.autocomplete) > maxItems {
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
-			Render("  │   "))
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Italic(true).
-			Render(fmt.Sprintf("... (%d more)", len(m.autocomplete)-maxItems)))
-		sb.WriteString("\n")
-	}
-
-	// Box bottom
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
-		Render("  └"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
-		Render(strings.Repeat("─", 54)))
-
-	// Hint with icons
-	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render("  ↑↓ navigate • "))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82")).
-		Render("Enter/Tab"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(" select • "))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196")).
-		Render("Esc"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Render(" close"))
 
 	return sb.String()
 }

@@ -1,309 +1,113 @@
-# ═══════════════════════════════════════════════════════════
-# SoulGate .gitignore
-# Prevents committing sensitive data and build artifacts
-# ═══════════════════════════════════════════════════════════
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ SECRETS & SENSITIVE DATA (CRITICAL - DO NOT COMMIT)    │
-# └─────────────────────────────────────────────────────────┘
-
-# API Keys & Credentials
+# Secrets & credentials
 .env
 .env.*
 *.key
 *.pem
-*.p12
-*.pfx
 secrets/
 credentials/
-**/*secret*
-**/*credential*
-**/*password*
 
-# SoulGate Configuration (may contain API keys)
+# SoulGate workspace data
 .soulgate/config.yml
 .soulgate/agents.yaml
-.soulgate/*.key
-.soulgate/secrets/
-
-# Audit Database (contains sensitive operational data)
+.soulgate/policy.yml
 .soulgate/audit.db
 .soulgate/audit.db-*
+.soulgate/memory.json
+.soulgate/*.key
+.soulgate/secrets/
 *.db
 *.db-shm
 *.db-wal
 
-# Memory store (contains user-specific data)
-.soulgate/memory.json
-
-# Soul file (user-specific persona - optional commit)
-# .soulgate/SOUL.md
-
-# Policy Files (may contain sensitive path information)
-# Uncomment if your policies reveal internal architecture
-# .soulgate/policy.yml
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ BUILD ARTIFACTS & BINARIES                              │
-# └─────────────────────────────────────────────────────────┘
-
-# Compiled binaries
+# Build artifacts
 /bin/
-dist/
-build/
-out/
-target/
 /soulgate
-/soulgate.exe
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
+*.wasm
 
-# Build artifacts
-*.o
-*.a
-*.lib
-
-# Distribution packages
-*.tar.gz
-*.zip
-*.deb
-*.rpm
-*.pkg
-*.dmg
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ GO-SPECIFIC                                             │
-# └─────────────────────────────────────────────────────────┘
-
-# Test binary, built with `go test -c`
+# Go
 *.test
-
-# Output of the go coverage tool
 *.out
-coverage.txt
-coverage.html
-coverage*.txt
-coverage*.html
-coverage*.out
-coverage-*.txt
-
-# Go workspace file
+coverage.*
 go.work
 go.work.sum
 
-# ┌─────────────────────────────────────────────────────────┐
-# │ PLUGINS & DEPENDENCIES                                  │
-# └─────────────────────────────────────────────────────────┘
-
-# Plugin artifacts
+# Plugins
 plugins/*.wasm
-plugins/*.so
-plugins/*.dll
-plugins/*.dylib
 plugins/*/target/
 plugins/*/node_modules/
 
-# WASM build artifacts
-*.wasm
-pkg/
-
-# Rust plugin artifacts
-Cargo.lock
-**/target/
-
-# Node modules (if using JS plugins)
-node_modules/
-package-lock.json
-yarn.lock
-
-# Dependency directories
+# Dependencies
 vendor/
+node_modules/
 
-# ┌─────────────────────────────────────────────────────────┐
-# │ LOGS & TEMPORARY FILES                                  │
-# └─────────────────────────────────────────────────────────┘
-
-# Log files
+# Logs & temp
 *.log
 logs/
-*.log.*
-log/
-
-# Temporary files
 tmp/
-temp/
 *.tmp
-*.temp
 *.swp
 *.swo
 *~
 
-# PID files
-*.pid
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ IDE & EDITOR FILES                                      │
-# └─────────────────────────────────────────────────────────┘
-
-# Claude Code
+# IDE & editors
 .claude/
 CLAUDE.md
-
-# Visual Studio Code
 .vscode/
-*.code-workspace
-
-# GoLand / IntelliJ IDEA
 .idea/
 *.iml
-*.ipr
-*.iws
-
-# Sublime Text
 *.sublime-project
 *.sublime-workspace
 
-# Vim
-[._]*.s[a-v][a-z]
-[._]*.sw[a-p]
-[._]s[a-rt-v][a-z]
-[._]ss[a-gi-z]
-[._]sw[a-p]
-
-# Emacs
-\#*\#
-/.emacs.desktop
-/.emacs.desktop.lock
-*.elc
-auto-save-list
-tramp
-.\#*
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ OPERATING SYSTEM FILES                                  │
-# └─────────────────────────────────────────────────────────┘
-
-# macOS
+# OS files
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-# Windows
 Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
 Desktop.ini
-$RECYCLE.BIN/
 
-# Linux
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ TEST & DEVELOPMENT FILES                                │
-# └─────────────────────────────────────────────────────────┘
-
-# Test workspaces
-demo/workspace/.soulgate/audit.db
-demo/workspace/.soulgate/*.db
-demo/workspace/.soulgate/*.db-*
+# Dev files
+*.backup
+*.bench
+*.prof
+__debug_bin
 test-workspace/
-test-data/
 scratch/
 
-# Benchmarking results
-*.bench
-benchmark-*.txt
+# Scripts (dev-only)
+run*.sh
+test-*.sh
+check-secrets.sh
 
-# Profiling data
-*.prof
-*.pprof
-cpu.prof
-mem.prof
+# Internal docs (dev-only)
+ARCHITECTURE.md
+CLI_GUIDE.md
+COMPLETION_SUMMARY.md
+CONTRIBUTING.md
+DEMO.md
+DEPENDENCIES.md
+IMPLEMENTATION_STATUS.md
+PROJECT_STATUS.md
+QUICKSTART.md
+REFACTORING_COMPLETE.md
+RELEASE_GUIDE.md
+SECURITY.md
+SECURITY_SUMMARY.md
+TEST_LOCALLY.md
+WEEK1_IMPLEMENTATION.md
+CODEOWNERS
+docs/
 
-# Debug files
-debug
-debug.test
-__debug_bin
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ CI/CD & DEPLOYMENT                                      │
-# └─────────────────────────────────────────────────────────┘
-
-# Deployment keys
-deploy_key
-deploy_key.pub
-id_rsa
-id_rsa.pub
-id_ed25519
-id_ed25519.pub
-
-# Terraform state (if using infrastructure as code)
-*.tfstate
-*.tfstate.*
-.terraform/
-
-# Kubernetes secrets
-*-secret.yaml
-*-secrets.yaml
-
-# Docker
-docker-compose.override.yml
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ DOCUMENTATION BUILD ARTIFACTS                           │
-# └─────────────────────────────────────────────────────────┘
-
-# Generated documentation
-docs/_build/
-site/
-_site/
-.hugo_build.lock
-
-# ┌─────────────────────────────────────────────────────────┐
-# │ PROJECT-SPECIFIC EXCLUSIONS                             │
-# └─────────────────────────────────────────────────────────┘
-
-# Local configuration overrides
-config.local.yml
-*.local.yml
-local/
-
-# User-specific test inputs
-*-input.txt
-test-input/
-
-# Personal notes and scratch files
-NOTES.md
-TODO.personal.md
-scratch.md
-
-# ═══════════════════════════════════════════════════════════
-# ALLOW LIST (explicitly include important files)
-# ═══════════════════════════════════════════════════════════
-
-# Always include these files even if patterns above would exclude them
+# Allow list
 !.gitignore
 !.github/
 !Makefile
 !go.mod
 !go.sum
-
-# Include example configuration templates (without secrets)
 !.soulgate/config.example.yml
 !.soulgate/policy.example.yml
 !.soulgate/agents.example.yaml
-
-# Include demo files (ensure they have no secrets)
 !demo/workspace/.soulgate/config.yml
 !demo/workspace/.soulgate/policy.yml
 !demo/workspace/example.txt

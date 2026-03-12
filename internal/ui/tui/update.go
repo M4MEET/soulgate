@@ -6,6 +6,7 @@ import (
 
 	"github.com/M4MEET/soulgate/internal/core"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Custom message type for dependency installation completion
@@ -273,7 +274,13 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autocompleteIndex = 0
 
 			// Add user message to output
-			m.addMessage(colorAccent(">>> ") + value)
+			m.addMessage(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Bold(true).
+				Render("  you") + "\n  " +
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("252")).
+					Render(value))
 
 			// Handle commands
 			if strings.HasPrefix(value, "/") {
@@ -315,21 +322,15 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinking = false
 		m.status = "Ready"
 		if msg.err != nil {
-			// Show detailed error
+			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 			var sb strings.Builder
-			sb.WriteString(colorError("╭─ ✗ Error ") + colorError(strings.Repeat("─", 43)) + "\n")
-			sb.WriteString(colorError("│") + "\n")
-			sb.WriteString(colorError("│ ") + msg.err.Error() + "\n")
-			sb.WriteString(colorError("│") + "\n")
-			sb.WriteString(colorError("│ ") + colorMuted("Troubleshooting:") + "\n")
-			sb.WriteString(colorError("│ ") + colorMuted("1. Check API key: echo $OPENAI_API_KEY") + "\n")
-			sb.WriteString(colorError("│ ") + colorMuted("2. Check config: cat ~/.soulgate/config.yml") + "\n")
-			sb.WriteString(colorError("│ ") + colorMuted("3. Test connection: curl https://api.openai.com") + "\n")
-			sb.WriteString(colorError("│") + "\n")
-			sb.WriteString(colorError("╰") + colorError(strings.Repeat("─", 54)))
+			sb.WriteString(errStyle.Render("  error") + "\n")
+			sb.WriteString("  " + errStyle.Render(msg.err.Error()) + "\n\n")
+			sb.WriteString(dim.Render("  Check: echo $OPENAI_API_KEY") + "\n")
+			sb.WriteString(dim.Render("  Check: cat ~/.soulgate/config.yml") + "\n")
 			m.addMessage(sb.String())
 		} else {
-			// Format AI response elegantly
 			m.addMessage(formatAIResponse(msg.text))
 		}
 		return m, nil

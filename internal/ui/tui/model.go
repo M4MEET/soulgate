@@ -102,27 +102,22 @@ type providerInfo struct {
 // NewInteractiveChatModel creates a new interactive chat model
 func NewInteractiveChatModel(orch *core.Orchestrator) InteractiveChatModel {
 	ti := textinput.New()
-	ti.Placeholder = "Type your message..."
+	ti.Placeholder = "Type a message..."
 	ti.Focus()
-	ti.CharLimit = 500
+	ti.CharLimit = 1000
 	ti.Width = 100
-	ti.Prompt = ">>> "
+	ti.Prompt = "  > "
 	ti.PromptStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Bold(true) // Make prompt bold and orange
+		Foreground(lipgloss.Color("246"))
 	ti.TextStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")) // Light gray for better visibility
+		Foreground(lipgloss.Color("252"))
 	ti.PlaceholderStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")) // Dim gray for placeholder
+		Foreground(lipgloss.Color("240"))
 
 	vp := viewport.New(100, 25)
-	// Welcome message will be set later if not entering onboarding
 	vp.SetContent("")
 
-	// Get current provider and model
 	provider, modelName := orch.GetCurrentProvider()
-
-	// Initialize model discovery
 	discovery := model.NewModelDiscovery()
 
 	return InteractiveChatModel{
@@ -138,7 +133,7 @@ func NewInteractiveChatModel(orch *core.Orchestrator) InteractiveChatModel {
 	}
 }
 
-// ShowWelcome displays the welcome message (called when not entering onboarding)
+// ShowWelcome displays the welcome message
 func (m *InteractiveChatModel) ShowWelcome() {
 	welcome := welcomeMessage()
 	m.messages = []string{welcome}
@@ -146,81 +141,13 @@ func (m *InteractiveChatModel) ShowWelcome() {
 }
 
 func welcomeMessage() string {
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+
 	var sb strings.Builder
-
-	// Welcome box with gradient border
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  ╭─ Welcome to SoulGate "))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Render(strings.Repeat("─", 28)))
 	sb.WriteString("\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Render("Your secure AI agent gateway") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render("Quick Start:") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("45")).
-			Render("  • ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render("Type your message and press Enter") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("45")).
-			Render("  • ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render("Press Ctrl+H for help") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("45")).
-			Render("  • ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render("Try: /status, /tools, /hub") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Render("  ╰"))
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Render(strings.Repeat("─", 54)))
-	sb.WriteString("\n")
-
+	sb.WriteString(dim.Render("  Type a message to chat with the AI.") + "\n")
+	sb.WriteString(dim.Render("  Use ") + cmd.Render("/help") + dim.Render(" for commands, ") + cmd.Render("ctrl+h") + dim.Render(" for shortcuts.") + "\n")
 	return sb.String()
 }
 

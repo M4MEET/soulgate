@@ -1,254 +1,202 @@
-# SoulGate 🚀
+# SoulGate
 
-**Your powerful AI assistant in the terminal - like OpenClaw, but with security and privacy.**
+A security-focused AI gateway for the terminal. SoulGate sits between LLM agents and your system, enforcing policies and auditing every operation.
 
-SoulGate gives you a single, capable AI agent that can read, write, and manage your files through natural conversation. Everything is controlled by security policies and fully audited.
-
-```bash
-soulgate chat
->>> read the README and create a summary.txt
->>> list all Go files in this project
->>> add a comment to main.go explaining what it does
-```
-
-## Features
-
-- 🤖 **Single Powerful Agent** - One AI that can do everything you need
-- 📁 **File Operations** - Read, write, and list files through conversation
-- 🔒 **Security Controls** - Policy engine controls what the agent can access
-- 📊 **Full Audit Logs** - Every operation is logged to SQLite
-- 🌐 **Multiple Providers** - OpenAI, Anthropic, or Gemini
-- 🎨 **OpenClaw-Style UX** - Natural, interactive terminal experience
-
-## Status
-
-✅ **v0.1 - Ready to Use**
-
-- ✅ Interactive chat with conversation memory
-- ✅ File operations (read, write, list)
-- ✅ Security policy engine
-- ✅ Complete audit logging
-- ✅ OpenAI & Anthropic support
-- ✅ Global configuration (~/.soulgate/)
-
-## Getting Started
-
-**First-time users**: SoulGate features a beautiful **auto-triggering onboarding wizard** 🎯
+## Install
 
 ```bash
-# Build SoulGate
-make build
-
-# Initialize workspace
-cd your-project
-./bin/soulgate init
-
-# Start interactive TUI (onboarding auto-triggers!)
-./bin/soulgate tui
-```
-
-The onboarding wizard will guide you through:
-- 🤖 **Model Selection** - Choose GPT-4o, Claude, Llama, or others
-- 🔑 **API Key Setup** - Configure your credentials securely
-- ✅ **Connection Test** - Verify everything works
-- 🔌 **Integrations** - Optional: Slack, GitHub, Notion, etc.
-- 📚 **Quick Tutorial** - Learn the basics in 2 minutes
-
-**Already configured?** The system auto-detects existing setups and skips onboarding.
-
-For advanced configuration options, see the [Onboarding Guide](docs/ONBOARDING_GUIDE.md).
-
-## Quick Start
-
-### Installation
-
-```bash
-# Clone repository
 git clone https://github.com/M4MEET/soulgate.git
 cd soulgate
-
-# Build
 make build
-
-# Optional: Install to $GOPATH/bin
-make install
 ```
 
-### Interactive Setup (Recommended)
-
-SoulGate features a user-friendly interactive setup wizard:
+The binary is built to `bin/soulgate`. Optionally move it to your PATH:
 
 ```bash
-# Run the setup wizard
-./bin/soulgate setup
+cp bin/soulgate /usr/local/bin/
 ```
 
-The wizard will guide you through:
-1. Workspace path configuration
-2. Model provider setup (OpenAI, Anthropic, or Ollama)
-3. Security policy configuration (strict/moderate/permissive)
-4. Consolidated agents setup
-5. Audit logging and notifications
-6. Configuration review
+## Setup
 
-### Quick Setup (Defaults)
-
-For quick testing with default settings:
+### 1. Initialize a workspace
 
 ```bash
-# Initialize with defaults
 cd your-project
 soulgate init
-
-# Set your API key
-export OPENAI_API_KEY=sk-...
-# or
-export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### Usage
+This creates a `.soulgate/` directory with default config and policies.
+
+### 2. Set your API key
+
+SoulGate supports multiple providers. Set the key for your preferred one:
 
 ```bash
-# Run a prompt (starts agentic loop)
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Groq (fast inference)
+export GROQ_API_KEY="gsk_..."
+
+# Google (Gemini)
+export GOOGLE_API_KEY="..."
+
+# Ollama (local, no key needed)
+# Just have ollama running locally
+```
+
+### 3. Start chatting
+
+```bash
+# Interactive TUI (recommended)
+soulgate tui
+
+# Single prompt
+soulgate run "Read example.txt and summarize it"
+```
+
+First launch opens an onboarding wizard that walks you through model selection, API key setup, and basic configuration.
+
+## Usage
+
+### Interactive mode
+
+```bash
+soulgate tui
+```
+
+Inside the TUI:
+
+| Command | Description |
+|---|---|
+| `/help` | Show all commands and shortcuts |
+| `/model` | Switch AI model or provider |
+| `/status` | Show current configuration |
+| `/tools` | List available tools |
+| `/skills` | List loaded skills |
+| `/memory` | Show conversation memory |
+| `/setup` | Integration setup wizard |
+| `/clear` | Clear screen |
+| `!command` | Run a shell command |
+
+Keyboard shortcuts: `Tab` autocomplete, `Up/Down` history, `PgUp/PgDn` scroll, `Ctrl+C` exit.
+
+### Single prompt mode
+
+```bash
 soulgate run "What files are in this directory?"
-
-# More complex operations
-soulgate run "Read README.md and summarize the key features"
-
-# View audit log
-soulgate audit tail
-
-# Show active policies
-soulgate policy show
-
-# Manage agents
-soulgate agents list
+soulgate run "Read main.go and explain what it does"
 ```
 
-## Architecture
+### Policy management
 
-SoulGate sits between LLM agents and system resources:
-
-```
-User → CLI → Orchestrator → Model Provider (OpenAI/Anthropic)
-                ↓
-         Plugin Runtime (WASM)
-                ↓
-         Resource Brokers → Policy Engine → Audit Log
-                ↓
-         System Resources
+```bash
+soulgate policy show       # View active policies
 ```
 
-### Key Components
+Policies control what the AI agent can access. Edit `.soulgate/policy.yml`:
 
-- **Orchestrator**: Coordinates model calls, tool execution, and broker routing. Implements the agentic loop (model → tools → model) with conversation history.
-- **Policy Engine**: Evaluates allow/deny decisions based on YAML policies with priority-based rule evaluation.
-- **Resource Brokers**: Mediate access to files, network, secrets, execution. Currently FileBroker is fully implemented.
-- **Model Providers**: OpenAI and Anthropic integrations with full tool calling support.
-- **Plugin Runtime**: Executes sandboxed WASM plugins with controlled capabilities.
-- **Audit Logger**: Records all operations to SQLite for forensic analysis and compliance.
+```yaml
+version: "1"
+policies:
+  - name: "allow-workspace-reads"
+    action: "files.read"
+    resource: "./**"
+    decision: allow
+    priority: 10
 
-## Documentation
-
-- [Setup Guide](SETUP_GUIDE.md) - Interactive setup wizard walkthrough
-- [Quick Start](QUICKSTART.md) - Complete feature walkthrough
-- [Agentic Loop](AGENTIC_LOOP.md) - How the agentic loop and tool calling works
-- [Architecture](ARCHITECTURE.md) - Detailed system design
-- [Security](SECURITY.md) - Security model and threat analysis
-- [Implementation Status](IMPLEMENTATION_STATUS.md) - Current status and roadmap
-
-## Project Structure
-
+  - name: "deny-parent-access"
+    action: "files.*"
+    resource: "../**"
+    decision: deny
+    priority: 20
 ```
-soulgate/
-├── cmd/soulgate/          # CLI entry point and commands
-├── internal/              # Core implementation
-│   ├── core/              # Orchestrator and session management
-│   ├── model/             # LLM provider adapters
-│   ├── policy/            # Policy engine
-│   ├── audit/             # Audit logging
-│   ├── brokers/           # Resource brokers (files, net, secrets, exec)
-│   └── plugins/           # Plugin system (SDK, loader, runtime)
-├── plugins/examples/      # Example plugins
-├── demo/                  # Demo workspace and scripts
-└── docs/                  # Documentation
+
+Higher priority rules are evaluated first. Default is deny (no matching rule = denied).
+
+### Audit logs
+
+```bash
+soulgate audit tail           # Recent events
+soulgate audit tail --last 20 # Last 20 events
 ```
+
+Every file read, write, tool call, and policy decision is recorded to `.soulgate/audit.db`.
+
+### Plugins
+
+```bash
+soulgate plugin list    # List installed plugins
+```
+
+Plugins run in a WASM sandbox and cannot access the OS directly. They declare required permissions in a `manifest.yml`.
+
+## Configuration
+
+Workspace config lives in `.soulgate/config.yml`. Example templates are provided:
+
+- `.soulgate/config.example.yml` - Full configuration reference
+- `.soulgate/policy.example.yml` - Policy rules reference
+- `.soulgate/agents.example.yaml` - Agent configuration reference
+
+### Supported providers
+
+| Provider | Models | Key variable |
+|---|---|---|
+| OpenAI | GPT-4o, GPT-4o-mini, GPT-4-Turbo | `OPENAI_API_KEY` |
+| Anthropic | Claude Opus 4, Sonnet 4, Haiku 4 | `ANTHROPIC_API_KEY` |
+| Groq | Llama 3.3, Mixtral, Gemma 2 | `GROQ_API_KEY` |
+| Google | Gemini 2.0 Flash, 1.5 Pro/Flash | `GOOGLE_API_KEY` |
+| Mistral | Large, Medium, Small | `MISTRAL_API_KEY` |
+| DeepSeek | V3, Coder | `DEEPSEEK_API_KEY` |
+| xAI | Grok 4.1, Grok 3 | `XAI_API_KEY` |
+| OpenRouter | 100+ models | `OPENROUTER_API_KEY` |
+| Together | Llama 3.1 405B, Qwen 2.5 | `TOGETHER_API_KEY` |
+| Perplexity | Sonar, Sonar Pro | `PERPLEXITY_API_KEY` |
+| Cohere | Command R+, Command R | `COHERE_API_KEY` |
+| Ollama | Any local model | (none, runs locally) |
+
+Switch models at any time with `/model` in the TUI.
+
+## Security model
+
+- **Default deny** - operations are denied unless explicitly allowed by policy
+- **Workspace boundaries** - agents cannot access files outside the workspace
+- **Path validation** - traversal attacks (`../../etc/passwd`) are blocked
+- **WASM sandbox** - plugins run in isolation, no direct OS access
+- **Audit trail** - every operation is logged to SQLite
 
 ## Development
 
 ```bash
-# Run tests
-make test
-
-# Run tests with coverage
-make test-coverage
-
-# Lint code
-make lint
-
-# Build example plugin
-make build-plugin
-
-# Run all checks
-make check
+make build          # Build binary
+make test           # Run all tests
+make lint           # Format and vet
+make check          # Lint + tests
+make test-coverage  # Coverage report
 ```
 
-## Security
+## Project structure
 
-SoulGate is designed with security as the primary concern:
-
-- **Default deny**: All operations denied unless explicitly allowed by policy
-- **Sandbox isolation**: WASM plugins cannot access OS directly
-- **Broker mediation**: All resource access goes through policy-enforced brokers
-- **Audit everything**: Complete log of all operations for forensics
-- **Path validation**: Prevents traversal attacks and workspace escapes
-- **Schema validation**: All tool calls validated against JSON schemas
-
-See [SECURITY.md](SECURITY.md) for security considerations and threat model.
-
-## Roadmap
-
-### v0.1 (Complete)
-- [x] Project setup and dependencies
-- [x] Core orchestrator with agentic loop
-- [x] Model provider adapters (OpenAI, Anthropic)
-- [x] Policy engine with priority-based rules
-- [x] FileBroker (read/list operations)
-- [x] Interactive setup wizard
-- [x] CLI commands (init, setup, run, audit, plugin, policy, agents)
-- [x] Comprehensive audit logging
-- [x] Tool calling and execution
-- [x] Multi-turn conversations
-
-### v0.2 (Planned)
-- [ ] File write operations with approval workflow
-- [ ] WASM plugin runtime (full bridge)
-- [ ] Example WASM plugins
-- [ ] NetBroker for HTTP requests
-- [ ] SecretBroker for credential management
-- [ ] ExecBroker for command execution
-- [ ] Streaming output
-- [ ] Advanced policy conditions (time-based, context-aware)
-
-### v0.3+ (Future)
-- [ ] Plugin versioning and upgrades
-- [ ] Daemon mode with API
-- [ ] Web UI for monitoring
-- [ ] Multi-agent coordination
-- [ ] Remote model providers
+```
+cmd/soulgate/       CLI entry point and commands
+internal/
+  core/             Orchestrator and session management
+  model/            LLM provider adapters
+  policy/           Policy engine
+  audit/            Audit logging (SQLite)
+  brokers/          Resource brokers (files, net, exec)
+  plugins/          WASM plugin system
+  ui/               Terminal UI (Bubble Tea)
+  skills/           Skills system
+  config/           Configuration management
+plugins/            Plugin manifests
+demo/               Demo workspace
+```
 
 ## License
 
-[Choose appropriate license - MIT, Apache 2.0, etc.]
-
-## Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## Credits
-
-Built with:
-- [wazero](https://github.com/tetratelabs/wazero) - Pure Go WASM runtime
-- [Cobra](https://github.com/spf13/cobra) - CLI framework
-- [SQLite](https://modernc.org/sqlite) - Embedded database
-- [Zap](https://github.com/uber-go/zap) - Structured logging
+MIT

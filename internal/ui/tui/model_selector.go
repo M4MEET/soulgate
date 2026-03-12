@@ -19,48 +19,11 @@ import (
 
 // buildModelOptions builds list of available models across all providers
 func (m *InteractiveChatModel) buildModelOptions() []modelOption {
-	// Use static list for now (dynamic discovery can be enabled later)
-	// This ensures /model always works
 	return m.buildStaticModelOptions()
-
-	/* Dynamic discovery (disabled for now - needs debugging)
-	options := []modelOption{}
-	num := 1
-
-	// Check if modelDiscovery is initialized
-	if m.modelDiscovery == nil {
-		return m.buildStaticModelOptions()
-	}
-
-	// Use dynamic model discovery
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	allModels, err := m.modelDiscovery.GetAllModels(ctx)
-	if err != nil || len(allModels) == 0 {
-		// Fallback to static list if discovery fails
-		return m.buildStaticModelOptions()
-	}
-
-	// Convert discovered models to modelOption format
-	for _, modelInfo := range allModels {
-		options = append(options, modelOption{
-			number:      num,
-			name:        modelInfo.Name,
-			provider:    modelInfo.Provider,
-			model:       modelInfo.ID,
-			description: modelInfo.Description,
-		})
-		num++
-	}
-
-	return options
-	*/
 }
 
 // buildStaticModelOptions returns hardcoded model list as fallback
 func (m *InteractiveChatModel) buildStaticModelOptions() []modelOption {
-	// Check which API keys are available
 	hasOpenAI := os.Getenv("OPENAI_API_KEY") != ""
 	hasAnthropic := os.Getenv("ANTHROPIC_API_KEY") != ""
 	hasGroq := os.Getenv("GROQ_API_KEY") != ""
@@ -75,305 +38,99 @@ func (m *InteractiveChatModel) buildStaticModelOptions() []modelOption {
 	options := []modelOption{}
 	num := 1
 
-	// OpenAI models (if API key available)
 	if hasOpenAI {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "GPT-4o",
-			provider:    "openai",
-			model:       "gpt-4o",
-			description: "Most capable OpenAI - Complex coding & analysis",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "GPT-4o-mini",
-			provider:    "openai",
-			model:       "gpt-4o-mini",
-			description: "Fast & economical - Simple tasks",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "GPT-4-Turbo",
-			provider:    "openai",
-			model:       "gpt-4-turbo",
-			description: "Previous gen - Reliable for most tasks",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "GPT-3.5-Turbo",
-			provider:    "openai",
-			model:       "gpt-3.5-turbo",
-			description: "Budget friendly - Quick responses",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "GPT-4o", "openai", "gpt-4o", "Most capable OpenAI - Complex coding & analysis"},
+			modelOption{num + 1, "GPT-4o-mini", "openai", "gpt-4o-mini", "Fast & economical - Simple tasks"},
+			modelOption{num + 2, "GPT-4-Turbo", "openai", "gpt-4-turbo", "Previous gen - Reliable for most tasks"},
+			modelOption{num + 3, "GPT-3.5-Turbo", "openai", "gpt-3.5-turbo", "Budget friendly - Quick responses"},
+		)
+		num += 4
 	}
 
-	// Anthropic models (if API key available)
 	if hasAnthropic {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Claude Opus 4",
-			provider:    "anthropic",
-			model:       "claude-opus-4-20250514",
-			description: "Most capable Claude - Deep reasoning",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Claude Sonnet 4",
-			provider:    "anthropic",
-			model:       "claude-sonnet-4-20250514",
-			description: "Balanced - Great for most tasks",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Claude Haiku 4",
-			provider:    "anthropic",
-			model:       "claude-haiku-4-20250501",
-			description: "Fast & efficient - Quick responses",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Claude Opus 4", "anthropic", "claude-opus-4-20250514", "Most capable Claude - Deep reasoning"},
+			modelOption{num + 1, "Claude Sonnet 4", "anthropic", "claude-sonnet-4-20250514", "Balanced - Great for most tasks"},
+			modelOption{num + 2, "Claude Haiku 4", "anthropic", "claude-haiku-4-20250501", "Fast & efficient - Quick responses"},
+		)
+		num += 3
 	}
 
-	// Groq models (if API key available)
 	if hasGroq {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Llama 3.3 70B (Groq)",
-			provider:    "groq",
-			model:       "llama-3.3-70b-versatile",
-			description: "Meta's latest - Lightning fast inference",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Mixtral 8x7B (Groq)",
-			provider:    "groq",
-			model:       "mixtral-8x7b-32768",
-			description: "Mistral MoE - Large context window",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Gemma 2 9B (Groq)",
-			provider:    "groq",
-			model:       "gemma2-9b-it",
-			description: "Google's efficient model - Fast",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Llama 3.3 70B (Groq)", "groq", "llama-3.3-70b-versatile", "Meta's latest - Lightning fast inference"},
+			modelOption{num + 1, "Mixtral 8x7B (Groq)", "groq", "mixtral-8x7b-32768", "Mistral MoE - Large context window"},
+			modelOption{num + 2, "Gemma 2 9B (Groq)", "groq", "gemma2-9b-it", "Google's efficient model - Fast"},
+		)
+		num += 3
 	}
 
-	// Google models (if API key available)
 	if hasGoogle {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Gemini 2.0 Flash",
-			provider:    "google",
-			model:       "gemini-2.0-flash-exp",
-			description: "Latest Gemini - Experimental features",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Gemini 1.5 Pro",
-			provider:    "google",
-			model:       "gemini-1.5-pro",
-			description: "Powerful - 2M context window",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Gemini 1.5 Flash",
-			provider:    "google",
-			model:       "gemini-1.5-flash",
-			description: "Fast & efficient - Quick tasks",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Gemini 2.0 Flash", "google", "gemini-2.0-flash-exp", "Latest Gemini - Experimental features"},
+			modelOption{num + 1, "Gemini 1.5 Pro", "google", "gemini-1.5-pro", "Powerful - 2M context window"},
+			modelOption{num + 2, "Gemini 1.5 Flash", "google", "gemini-1.5-flash", "Fast & efficient - Quick tasks"},
+		)
+		num += 3
 	}
 
-	// Mistral models (if API key available)
 	if hasMistral {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Mistral Large",
-			provider:    "mistral",
-			model:       "mistral-large-latest",
-			description: "Most capable Mistral - Complex reasoning",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Mistral Medium",
-			provider:    "mistral",
-			model:       "mistral-medium-latest",
-			description: "Balanced - Good for most tasks",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Mistral Small",
-			provider:    "mistral",
-			model:       "mistral-small-latest",
-			description: "Fast & economical - Simple tasks",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Mistral Large", "mistral", "mistral-large-latest", "Most capable Mistral - Complex reasoning"},
+			modelOption{num + 1, "Mistral Medium", "mistral", "mistral-medium-latest", "Balanced - Good for most tasks"},
+			modelOption{num + 2, "Mistral Small", "mistral", "mistral-small-latest", "Fast & economical - Simple tasks"},
+		)
+		num += 3
 	}
 
-	// Cohere models (if API key available)
 	if hasCohere {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Command R+",
-			provider:    "cohere",
-			model:       "command-r-plus",
-			description: "Most capable Cohere - RAG & tools",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Command R",
-			provider:    "cohere",
-			model:       "command-r",
-			description: "Balanced - Good performance",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Command R+", "cohere", "command-r-plus", "Most capable Cohere - RAG & tools"},
+			modelOption{num + 1, "Command R", "cohere", "command-r", "Balanced - Good performance"},
+		)
+		num += 2
 	}
 
-	// DeepSeek models (if API key available)
 	if hasDeepSeek {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "DeepSeek V3",
-			provider:    "deepseek",
-			model:       "deepseek-chat",
-			description: "Chinese model - Strong coding ability",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "DeepSeek Coder",
-			provider:    "deepseek",
-			model:       "deepseek-coder",
-			description: "Specialized for code generation",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "DeepSeek V3", "deepseek", "deepseek-chat", "Chinese model - Strong coding ability"},
+			modelOption{num + 1, "DeepSeek Coder", "deepseek", "deepseek-coder", "Specialized for code generation"},
+		)
+		num += 2
 	}
 
-	// OpenRouter models (if API key available)
 	if hasOpenRouter {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Auto (OpenRouter)",
-			provider:    "openrouter",
-			model:       "openrouter/auto",
-			description: "Best available model - Auto-selected",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "GPT-4o (OpenRouter)",
-			provider:    "openrouter",
-			model:       "openai/gpt-4o",
-			description: "OpenAI via OpenRouter - Fallback routing",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Claude Opus 4 (OpenRouter)",
-			provider:    "openrouter",
-			model:       "anthropic/claude-opus-4",
-			description: "Claude via OpenRouter - Fallback routing",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Auto (OpenRouter)", "openrouter", "openrouter/auto", "Best available model - Auto-selected"},
+			modelOption{num + 1, "GPT-4o (OpenRouter)", "openrouter", "openai/gpt-4o", "OpenAI via OpenRouter - Fallback routing"},
+			modelOption{num + 2, "Claude Opus 4 (OpenRouter)", "openrouter", "anthropic/claude-opus-4", "Claude via OpenRouter - Fallback routing"},
+		)
+		num += 3
 	}
 
-	// Together AI models (if API key available)
 	if hasTogether {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Llama 3.1 405B (Together)",
-			provider:    "together",
-			model:       "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
-			description: "Largest open model - Powerful",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Qwen 2.5 72B (Together)",
-			provider:    "together",
-			model:       "Qwen/Qwen2.5-72B-Instruct-Turbo",
-			description: "Alibaba's model - Strong multilingual",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Llama 3.1 405B (Together)", "together", "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo", "Largest open model - Powerful"},
+			modelOption{num + 1, "Qwen 2.5 72B (Together)", "together", "Qwen/Qwen2.5-72B-Instruct-Turbo", "Alibaba's model - Strong multilingual"},
+		)
+		num += 2
 	}
 
-	// Perplexity models (if API key available)
 	if hasPerplexity {
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Perplexity Sonar",
-			provider:    "perplexity",
-			model:       "sonar",
-			description: "Real-time web search - Current info",
-		})
-		num++
-
-		options = append(options, modelOption{
-			number:      num,
-			name:        "Perplexity Sonar Pro",
-			provider:    "perplexity",
-			model:       "sonar-pro",
-			description: "Advanced search - Deep research",
-		})
-		num++
+		options = append(options,
+			modelOption{num, "Perplexity Sonar", "perplexity", "sonar", "Real-time web search - Current info"},
+			modelOption{num + 1, "Perplexity Sonar Pro", "perplexity", "sonar-pro", "Advanced search - Deep research"},
+		)
+		num += 2
 	}
 
 	// Ollama (local models - always available)
-	options = append(options, modelOption{
-		number:      num,
-		name:        "Llama 3.2 (Ollama)",
-		provider:    "ollama",
-		model:       "llama3.2",
-		description: "Local - Privacy & no API costs",
-	})
-	num++
-
-	options = append(options, modelOption{
-		number:      num,
-		name:        "Mistral (Ollama)",
-		provider:    "ollama",
-		model:       "mistral",
-		description: "Local - Fast inference",
-	})
-	num++
-
-	options = append(options, modelOption{
-		number:      num,
-		name:        "CodeLlama (Ollama)",
-		provider:    "ollama",
-		model:       "codellama",
-		description: "Local - Code generation",
-	})
+	options = append(options,
+		modelOption{num, "Llama 3.2 (Ollama)", "ollama", "llama3.2", "Local - Privacy & no API costs"},
+		modelOption{num + 1, "Mistral (Ollama)", "ollama", "mistral", "Local - Fast inference"},
+		modelOption{num + 2, "CodeLlama (Ollama)", "ollama", "codellama", "Local - Code generation"},
+	)
 
 	return options
 }
@@ -396,61 +153,51 @@ func (m *InteractiveChatModel) handleProviderSelection(key string) (InteractiveC
 		return *m, nil
 
 	case "enter", " ":
-		// Select provider and check if API key is needed
 		if m.selectedModelIndex >= 0 && m.selectedModelIndex < len(providers) {
 			selectedProvider := providers[m.selectedModelIndex]
 			m.selectedProvider = selectedProvider.id
 
-			// Check if API key is available
 			if !selectedProvider.hasAPIKey {
-				// Show API key prompt
 				m.showAPIKeyPrompt = true
 				m.apiKeyProvider = selectedProvider.id
 				m.showModelSelector = false
 
-				// Initialize API key input
 				apiKeyInput := textinput.New()
 				apiKeyInput.Placeholder = "Enter your API key..."
 				apiKeyInput.Focus()
 				apiKeyInput.CharLimit = 200
 				apiKeyInput.Width = 60
 				apiKeyInput.EchoMode = textinput.EchoPassword
-				apiKeyInput.EchoCharacter = '•'
+				apiKeyInput.EchoCharacter = '*'
 				m.apiKeyInput = apiKeyInput
 			} else {
-				// API key available, proceed to model selection
 				m.modelSelectionStep = 2
-				m.selectedModelIndex = 0 // Reset for model selection
+				m.selectedModelIndex = 0
 				m.modelOptions = m.buildModelOptionsForProvider(m.selectedProvider)
 			}
 		}
 		return *m, nil
 
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		// Quick number selection
 		number := int(key[0] - '0')
 		if number > 0 && number <= len(providers) {
 			selectedProvider := providers[number-1]
 			m.selectedProvider = selectedProvider.id
 
-			// Check if API key is available
 			if !selectedProvider.hasAPIKey {
-				// Show API key prompt
 				m.showAPIKeyPrompt = true
 				m.apiKeyProvider = selectedProvider.id
 				m.showModelSelector = false
 
-				// Initialize API key input
 				apiKeyInput := textinput.New()
 				apiKeyInput.Placeholder = "Enter your API key..."
 				apiKeyInput.Focus()
 				apiKeyInput.CharLimit = 200
 				apiKeyInput.Width = 60
 				apiKeyInput.EchoMode = textinput.EchoPassword
-				apiKeyInput.EchoCharacter = '•'
+				apiKeyInput.EchoCharacter = '*'
 				m.apiKeyInput = apiKeyInput
 			} else {
-				// API key available, proceed to model selection
 				m.modelSelectionStep = 2
 				m.selectedModelIndex = 0
 				m.modelOptions = m.buildModelOptionsForProvider(m.selectedProvider)
@@ -467,91 +214,50 @@ func (m *InteractiveChatModel) handleProviderSelection(key string) (InteractiveC
 	return *m, nil
 }
 
-// handleModelSelection handles model selection (step 2) with grid navigation
+// handleModelSelection handles model selection (step 2)
 func (m *InteractiveChatModel) handleModelSelection(key string) (InteractiveChatModel, tea.Cmd) {
-	numColumns := 3 // Match the column count in renderModelSelector
-
 	switch key {
 	case "up", "k":
-		// Move up one row (3 positions back)
-		newIndex := m.selectedModelIndex - numColumns
-		if newIndex >= 0 {
-			m.selectedModelIndex = newIndex
-		} else {
-			// Wrap to bottom row, same column
-			col := m.selectedModelIndex % numColumns
-			numRows := (len(m.modelOptions) + numColumns - 1) / numColumns
-			lastRowIndex := (numRows-1)*numColumns + col
-			if lastRowIndex < len(m.modelOptions) {
-				m.selectedModelIndex = lastRowIndex
-			}
+		if m.selectedModelIndex > 0 {
+			m.selectedModelIndex--
 		}
 		return *m, nil
 
 	case "down", "j":
-		// Move down one row (3 positions forward)
-		newIndex := m.selectedModelIndex + numColumns
-		if newIndex < len(m.modelOptions) {
-			m.selectedModelIndex = newIndex
-		} else {
-			// Wrap to top row, same column
-			m.selectedModelIndex = m.selectedModelIndex % numColumns
-		}
-		return *m, nil
-
-	case "left", "h":
-		// Move left one column
-		if m.selectedModelIndex > 0 {
-			m.selectedModelIndex--
-		} else {
-			// Wrap to last item
-			m.selectedModelIndex = len(m.modelOptions) - 1
-		}
-		return *m, nil
-
-	case "right", "l":
-		// Move right one column
 		if m.selectedModelIndex < len(m.modelOptions)-1 {
 			m.selectedModelIndex++
-		} else {
-			// Wrap to first item
-			m.selectedModelIndex = 0
 		}
 		return *m, nil
 
 	case "enter", " ":
-		// Select model and switch
 		if m.selectedModelIndex >= 0 && m.selectedModelIndex < len(m.modelOptions) {
 			opt := m.modelOptions[m.selectedModelIndex]
 			m.showModelSelector = false
 			if err := m.orch.SetProvider(opt.provider, opt.model); err != nil {
-				m.addMessage(colorError(fmt.Sprintf("✗ Failed to switch: %s", err.Error())))
+				m.addMessage(colorError(fmt.Sprintf("Failed to switch: %s", err.Error())))
 			} else {
 				m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
-				// Save config to persist the change
 				if err := m.orch.GetWorkspace().SaveConfig(); err != nil {
-					m.addMessage(colorWarn(fmt.Sprintf("⚠ Model switched but config save failed: %s", err.Error())))
+					m.addMessage(colorWarn(fmt.Sprintf("Model switched but config save failed: %s", err.Error())))
 				}
-				m.addMessage(colorSuccess(fmt.Sprintf("✓ Switched to %s - %s", opt.name, opt.description)))
+				m.addMessage(colorSuccess(fmt.Sprintf("Switched to %s - %s", opt.name, opt.description)))
 			}
 		}
 		return *m, nil
 
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		// Quick number selection
 		number := int(key[0] - '0')
 		for _, opt := range m.modelOptions {
 			if opt.number == number {
 				m.showModelSelector = false
 				if err := m.orch.SetProvider(opt.provider, opt.model); err != nil {
-					m.addMessage(colorError(fmt.Sprintf("✗ Failed to switch: %s", err.Error())))
+					m.addMessage(colorError(fmt.Sprintf("Failed to switch: %s", err.Error())))
 				} else {
 					m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
-					// Save config to persist the change
 					if err := m.orch.GetWorkspace().SaveConfig(); err != nil {
-						m.addMessage(colorWarn(fmt.Sprintf("⚠ Model switched but config save failed: %s", err.Error())))
+						m.addMessage(colorWarn(fmt.Sprintf("Model switched but config save failed: %s", err.Error())))
 					}
-					m.addMessage(colorSuccess(fmt.Sprintf("✓ Switched to %s - %s", opt.name, opt.description)))
+					m.addMessage(colorSuccess(fmt.Sprintf("Switched to %s - %s", opt.name, opt.description)))
 				}
 				return *m, nil
 			}
@@ -559,7 +265,6 @@ func (m *InteractiveChatModel) handleModelSelection(key string) (InteractiveChat
 		return *m, nil
 
 	case "esc", "q", "Q", "backspace":
-		// Go back to provider selection
 		m.modelSelectionStep = 1
 		m.selectedModelIndex = 0
 		m.selectedProvider = ""
@@ -588,8 +293,6 @@ type providerInfoStruct struct {
 
 // getAvailableProviders returns list of all supported providers
 func (m *InteractiveChatModel) getAvailableProviders() []providerInfoStruct {
-	// Return ALL providers - user should see all options
-	// We'll show which ones need API key configuration
 	return []providerInfoStruct{
 		{id: "openai", name: "OpenAI", description: "GPT-4o, GPT-4o-mini, GPT-4-Turbo", modelCount: 4, hasAPIKey: os.Getenv("OPENAI_API_KEY") != ""},
 		{id: "anthropic", name: "Anthropic", description: "Claude Opus, Sonnet, Haiku", modelCount: 3, hasAPIKey: os.Getenv("ANTHROPIC_API_KEY") != ""},
@@ -602,23 +305,21 @@ func (m *InteractiveChatModel) getAvailableProviders() []providerInfoStruct {
 		{id: "together", name: "Together AI", description: "Llama 3.1 405B, Qwen 2.5", modelCount: 2, hasAPIKey: os.Getenv("TOGETHER_API_KEY") != ""},
 		{id: "perplexity", name: "Perplexity", description: "Sonar - Real-time web search", modelCount: 2, hasAPIKey: os.Getenv("PERPLEXITY_API_KEY") != ""},
 		{id: "xai", name: "xAI (Grok)", description: "Grok 4.1, Grok 3, Vision - Real-time", modelCount: 7, hasAPIKey: os.Getenv("XAI_API_KEY") != ""},
-		{id: "ollama", name: "Ollama (Local)", description: "Run models locally - Private", modelCount: 3, hasAPIKey: true}, // Always available
+		{id: "ollama", name: "Ollama (Local)", description: "Run models locally - Private", modelCount: 3, hasAPIKey: true},
 	}
 }
 
 // buildModelOptionsForProvider builds model list for a specific provider
-// Uses dynamic discovery to fetch latest models from provider APIs
 func (m *InteractiveChatModel) buildModelOptionsForProvider(provider string) []modelOption {
 	options := []modelOption{}
 
-	// Try dynamic discovery first (to get latest models automatically)
+	// Try dynamic discovery first
 	if m.modelDiscovery != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		discoveredModels, err := m.modelDiscovery.DiscoverModels(ctx, provider)
 		if err == nil && len(discoveredModels) > 0 {
-			// Successfully discovered models dynamically
 			for i, modelInfo := range discoveredModels {
 				options = append(options, modelOption{
 					number:      i + 1,
@@ -630,7 +331,6 @@ func (m *InteractiveChatModel) buildModelOptionsForProvider(provider string) []m
 			}
 			return options
 		}
-		// If discovery failed, fall through to static list
 	}
 
 	// Fallback: Use static model list
@@ -650,307 +350,114 @@ func (m *InteractiveChatModel) buildModelOptionsForProvider(provider string) []m
 
 // renderProviderSelector renders the provider selection UI (step 1)
 func (m *InteractiveChatModel) renderProviderSelector() string {
-	var sb strings.Builder
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+	hl := lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
+	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+
 	providers := m.getAvailableProviders()
 
-	// Header with proper border
-	borderWidth := 58
-	titleText := " 🤖 Select LLM Provider (Step 1/2) "
-	titleLen := len(titleText)
-	remainingDashes := borderWidth - titleLen - 2
+	var sb strings.Builder
 
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Bold(true).
-		Render("  ╭─" + titleText + strings.Repeat("─", remainingDashes) + "╮"))
-	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Select Provider") + dim.Render("  step 1/2") + "\n\n")
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Provider list
 	for i, provider := range providers {
 		isSelected := (i == m.selectedModelIndex)
 
-		// Highlight selected provider
-		prefix := "  │ "
+		// Selection indicator
+		prefix := "    "
+		nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 		if isSelected {
-			prefix = "  │ " + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Background(lipgloss.Color("236")).
-				Render("►")
-		} else {
-			prefix = "  │  "
+			prefix = "  " + hl.Render("> ")
+			nameStyle = hl
 		}
 
-		nameStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
-			Bold(true)
-		if isSelected {
-			nameStyle = nameStyle.
-				Background(lipgloss.Color("236")).
-				Foreground(lipgloss.Color("208"))
-		}
-
-		// API key status indicator
-		var statusIndicator string
-		var statusStyle lipgloss.Style
+		// API key status
+		var status string
 		if provider.hasAPIKey {
-			statusIndicator = " ✓ Ready"
-			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82")) // Green
+			status = ok.Render(" ready")
 		} else {
-			statusIndicator = " ⚠ Needs API Key"
-			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
-		}
-		if isSelected {
-			statusStyle = statusStyle.Background(lipgloss.Color("236"))
+			status = warn.Render(" needs key")
 		}
 
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render(prefix) +
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")).
-				Bold(true).
-				Render(fmt.Sprintf("%d. ", i+1)) +
-			nameStyle.Render(provider.name) +
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				Render(fmt.Sprintf(" (%d models)", provider.modelCount)) +
-			statusStyle.Render(statusIndicator) + "\n")
-
-		descPrefix := "  │    "
-		if isSelected {
-			descPrefix = "  │     "
-		}
-
-		descStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Italic(true)
-		if isSelected {
-			descStyle = descStyle.
-				Background(lipgloss.Color("236")).
-				Foreground(lipgloss.Color("252"))
-		}
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render(descPrefix) +
-			descStyle.Render(provider.description) + "\n")
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │") + "\n")
+		sb.WriteString(prefix + dim.Render(fmt.Sprintf("%2d ", i+1)) + nameStyle.Render(provider.name) + status + "\n")
+		sb.WriteString("      " + dim.Render(provider.description) + "\n")
 	}
 
-	// Instructions
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("45")).
-			Bold(true).
-			Render("↑↓") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Navigate  •  ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
-			Bold(true).
-			Render("Enter/Space") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Select  •  ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true).
-			Render("Esc") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Cancel") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Add API key setup hint
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Italic(true).
-			Render("Tip: Set API keys with ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
-			Render("export OPENAI_API_KEY=\"sk-...\"") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Footer with proper border matching header
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  ╰" + strings.Repeat("─", borderWidth) + "╯"))
 	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("press ") + cmd.Render("up/down") + dim.Render(" to navigate, ") + cmd.Render("enter") + dim.Render(" to select, ") + cmd.Render("esc") + dim.Render(" to cancel") + "\n")
+	sb.WriteString("  " + dim.Render("tip: ") + cmd.Render("export OPENAI_API_KEY=\"sk-...\"") + "\n")
 
 	return sb.String()
 }
 
-// renderModelSelector renders the model selection UI (step 2) with compact multi-column layout
+// renderModelSelector renders the model selection UI (step 2)
 func (m *InteractiveChatModel) renderModelSelector() string {
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+	hl := lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
+	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+
+	providerName := strings.Title(m.selectedProvider)
+
 	var sb strings.Builder
 
-	// Header with proper border - wider for 3 columns
-	borderWidth := 110
-	providerName := strings.Title(m.selectedProvider)
-	titleText := fmt.Sprintf(" %s Models (Step 2/2) ", providerName)
-	titleLen := len(titleText)
-	remainingDashes := borderWidth - titleLen - 2
-
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Bold(true).
-		Render("  ╭─" + titleText + strings.Repeat("─", remainingDashes) + "╮"))
-	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render(providerName+" Models") + dim.Render("  step 2/2") + "\n\n")
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
+	// Scrolling window for models
+	total := len(m.modelOptions)
+	maxVisible := 10
+	start := 0
+	end := total
 
-	// Display models in 3 columns for compact view
-	numColumns := 3
-	columnWidth := 35 // Width per column
-
-	// Process models in rows of 3
-	for rowStart := 0; rowStart < len(m.modelOptions); rowStart += numColumns {
-		rowEnd := rowStart + numColumns
-		if rowEnd > len(m.modelOptions) {
-			rowEnd = len(m.modelOptions)
+	if total > maxVisible {
+		start = m.selectedModelIndex - maxVisible/2
+		if start < 0 {
+			start = 0
 		}
-
-		// Build the row with up to 3 columns
-		var columns []string
-		for col := rowStart; col < rowEnd; col++ {
-			opt := m.modelOptions[col]
-			isCurrent := (m.currentProvider == opt.provider && strings.Contains(m.currentModel, opt.model))
-			isSelected := (col == m.selectedModelIndex)
-
-			var cellContent strings.Builder
-
-			// Selection indicator
-			if isSelected {
-				cellContent.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Background(lipgloss.Color("236")).
-					Render("►"))
-			} else {
-				cellContent.WriteString(" ")
-			}
-
-			// Number and name
-			numStr := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")).
-				Bold(true).
-				Render(fmt.Sprintf("%2d.", opt.number))
-
-			nameStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("220")).
-				Bold(true)
-			if isSelected {
-				nameStyle = nameStyle.
-					Background(lipgloss.Color("236")).
-					Foreground(lipgloss.Color("208"))
-			}
-
-			// Truncate name if too long
-			displayName := opt.name
-			maxNameLen := 25
-			if len(displayName) > maxNameLen {
-				displayName = displayName[:maxNameLen-3] + "..."
-			}
-
-			marker := ""
-			if isCurrent {
-				marker = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("82")).
-					Render("✓")
-			}
-
-			cellContent.WriteString(numStr)
-			cellContent.WriteString(" ")
-
-			if isSelected {
-				cellContent.WriteString(lipgloss.NewStyle().
-					Background(lipgloss.Color("236")).
-					Width(columnWidth - 5).
-					Render(nameStyle.Render(displayName) + marker))
-			} else {
-				cellContent.WriteString(nameStyle.Render(displayName) + marker)
-			}
-
-			// Pad to column width
-			cell := cellContent.String()
-			// Remove ANSI codes for width calculation
-			plainLen := len(stripAnsi(cell))
-			if plainLen < columnWidth {
-				cell += strings.Repeat(" ", columnWidth-plainLen)
-			}
-
-			columns = append(columns, cell)
+		end = start + maxVisible
+		if end > total {
+			end = total
+			start = end - maxVisible
 		}
-
-		// Render the row
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │ "))
-		sb.WriteString(strings.Join(columns, " "))
-		sb.WriteString("\n")
 	}
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
+	if start > 0 {
+		sb.WriteString("    " + dim.Render(fmt.Sprintf("... %d above", start)) + "\n")
+	}
 
-	// Instructions
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("45")).
-			Bold(true).
-			Render("↑↓←→") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Navigate  •  ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
-			Bold(true).
-			Render("Enter/Space") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Select  •  ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true).
-			Render("Esc") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Back") + "\n")
+	for i := start; i < end; i++ {
+		opt := m.modelOptions[i]
+		isSelected := (i == m.selectedModelIndex)
+		isCurrent := (m.currentProvider == opt.provider && strings.Contains(m.currentModel, opt.model))
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
+		prefix := "    "
+		nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+		if isSelected {
+			prefix = "  " + hl.Render("> ")
+			nameStyle = hl
+		}
 
-	// Footer with proper border matching header
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  ╰" + strings.Repeat("─", borderWidth) + "╯"))
+		marker := ""
+		if isCurrent {
+			marker = ok.Render(" current")
+		}
+
+		sb.WriteString(prefix + dim.Render(fmt.Sprintf("%2d ", opt.number)) + nameStyle.Render(opt.name) + marker + "\n")
+		sb.WriteString("      " + dim.Render(opt.description) + "\n")
+	}
+
+	if end < total {
+		sb.WriteString("    " + dim.Render(fmt.Sprintf("... %d below", total-end)) + "\n")
+	}
+
 	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("press ") + cmd.Render("up/down") + dim.Render(" to navigate, ") + cmd.Render("enter") + dim.Render(" to select, ") + cmd.Render("esc") + dim.Render(" to go back") + "\n")
 
 	return sb.String()
 }

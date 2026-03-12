@@ -19,13 +19,13 @@ func (m *InteractiveChatModel) handleAPIKeyInput(msg tea.KeyMsg) (InteractiveCha
 		// Save API key and proceed
 		apiKey := m.apiKeyInput.Value()
 		if apiKey == "" {
-			m.addMessage(colorError("✗ API key cannot be empty"))
+			m.addMessage(colorError("API key cannot be empty"))
 			return *m, nil
 		}
 
 		// Save to workspace config
 		if err := m.saveAPIKey(m.apiKeyProvider, apiKey); err != nil {
-			m.addMessage(colorError(fmt.Sprintf("✗ Failed to save API key: %s", err.Error())))
+			m.addMessage(colorError(fmt.Sprintf("Failed to save API key: %s", err.Error())))
 			m.showAPIKeyPrompt = false
 			return *m, nil
 		}
@@ -35,7 +35,7 @@ func (m *InteractiveChatModel) handleAPIKeyInput(msg tea.KeyMsg) (InteractiveCha
 
 		// Show success message
 		providerName := strings.Title(m.apiKeyProvider)
-		m.addMessage(colorSuccess(fmt.Sprintf("✓ API key saved for %s", providerName)))
+		m.addMessage(colorSuccess(fmt.Sprintf("API key saved for %s", providerName)))
 
 		// Proceed to model selection
 		m.showModelSelector = true
@@ -48,7 +48,7 @@ func (m *InteractiveChatModel) handleAPIKeyInput(msg tea.KeyMsg) (InteractiveCha
 	case "esc":
 		// Cancel API key input
 		m.showAPIKeyPrompt = false
-		m.showModelSelector = true  // Go back to provider selection
+		m.showModelSelector = true // Go back to provider selection
 		m.modelSelectionStep = 1
 		m.selectedModelIndex = 0
 		m.addMessage(colorMuted("API key entry cancelled"))
@@ -85,103 +85,26 @@ func (m *InteractiveChatModel) saveAPIKey(provider string, apiKey string) error 
 
 // renderAPIKeyPrompt renders the API key input prompt
 func (m *InteractiveChatModel) renderAPIKeyPrompt() string {
-	var sb strings.Builder
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
 
-	// Get provider name
 	providerName := strings.Title(m.apiKeyProvider)
 	envVarName := strings.ToUpper(m.apiKeyProvider) + "_API_KEY"
 
-	// Header
-	borderWidth := 70
-	titleText := fmt.Sprintf(" 🔑 Enter API Key for %s ", providerName)
-	titleLen := len(titleText)
-	remainingDashes := borderWidth - titleLen - 2
+	var sb strings.Builder
 
-	sb.WriteString("\n\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Bold(true).
-		Render("  ╭─" + titleText + strings.Repeat("─", remainingDashes) + "╮"))
 	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("API Key") + dim.Render(" - "+providerName) + "\n\n")
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
+	sb.WriteString("  " + dim.Render("This provider requires an API key. Your key will be") + "\n")
+	sb.WriteString("  " + dim.Render("saved to your workspace config for future sessions.") + "\n\n")
 
-	// Info message
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(fmt.Sprintf("This provider requires an API key to use. Your key will be")) + "\n")
+	sb.WriteString("  " + dim.Render("Environment variable: ") + cmd.Render(envVarName) + "\n\n")
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render("saved to your workspace config for future sessions.") + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true).Render("API Key: ") + m.apiKeyInput.View() + "\n\n")
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Environment variable hint
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Italic(true).
-			Render(fmt.Sprintf("Environment variable: %s", envVarName)) + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Input field
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
-			Bold(true).
-			Render("API Key: ") +
-		m.apiKeyInput.View() + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Instructions
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │ ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
-			Bold(true).
-			Render("Enter") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Save & Continue  •  ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true).
-			Render("Esc") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Render(" Cancel") + "\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  │") + "\n")
-
-	// Footer
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Render("  ╰" + strings.Repeat("─", borderWidth) + "╯"))
-	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("press ") + cmd.Render("enter") + dim.Render(" to save, ") + cmd.Render("esc") + dim.Render(" to cancel") + "\n")
 
 	return sb.String()
 }

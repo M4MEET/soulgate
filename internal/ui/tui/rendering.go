@@ -7,185 +7,169 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Static rendering functions (non-method functions)
-// These functions render various UI components
-
-// renderHeader renders the SoulGate header with gradient effect
+// renderHeader renders a clean, minimal header
 func renderHeader() string {
-	// Gradient text effect for "SoulGate"
-	soul := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")). // Orange
+	name := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
 		Bold(true).
-		Render("Soul")
-
-	gate := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")). // Lighter orange
-		Bold(true).
-		Render("Gate")
+		Render("SoulGate")
 
 	tagline := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")). // Gray
-		Italic(true).
-		Render("Your AI Guardian")
+		Foreground(lipgloss.Color("242")).
+		Render("secure AI gateway")
 
-	// Build header with gradient
-	header := fmt.Sprintf("  🐙  %s%s  -  %s", soul, gate, tagline)
-
-	// Center it
-	headerStyle := lipgloss.NewStyle().
-		Align(lipgloss.Center).
-		Width(60)
-
-	return headerStyle.Render(header)
+	return fmt.Sprintf("  %s  %s", name, tagline)
 }
 
-// renderHelp renders the help screen with commands and shortcuts
+// renderHelp renders the help screen
 func renderHelp() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ Help ─────────────────────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Commands:") + "\n")
-	sb.WriteString(colorAccent("│") + "   /status              Show status\n")
-	sb.WriteString(colorAccent("│") + "   /tools               List tools\n")
-	sb.WriteString(colorAccent("│") + "   /skills              List skills\n")
-	sb.WriteString(colorAccent("│") + "   /memory              Show memory entries\n")
-	sb.WriteString(colorAccent("│") + "   /model [provider]    Show/switch AI model\n")
-	sb.WriteString(colorAccent("│") + "   /history             Show history\n")
-	sb.WriteString(colorAccent("│") + "   /clear               Clear screen\n")
-	sb.WriteString(colorAccent("│") + "   /hub                 Browse community hub\n")
-	sb.WriteString(colorAccent("│") + "   /setup               Integration wizard\n")
-	sb.WriteString(colorAccent("│") + "   /onboarding          Run onboarding\n")
-	sb.WriteString(colorAccent("│") + "   /help                Show this help\n")
-	sb.WriteString(colorAccent("│") + "   /exit                Exit\n")
-	sb.WriteString(colorAccent("│") + "   !command             Execute shell command\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Examples:") + "\n")
-	sb.WriteString(colorAccent("│") + "   /model               List all models\n")
-	sb.WriteString(colorAccent("│") + "   /model openai        Switch to OpenAI\n")
-	sb.WriteString(colorAccent("│") + "   /model anthropic     Switch to Claude\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Navigation:") + "\n")
-	sb.WriteString(colorAccent("│") + "   ↑↓         Navigate command history\n")
-	sb.WriteString(colorAccent("│") + "   ←→         Move cursor in input\n")
-	sb.WriteString(colorAccent("│") + "   Home/End   Jump to start/end of line\n")
-	sb.WriteString(colorAccent("│") + "   PgUp/PgDn  Scroll output\n")
-	sb.WriteString(colorAccent("│") + "   Tab        Autocomplete command\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Shortcuts:") + "\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+A/E   Jump to start/end\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+U     Clear line\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+K     Delete to end\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+W     Delete word\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+H     Show this help\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+L     Clear screen\n")
-	sb.WriteString(colorAccent("│") + "   Ctrl+C/D   Exit\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Bold(true)
+
+	dim := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	cmd := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Commands") + "\n\n")
+	sb.WriteString("  " + cmd.Render("/status") + dim.Render("              Show status") + "\n")
+	sb.WriteString("  " + cmd.Render("/tools") + dim.Render("               List tools") + "\n")
+	sb.WriteString("  " + cmd.Render("/skills") + dim.Render("              List skills") + "\n")
+	sb.WriteString("  " + cmd.Render("/memory") + dim.Render("              Show memory entries") + "\n")
+	sb.WriteString("  " + cmd.Render("/model") + dim.Render(" [provider]    Show/switch AI model") + "\n")
+	sb.WriteString("  " + cmd.Render("/soul") + dim.Render("                AI persona config") + "\n")
+	sb.WriteString("  " + cmd.Render("/schedule") + dim.Render("            Scheduled tasks") + "\n")
+	sb.WriteString("  " + cmd.Render("/hub") + dim.Render("                 Community hub") + "\n")
+	sb.WriteString("  " + cmd.Render("/setup") + dim.Render("               Integration wizard") + "\n")
+	sb.WriteString("  " + cmd.Render("/onboarding") + dim.Render("          Run onboarding") + "\n")
+	sb.WriteString("  " + cmd.Render("/history") + dim.Render("             Command history") + "\n")
+	sb.WriteString("  " + cmd.Render("/debug") + dim.Render("               Debug info") + "\n")
+	sb.WriteString("  " + cmd.Render("/clear") + dim.Render("               Clear screen") + "\n")
+	sb.WriteString("  " + cmd.Render("/exit") + dim.Render("                Exit") + "\n")
+	sb.WriteString("  " + cmd.Render("!command") + dim.Render("             Execute shell command") + "\n")
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Shortcuts") + "\n\n")
+	sb.WriteString("  " + cmd.Render("Tab") + dim.Render("       Autocomplete    ") + cmd.Render("Ctrl+H") + dim.Render("  Help") + "\n")
+	sb.WriteString("  " + cmd.Render("Up/Down") + dim.Render("   History         ") + cmd.Render("Ctrl+L") + dim.Render("  Clear") + "\n")
+	sb.WriteString("  " + cmd.Render("PgUp/Dn") + dim.Render("   Scroll          ") + cmd.Render("Ctrl+C") + dim.Render("  Exit") + "\n")
+
 	return sb.String()
 }
 
 // renderToolsList renders the list of available tools
 func renderToolsList() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ Available Tools ──────────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " Core Tools (9):\n")
-	sb.WriteString(colorAccent("│") + "   • files_read, files_write, files_list\n")
-	sb.WriteString(colorAccent("│") + "   • exec_command, net_request\n")
-	sb.WriteString(colorAccent("│") + "   • memory_write, memory_search, memory_get\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " Integration Tools: " + colorMuted("46 tools") + "\n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Bold(true)
+
+	dim := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	tool := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Available Tools") + "\n\n")
+	sb.WriteString("  " + dim.Render("Files") + "     " + tool.Render("files_read") + dim.Render(", ") + tool.Render("files_write") + dim.Render(", ") + tool.Render("files_list") + "\n")
+	sb.WriteString("  " + dim.Render("System") + "    " + tool.Render("exec_command") + dim.Render(", ") + tool.Render("net_request") + "\n")
+	sb.WriteString("  " + dim.Render("Memory") + "    " + tool.Render("memory_write") + dim.Render(", ") + tool.Render("memory_get") + dim.Render(", ") + tool.Render("memory_search") + "\n")
+	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("+ 46 integration tools") + "\n")
+
 	return sb.String()
 }
 
 // renderHubOverview renders the SoulHub marketplace overview
 func renderHubOverview() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ 🐙 SoulHub - Community Marketplace ───────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Categories:") + "\n")
-	sb.WriteString(colorAccent("│") + "   🔌 Plugins       - WASM extensions\n")
-	sb.WriteString(colorAccent("│") + "   ⚡ Skills        - Automation workflows\n")
-	sb.WriteString(colorAccent("│") + "   🔗 Integrations - Ready-to-use services\n")
-	sb.WriteString(colorAccent("│") + "   📦 Recipes       - Complete solutions\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Browse:") + "\n")
-	sb.WriteString(colorAccent("│") + "   /hub plugins     - View all plugins\n")
-	sb.WriteString(colorAccent("│") + "   /hub skills      - View all skills\n")
-	sb.WriteString(colorAccent("│") + "   /hub installed   - Show installed items\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Install:") + "\n")
-	sb.WriteString(colorAccent("│") + "   /hub install <name>\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorMuted("Or use CLI: soulgate hub") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Bold(true)
+
+	dim := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	cmd := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("SoulHub") + dim.Render(" - Community Marketplace") + "\n\n")
+	sb.WriteString("  " + cmd.Render("/hub plugins") + dim.Render("     Browse plugins") + "\n")
+	sb.WriteString("  " + cmd.Render("/hub skills") + dim.Render("      Browse skills") + "\n")
+	sb.WriteString("  " + cmd.Render("/hub installed") + dim.Render("   Show installed") + "\n")
+	sb.WriteString("  " + cmd.Render("/hub install") + dim.Render(" <name>") + "\n")
+
 	return sb.String()
 }
 
 // renderHubPlugins renders the list of featured Hub plugins
 func renderHubPlugins() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ 🔌 Hub Plugins ───────────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Featured Plugins:") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + "   1. ⭐⭐⭐⭐⭐ " + colorSuccess("awesome-github") + "\n")
-	sb.WriteString(colorAccent("│") + "      Advanced GitHub integration\n")
-	sb.WriteString(colorAccent("│") + "      1.2k downloads\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + "   2. ⭐⭐⭐⭐⭐ " + colorInfo("notion-sync") + "\n")
-	sb.WriteString(colorAccent("│") + "      Sync notes to Notion\n")
-	sb.WriteString(colorAccent("│") + "      890 downloads\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + "   3. ⭐⭐⭐⭐ " + colorInfo("whatsapp-bot") + "\n")
-	sb.WriteString(colorAccent("│") + "      WhatsApp automation\n")
-	sb.WriteString(colorAccent("│") + "      567 downloads\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorMuted("For full list: soulgate hub plugins") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Bold(true)
+
+	dim := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	name := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Featured Plugins") + "\n\n")
+	sb.WriteString("  " + name.Render("awesome-github") + dim.Render("    Advanced GitHub integration     1.2k downloads") + "\n")
+	sb.WriteString("  " + name.Render("notion-sync") + dim.Render("       Sync notes to Notion          890 downloads") + "\n")
+	sb.WriteString("  " + name.Render("whatsapp-bot") + dim.Render("      WhatsApp automation            567 downloads") + "\n")
+	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("Full list: soulgate hub plugins") + "\n")
+
 	return sb.String()
 }
 
 // renderHubSkills renders the list of popular Hub skills
 func renderHubSkills() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ ⚡ Hub Skills ─────────────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Popular Skills:") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + "   1. ⭐⭐⭐⭐⭐ " + colorSuccess("auto-commit") + "\n")
-	sb.WriteString(colorAccent("│") + "      Auto-commit and push changes\n")
-	sb.WriteString(colorAccent("│") + "      2.3k downloads\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + "   2. ⭐⭐⭐⭐⭐ " + colorInfo("daily-standup") + "\n")
-	sb.WriteString(colorAccent("│") + "      Automated standup reports\n")
-	sb.WriteString(colorAccent("│") + "      1.5k downloads\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + "   3. ⭐⭐⭐⭐ " + colorInfo("code-review") + "\n")
-	sb.WriteString(colorAccent("│") + "      AI code review automation\n")
-	sb.WriteString(colorAccent("│") + "      890 downloads\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorMuted("For full list: soulgate hub skills") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Bold(true)
+
+	dim := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	name := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + title.Render("Popular Skills") + "\n\n")
+	sb.WriteString("  " + name.Render("auto-commit") + dim.Render("       Auto-commit and push          2.3k downloads") + "\n")
+	sb.WriteString("  " + name.Render("daily-standup") + dim.Render("     Automated standup reports      1.5k downloads") + "\n")
+	sb.WriteString("  " + name.Render("code-review") + dim.Render("       AI code review                 890 downloads") + "\n")
+	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("Full list: soulgate hub skills") + "\n")
+
 	return sb.String()
 }
 
 // renderHubInstalled renders the list of installed Hub items
 func renderHubInstalled() string {
 	var sb strings.Builder
-	sb.WriteString(colorAccentBright("╭─ 📦 Installed Items ───────────────────────────────╮\n"))
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorMuted("No items installed yet.") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorBold("Get Started:") + "\n")
-	sb.WriteString(colorAccent("│") + "   /hub plugins     - Browse plugins\n")
-	sb.WriteString(colorAccent("│") + "   /hub install <name>\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccent("│") + " " + colorMuted("Or: soulgate hub install <name>") + "\n")
-	sb.WriteString(colorAccent("│") + " \n")
-	sb.WriteString(colorAccentBright("╰────────────────────────────────────────────────────╯"))
+
+	dim := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	sb.WriteString("\n")
+	sb.WriteString("  " + dim.Render("No items installed yet.") + "\n\n")
+	sb.WriteString("  " + dim.Render("Browse with /hub plugins or /hub skills") + "\n")
+
 	return sb.String()
 }

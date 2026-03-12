@@ -26,7 +26,7 @@ func (m *InteractiveChatModel) handleSetupWizardInput(key string) (InteractiveCh
 				m.setupIntegrationID = integrations[number-1].ID
 				m.setupStep = 1
 				m.setupCurrentField = 0
-				m.addMessage(colorSuccess(fmt.Sprintf("Selected: %s %s", integrations[number-1].Icon, integrations[number-1].Name)))
+				m.addMessage(colorSuccess(fmt.Sprintf("Selected: %s", integrations[number-1].Name)))
 			}
 			return *m, nil
 
@@ -37,8 +37,6 @@ func (m *InteractiveChatModel) handleSetupWizardInput(key string) (InteractiveCh
 		}
 
 	case 1: // Field input (handled by text input)
-		// Let the normal input handler capture the value
-		// When user presses Enter, it will be processed in handleCommand
 		return *m, nil
 	}
 
@@ -50,34 +48,18 @@ func (m *InteractiveChatModel) renderSetupWizard() string {
 	wizard := setup.NewWizard(m.orch.GetWorkspace())
 	integrations := wizard.GetAvailableIntegrations()
 
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cmd := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+	name := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	cat := lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
+
 	var sb strings.Builder
 
 	if m.setupStep == 0 {
 		// Step 1: Select integration
 		sb.WriteString("\n")
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Bold(true).
-			Render("  ╭─ 🔧 Setup Wizard - Select Integration "))
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render(strings.Repeat("─", 16)))
-		sb.WriteString("\n")
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │") + "\n")
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │ ") +
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				Render("Configure integrations with ease!") + "\n")
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │") + "\n")
+		sb.WriteString("  " + title.Render("Setup Wizard") + dim.Render(" - Select Integration") + "\n\n")
 
 		// Group by category
 		categories := make(map[string][]setup.IntegrationSetup)
@@ -88,66 +70,18 @@ func (m *InteractiveChatModel) renderSetupWizard() string {
 		num := 1
 		for _, category := range []string{"Communication", "Development", "Productivity", "Project Management", "Cloud"} {
 			if integrationsInCat, ok := categories[category]; ok && len(integrationsInCat) > 0 {
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("45")).
-						Bold(true).
-						Render(category+":") + "\n")
+				sb.WriteString("  " + cat.Render(category) + "\n")
 
 				for _, integ := range integrationsInCat {
-					sb.WriteString(lipgloss.NewStyle().
-						Foreground(lipgloss.Color("208")).
-						Render("  │ ") +
-						lipgloss.NewStyle().
-							Foreground(lipgloss.Color("214")).
-							Bold(true).
-							Render(fmt.Sprintf(" %d. ", num)) +
-						lipgloss.NewStyle().
-							Foreground(lipgloss.Color("220")).
-							Render(integ.Icon+" "+integ.Name) + "\n")
-
-					sb.WriteString(lipgloss.NewStyle().
-						Foreground(lipgloss.Color("208")).
-						Render("  │    ") +
-						lipgloss.NewStyle().
-							Foreground(lipgloss.Color("244")).
-							Italic(true).
-							Render(integ.Description) + "\n")
-
+					sb.WriteString("  " + dim.Render(fmt.Sprintf("  %d ", num)) + name.Render(integ.Name) + "\n")
+					sb.WriteString("  " + dim.Render("    "+integ.Description) + "\n")
 					num++
 				}
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │") + "\n")
+				sb.WriteString("\n")
 			}
 		}
 
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │ ") +
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				Render("Type a number to select, or ") +
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196")).
-				Render("Esc") +
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				Render(" to cancel") + "\n")
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  │") + "\n")
-
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render("  ╰"))
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
-			Render(strings.Repeat("─", 54)))
-		sb.WriteString("\n")
+		sb.WriteString("  " + dim.Render("press ") + cmd.Render("1-"+fmt.Sprintf("%d", num-1)) + dim.Render(" to select, ") + cmd.Render("esc") + dim.Render(" to cancel") + "\n")
 
 	} else if m.setupStep == 1 {
 		// Step 2: Enter field values
@@ -161,98 +95,30 @@ func (m *InteractiveChatModel) renderSetupWizard() string {
 
 		if selectedIntegration != nil {
 			sb.WriteString("\n")
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Bold(true).
-				Render(fmt.Sprintf("  ╭─ 🔧 Setup: %s %s ", selectedIntegration.Icon, selectedIntegration.Name)))
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Render(strings.Repeat("─", 20))+ "\n")
-
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Render("  │") + "\n")
+			sb.WriteString("  " + title.Render("Setup") + dim.Render(" - "+selectedIntegration.Name) + "\n\n")
 
 			// Show current field
 			if m.setupCurrentField < len(selectedIntegration.Fields) {
 				field := selectedIntegration.Fields[m.setupCurrentField]
 
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("220")).
-						Bold(true).
-						Render(field.Label) +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("196")).
-						Render(func() string {
-							if field.Required {
-								return " *"
-							}
-							return ""
-						}()) + "\n")
+				req := ""
+				if field.Required {
+					req = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(" *")
+				}
 
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("244")).
-						Italic(true).
-						Render(field.Description) + "\n")
-
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │") + "\n")
-
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("244")).
-						Render("Type your value and press Enter") + "\n")
+				sb.WriteString("  " + name.Render(field.Label) + req + "\n")
+				sb.WriteString("  " + dim.Render(field.Description) + "\n\n")
+				sb.WriteString("  " + dim.Render("Type your value and press Enter") + "\n")
 
 				if field.Default != "" {
-					sb.WriteString(lipgloss.NewStyle().
-						Foreground(lipgloss.Color("208")).
-						Render("  │ ") +
-						lipgloss.NewStyle().
-							Foreground(lipgloss.Color("244")).
-							Render(fmt.Sprintf("(Default: %s)", field.Default)) + "\n")
+					sb.WriteString("  " + dim.Render(fmt.Sprintf("(Default: %s)", field.Default)) + "\n")
 				}
 			} else {
-				// All fields collected - show summary
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("82")).
-						Bold(true).
-						Render("✓ All fields collected!") + "\n")
-
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │") + "\n")
-
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Render("  │ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("244")).
-						Render("Testing connection...") + "\n")
+				// All fields collected
+				ok := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+				sb.WriteString("  " + ok.Render("ok") + dim.Render("  All fields collected") + "\n\n")
+				sb.WriteString("  " + dim.Render("Testing connection...") + "\n")
 			}
-
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Render("  │") + "\n")
-
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Render("  ╰"))
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("208")).
-				Render(strings.Repeat("─", 54)))
-			sb.WriteString("\n")
 		}
 	}
 

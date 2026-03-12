@@ -18,15 +18,12 @@ func (m *InteractiveChatModel) addMessage(text string) {
 func (m *InteractiveChatModel) updateAutocomplete() {
 	value := m.input.Value()
 	if strings.HasPrefix(value, "/") {
-		// Command autocomplete
 		commands := []string{"/status", "/tools", "/skills", "/memory", "/soul", "/schedule", "/history", "/clear", "/help", "/model", "/debug", "/hub", "/setup", "/onboarding", "/exit", "/quit"}
 		newAutocomplete := filterStrings(commands, value)
 
-		// Only show if there are suggestions and not exact match
 		wasShowing := m.showAutocomplete
 		m.showAutocomplete = len(newAutocomplete) > 0 && value != newAutocomplete[0]
 
-		// Reset index if suggestions changed
 		if !wasShowing && m.showAutocomplete {
 			m.autocompleteIndex = 0
 		}
@@ -53,125 +50,69 @@ func filterStrings(items []string, prefix string) []string {
 // isSensitiveCommand checks if a command is potentially dangerous
 func isSensitiveCommand(cmd string) bool {
 	cmdLower := strings.ToLower(strings.TrimSpace(cmd))
-	cmdLower = strings.TrimPrefix(cmdLower, "!") // Remove ! prefix for shell commands
+	cmdLower = strings.TrimPrefix(cmdLower, "!")
 
-	// Dangerous deletion patterns
-	deletionPatterns := []string{
-		"rm -rf",
-		"rm -r",
-		"rm ",
-		"sudo rm",
-		"delete",
-		"files_delete",
-		"rmdir",
-		"unlink",
+	patterns := []string{
+		"rm -rf", "rm -r", "rm ", "sudo rm", "delete", "files_delete", "rmdir", "unlink",
+		"sudo ", "su ", "doas ",
+		"mkfs", "dd if=", "format", "fdisk", "parted",
+		"shutdown", "reboot", "halt", "poweroff",
+		"systemctl stop", "systemctl disable",
+		"kill -9", "pkill", "killall",
+		"chmod 777", "chmod -r 777", "chown",
+		"curl | sh", "wget | sh", "curl | bash", "wget | bash",
 	}
 
-	// Privilege escalation
-	privilegePatterns := []string{
-		"sudo ",
-		"su ",
-		"doas ",
-	}
-
-	// System modification
-	systemPatterns := []string{
-		"mkfs",
-		"dd if=",
-		"format",
-		"fdisk",
-		"parted",
-		"shutdown",
-		"reboot",
-		"halt",
-		"poweroff",
-		"systemctl stop",
-		"systemctl disable",
-		"kill -9",
-		"pkill",
-		"killall",
-	}
-
-	// Network/security sensitive
-	networkPatterns := []string{
-		"chmod 777",
-		"chmod -r 777",
-		"chown",
-		"curl | sh",
-		"wget | sh",
-		"curl | bash",
-		"wget | bash",
-	}
-
-	allPatterns := append(deletionPatterns, privilegePatterns...)
-	allPatterns = append(allPatterns, systemPatterns...)
-	allPatterns = append(allPatterns, networkPatterns...)
-
-	for _, pattern := range allPatterns {
+	for _, pattern := range patterns {
 		if strings.Contains(cmdLower, pattern) {
 			return true
 		}
 	}
-
 	return false
 }
 
 // getSensitiveMessage returns a warning message for sensitive commands
 func getSensitiveMessage(cmd string) string {
 	cmdLower := strings.ToLower(cmd)
-
-	// Check for different types of dangerous operations
-	if strings.Contains(cmdLower, "rm -rf") {
-		return "⚠️  DANGER: Recursive force delete - files CANNOT be recovered!"
+	switch {
+	case strings.Contains(cmdLower, "rm -rf"):
+		return "Recursive force delete - files CANNOT be recovered!"
+	case strings.Contains(cmdLower, "rm -r") || strings.Contains(cmdLower, "rmdir"):
+		return "This will delete directories and their contents."
+	case strings.Contains(cmdLower, "rm ") || strings.Contains(cmdLower, "delete"):
+		return "This command will DELETE files permanently."
+	case strings.Contains(cmdLower, "sudo") || strings.Contains(cmdLower, "su "):
+		return "This command requires ELEVATED PRIVILEGES."
+	case strings.Contains(cmdLower, "shutdown") || strings.Contains(cmdLower, "reboot") ||
+		strings.Contains(cmdLower, "halt") || strings.Contains(cmdLower, "poweroff"):
+		return "This will SHUTDOWN or REBOOT your system."
+	case strings.Contains(cmdLower, "kill") || strings.Contains(cmdLower, "pkill"):
+		return "This will TERMINATE running processes."
+	case strings.Contains(cmdLower, "mkfs") || strings.Contains(cmdLower, "format") ||
+		strings.Contains(cmdLower, "fdisk") || strings.Contains(cmdLower, "dd if="):
+		return "This can DESTROY entire disk partitions!"
+	case strings.Contains(cmdLower, "chmod 777"):
+		return "This makes files world-writable!"
+	case strings.Contains(cmdLower, "curl | sh") || strings.Contains(cmdLower, "wget | bash"):
+		return "Executing remote scripts without review!"
+	default:
+		return "This is a potentially dangerous operation."
 	}
-	if strings.Contains(cmdLower, "rm -r") || strings.Contains(cmdLower, "rmdir") {
-		return "⚠️  WARNING: This will delete directories and their contents."
-	}
-	if strings.Contains(cmdLower, "rm ") || strings.Contains(cmdLower, "delete") {
-		return "⚠️  This command will DELETE files permanently."
-	}
-	if strings.Contains(cmdLower, "sudo") || strings.Contains(cmdLower, "su ") {
-		return "⚠️  This command requires ELEVATED PRIVILEGES."
-	}
-	if strings.Contains(cmdLower, "shutdown") || strings.Contains(cmdLower, "reboot") ||
-	   strings.Contains(cmdLower, "halt") || strings.Contains(cmdLower, "poweroff") {
-		return "⚠️  This will SHUTDOWN or REBOOT your system."
-	}
-	if strings.Contains(cmdLower, "kill") || strings.Contains(cmdLower, "pkill") {
-		return "⚠️  This will TERMINATE running processes."
-	}
-	if strings.Contains(cmdLower, "mkfs") || strings.Contains(cmdLower, "format") ||
-	   strings.Contains(cmdLower, "fdisk") || strings.Contains(cmdLower, "dd if=") {
-		return "⚠️  EXTREME DANGER: This can DESTROY entire disk partitions!"
-	}
-	if strings.Contains(cmdLower, "chmod 777") {
-		return "⚠️  SECURITY RISK: This makes files world-writable!"
-	}
-	if strings.Contains(cmdLower, "curl | sh") || strings.Contains(cmdLower, "wget | bash") {
-		return "⚠️  SECURITY RISK: Executing remote scripts without review!"
-	}
-
-	return "⚠️  This is a potentially dangerous operation."
 }
 
-// formatAIResponse formats AI response with elegant styling
+// formatAIResponse formats AI response with clean, minimal styling
 func formatAIResponse(text string) string {
 	if text == "" {
-		return colorMuted("(empty response)")
+		return colorMuted("  (empty response)")
 	}
 
 	var sb strings.Builder
 
-	// Header with gradient effect
-	sb.WriteString(colorAccent("╭─ 🐙 "))
+	// Clean label
 	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("208")).
-		Bold(true).
-		Render("AI Response"))
-	sb.WriteString(colorAccent(" "))
-	sb.WriteString(colorAccent(strings.Repeat("─", 30)))
+		Foreground(lipgloss.Color("246")).
+		Render("  assistant"))
 	sb.WriteString("\n")
-	sb.WriteString(colorAccent("│") + "\n")
 
 	// Process text for code blocks and formatting
 	lines := strings.Split(text, "\n")
@@ -179,165 +120,124 @@ func formatAIResponse(text string) string {
 	codeLanguage := ""
 
 	for _, line := range lines {
-		// Detect code blocks
 		if strings.HasPrefix(line, "```") {
 			inCodeBlock = !inCodeBlock
 			if inCodeBlock {
-				// Extract language
-				codeLanguage = strings.TrimPrefix(line, "```")
-				codeLanguage = strings.TrimSpace(codeLanguage)
+				codeLanguage = strings.TrimSpace(strings.TrimPrefix(line, "```"))
 				if codeLanguage == "" {
 					codeLanguage = "code"
 				}
-
-				// Pretty code block header
-				sb.WriteString(colorAccent("│ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("39")).
-						Render("┌─ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("45")).
-						Bold(true).
-						Render(codeLanguage+" ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("39")).
-						Render(strings.Repeat("─", 42-len(codeLanguage))) + "\n")
+				// Code block header - subtle
+				sb.WriteString("\n")
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("240")).
+					Render("    "+codeLanguage))
+				sb.WriteString("\n")
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("238")).
+					Render("   "+strings.Repeat("─", 50)))
+				sb.WriteString("\n")
 			} else {
 				// Code block footer
-				sb.WriteString(colorAccent("│ ") +
-					lipgloss.NewStyle().
-						Foreground(lipgloss.Color("39")).
-						Render("└"+strings.Repeat("─", 48)) + "\n")
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("238")).
+					Render("   "+strings.Repeat("─", 50)))
+				sb.WriteString("\n")
 			}
 			continue
 		}
 
-		// Format based on context
 		if inCodeBlock {
-			// Code block - syntax highlighting by color
 			styledLine := highlightCodeLine(line, codeLanguage)
-			sb.WriteString(colorAccent("│ ") + "  " + styledLine + "\n")
-		} else if strings.HasPrefix(line, "✓") || strings.HasPrefix(line, "✅") {
-			// Success message with icon
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("82")).
-					Bold(true).
-					Render(line) + "\n")
-		} else if strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "❌") {
-			// Error message with icon
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("196")).
-					Bold(true).
-					Render(line) + "\n")
-		} else if strings.HasPrefix(line, "⚠") || strings.HasPrefix(line, "⚠️") {
-			// Warning message
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("226")).
-					Bold(true).
-					Render(line) + "\n")
+			sb.WriteString("    " + styledLine + "\n")
 		} else if strings.HasPrefix(line, "##") {
-			// H2 Heading
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("214")).
-					Bold(true).
-					Render(line) + "\n")
+			heading := strings.TrimLeft(line, "# ")
+			sb.WriteString("\n  " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("255")).
+				Bold(true).
+				Render(heading) + "\n")
 		} else if strings.HasPrefix(line, "#") {
-			// H1 Heading
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("208")).
-					Bold(true).
-					Underline(true).
-					Render(line) + "\n")
-		} else if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "•") {
-			// List item with prettier bullet
-			trimmed := strings.TrimLeft(line, "- *•")
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("45")).
-					Render("  • ") +
+			heading := strings.TrimLeft(line, "# ")
+			sb.WriteString("\n  " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("255")).
+				Bold(true).
+				Underline(true).
+				Render(heading) + "\n")
+		} else if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "• ") {
+			trimmed := strings.TrimLeft(line, "-*• ")
+			sb.WriteString("  " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("246")).
+				Render("  - ") +
 				lipgloss.NewStyle().
 					Foreground(lipgloss.Color("252")).
 					Render(trimmed) + "\n")
 		} else if strings.HasPrefix(line, ">") {
-			// Quote/blockquote
-			sb.WriteString(colorAccent("│ ") +
+			quoted := strings.TrimLeft(line, "> ")
+			sb.WriteString("  " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("238")).
+				Render("  | ") +
 				lipgloss.NewStyle().
 					Foreground(lipgloss.Color("244")).
 					Italic(true).
-					Render(line) + "\n")
+					Render(quoted) + "\n")
 		} else if strings.Contains(line, "`") && !inCodeBlock {
-			// Inline code
 			styledLine := highlightInlineCode(line)
-			sb.WriteString(colorAccent("│ ") + styledLine + "\n")
+			sb.WriteString("  " + styledLine + "\n")
+		} else if line == "" {
+			sb.WriteString("\n")
 		} else {
-			// Normal text
-			sb.WriteString(colorAccent("│ ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("252")).
-					Render(line) + "\n")
+			sb.WriteString("  " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Render(line) + "\n")
 		}
 	}
-
-	// Footer
-	sb.WriteString(colorAccent("│") + "\n")
-	sb.WriteString(colorAccent("╰"))
-	sb.WriteString(colorAccent(strings.Repeat("─", 54)))
 
 	return sb.String()
 }
 
 // highlightCodeLine adds basic syntax highlighting to code
 func highlightCodeLine(line string, language string) string {
-	// Keywords by language
 	keywords := map[string][]string{
-		"go":     {"func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range"},
-		"python": {"def", "class", "import", "from", "return", "if", "else", "for", "while", "try", "except"},
-		"javascript": {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class"},
-		"bash":   {"if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac"},
+		"go":         {"func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range", "var", "const", "defer", "go", "chan", "select", "switch", "case", "break"},
+		"python":     {"def", "class", "import", "from", "return", "if", "else", "elif", "for", "while", "try", "except", "with", "as", "yield", "lambda", "pass", "raise"},
+		"javascript": {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "try", "catch"},
+		"js":         {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "try", "catch"},
+		"typescript": {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "interface", "type"},
+		"ts":         {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "interface", "type"},
+		"bash":       {"if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac", "function", "export", "local", "echo", "exit"},
+		"sh":         {"if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac", "function", "export", "local", "echo", "exit"},
+		"rust":       {"fn", "let", "mut", "pub", "struct", "enum", "impl", "trait", "use", "mod", "if", "else", "for", "while", "match", "return", "self", "Self"},
+		"java":       {"public", "private", "protected", "class", "interface", "void", "int", "String", "return", "if", "else", "for", "while", "new", "static", "final", "import"},
 	}
 
-	// Apply basic coloring
-	styledLine := line
+	trimmed := strings.TrimSpace(line)
 
 	// Comments
-	if strings.Contains(line, "//") || strings.Contains(line, "#") {
+	if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
+			Foreground(lipgloss.Color("242")).
 			Italic(true).
 			Render(line)
 	}
 
 	// Strings
 	if strings.Contains(line, "\"") || strings.Contains(line, "'") {
-		styledLine = lipgloss.NewStyle().
+		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("179")).
 			Render(line)
-		return styledLine
-	}
-
-	// Numbers
-	for _, char := range line {
-		if char >= '0' && char <= '9' {
-			return lipgloss.NewStyle().
-				Foreground(lipgloss.Color("141")).
-				Render(line)
-		}
 	}
 
 	// Check for keywords
 	lang := strings.ToLower(language)
 	if kwList, ok := keywords[lang]; ok {
-		for _, kw := range kwList {
-			if strings.Contains(line, kw) {
-				return lipgloss.NewStyle().
-					Foreground(lipgloss.Color("213")).
-					Bold(true).
-					Render(line)
+		words := strings.Fields(trimmed)
+		for _, word := range words {
+			for _, kw := range kwList {
+				if word == kw || strings.HasPrefix(word, kw+"(") || strings.HasPrefix(word, kw+".") {
+					return lipgloss.NewStyle().
+						Foreground(lipgloss.Color("176")).
+						Render(line)
+				}
 			}
 		}
 	}
@@ -351,21 +251,20 @@ func highlightCodeLine(line string, language string) string {
 // highlightInlineCode highlights `code` in text
 func highlightInlineCode(text string) string {
 	parts := strings.Split(text, "`")
-	result := ""
+	var sb strings.Builder
 
 	for i, part := range parts {
 		if i%2 == 1 {
-			// Inside backticks
-			result += lipgloss.NewStyle().
+			sb.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("117")).
 				Background(lipgloss.Color("236")).
-				Render(part)
+				Render(" "+part+" "))
 		} else {
-			result += lipgloss.NewStyle().
+			sb.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252")).
-				Render(part)
+				Render(part))
 		}
 	}
 
-	return result
+	return sb.String()
 }
