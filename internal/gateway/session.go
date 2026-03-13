@@ -29,15 +29,15 @@ type Session struct {
 	State          SessionState
 
 	// Agent routing
-	AssignedAgentID string   // Current agent handling this session
-	AgentHistory    []string // All agents that have handled this session
-	AgentAffinityEnabled bool // Whether to keep using the same agent
+	AssignedAgentID      string   // Current agent handling this session
+	AgentHistory         []string // All agents that have handled this session
+	AgentAffinityEnabled bool     // Whether to keep using the same agent
 
 	// Statistics
-	MessageCount    int
-	ToolCalls       int
-	TotalTokens     int64
-	AverageLatency  int64 // milliseconds
+	MessageCount   int
+	ToolCalls      int
+	TotalTokens    int64
+	AverageLatency int64 // milliseconds
 
 	// Message history
 	messages []interface{}

@@ -148,19 +148,19 @@ func ApplyModelSelection(cfg *Config, selection ModelSelection) error {
 func GetModelOptions() []ModelOptionPreset {
 	return []ModelOptionPreset{
 		{
-			ID:          "gpt-4o",
-			Name:        "GPT-4o",
+			ID:          "gpt-4.1",
+			Name:        "GPT-4.1",
 			Provider:    "openai",
-			Model:       "gpt-4o",
-			Description: "Most capable OpenAI model - Complex coding & analysis",
+			Model:       "gpt-4.1",
+			Description: "Latest OpenAI flagship - Complex coding & analysis",
 			Icon:        "🧠",
 			Recommended: true,
 		},
 		{
-			ID:          "gpt-4o-mini",
-			Name:        "GPT-4o-mini",
+			ID:          "gpt-4.1-mini",
+			Name:        "GPT-4.1-mini",
 			Provider:    "openai",
-			Model:       "gpt-4o-mini",
+			Model:       "gpt-4.1-mini",
 			Description: "Fast & economical - Simple tasks & quick responses",
 			Icon:        "⚡",
 			Recommended: false,

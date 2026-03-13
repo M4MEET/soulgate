@@ -345,7 +345,7 @@ func (m *InteractiveChatModel) renderDependenciesStep() string {
 	if len(m.OnboardingState.DependencyErrors) > 0 {
 		sb.WriteString("\n")
 		for _, err := range m.OnboardingState.DependencyErrors {
-			sb.WriteString("  " + onbBad.Render("! " + err) + "\n")
+			sb.WriteString("  " + onbBad.Render("! "+err) + "\n")
 		}
 	}
 

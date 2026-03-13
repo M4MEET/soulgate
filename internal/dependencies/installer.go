@@ -98,11 +98,11 @@ var IntegrationDependencies = map[string][]Dependency{
 
 // DependencyInstaller handles installing integration dependencies
 type DependencyInstaller struct {
-	soulGateDir  string
-	nodeModules  string
-	binDir       string
-	depsFile     string
-	verbose      bool
+	soulGateDir string
+	nodeModules string
+	binDir      string
+	depsFile    string
+	verbose     bool
 }
 
 // InstalledDependencies tracks what's been installed
@@ -113,11 +113,11 @@ type InstalledDependencies struct {
 // NewDependencyInstaller creates a new dependency installer
 func NewDependencyInstaller(soulGateDir string, verbose bool) *DependencyInstaller {
 	return &DependencyInstaller{
-		soulGateDir:  soulGateDir,
-		nodeModules:  filepath.Join(soulGateDir, "node_modules"),
-		binDir:       filepath.Join(soulGateDir, "bin"),
-		depsFile:     filepath.Join(soulGateDir, "dependencies.yml"),
-		verbose:      verbose,
+		soulGateDir: soulGateDir,
+		nodeModules: filepath.Join(soulGateDir, "node_modules"),
+		binDir:      filepath.Join(soulGateDir, "bin"),
+		depsFile:    filepath.Join(soulGateDir, "dependencies.yml"),
+		verbose:     verbose,
 	}
 }
 
@@ -333,7 +333,7 @@ func (di *DependencyInstaller) trackInstalled(integrationID string, packages []s
 // CheckSystemPrerequisites checks if system has necessary package managers
 func (di *DependencyInstaller) CheckSystemPrerequisites() map[string]bool {
 	prereqs := map[string]bool{
-		"npm": commandExists("npm"),
+		"npm":  commandExists("npm"),
 		"node": commandExists("node"),
 	}
 	return prereqs

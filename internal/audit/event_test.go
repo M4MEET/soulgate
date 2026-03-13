@@ -97,10 +97,10 @@ func TestEventWithStatus(t *testing.T) {
 
 func TestEventWithError(t *testing.T) {
 	tests := []struct {
-		name          string
-		err           error
-		expectError   string
-		expectStatus  EventStatus
+		name         string
+		err          error
+		expectError  string
+		expectStatus EventStatus
 	}{
 		{
 			name:         "with error",

@@ -107,18 +107,18 @@ type HubItem struct {
 
 // InstalledItem represents locally installed item
 type InstalledItem struct {
-	Type       string    `json:"type"`
-	Name       string    `json:"name"`
-	Version    string    `json:"version"`
+	Type        string    `json:"type"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
 	InstalledAt time.Time `json:"installed_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	AutoUpdate bool      `json:"auto_update"`
+	AutoUpdate  bool      `json:"auto_update"`
 }
 
 // InstallOptions represents installation options
 type InstallOptions struct {
-	Force      bool     // Force reinstall
-	SkipVerify bool     // Skip signature verification
-	Version    string   // Specific version to install
+	Force      bool              // Force reinstall
+	SkipVerify bool              // Skip signature verification
+	Version    string            // Specific version to install
 	Config     map[string]string // Pre-filled configuration
 }

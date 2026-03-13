@@ -273,10 +273,11 @@ func (md *ModelDiscovery) fetchOllamaModels(ctx context.Context) ([]ModelInfo, e
 
 func (md *ModelDiscovery) getDefaultOpenAIModels() []ModelInfo {
 	return []ModelInfo{
-		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Description: "Most capable - Complex tasks"},
-		{ID: "gpt-4o-mini", Name: "GPT-4o-mini", Provider: "openai", Description: "Fast & economical"},
-		{ID: "gpt-4-turbo", Name: "GPT-4-Turbo", Provider: "openai", Description: "Previous generation"},
-		{ID: "gpt-3.5-turbo", Name: "GPT-3.5-Turbo", Provider: "openai", Description: "Budget friendly"},
+		{ID: "gpt-4.1", Name: "GPT-4.1", Provider: "openai", Description: "Latest flagship - Complex tasks"},
+		{ID: "gpt-4.1-mini", Name: "GPT-4.1-mini", Provider: "openai", Description: "Fast & economical"},
+		{ID: "gpt-4.1-nano", Name: "GPT-4.1-nano", Provider: "openai", Description: "Fastest & cheapest"},
+		{ID: "o3", Name: "o3", Provider: "openai", Description: "Deep reasoning"},
+		{ID: "o4-mini", Name: "o4-mini", Provider: "openai", Description: "Efficient reasoning"},
 	}
 }
 
@@ -346,7 +347,7 @@ func (md *ModelDiscovery) fetchDeepSeekModels(ctx context.Context) ([]ModelInfo,
 func (md *ModelDiscovery) fetchOpenRouterModels(ctx context.Context) ([]ModelInfo, error) {
 	return []ModelInfo{
 		{ID: "openrouter/auto", Name: "Auto", Provider: "openrouter", Description: "Best available"},
-		{ID: "openai/gpt-4o", Name: "GPT-4o", Provider: "openrouter", Description: "Via OpenRouter"},
+		{ID: "openai/gpt-4.1", Name: "GPT-4.1", Provider: "openrouter", Description: "Via OpenRouter"},
 		{ID: "anthropic/claude-opus-4", Name: "Claude Opus 4", Provider: "openrouter", Description: "Via OpenRouter"},
 	}, nil
 }
@@ -427,9 +428,9 @@ func (md *ModelDiscovery) fetchXAIModels(ctx context.Context) ([]ModelInfo, erro
 			}
 
 			models = append(models, ModelInfo{
-				ID:       m.ID,
-				Name:     name,
-				Provider: "xai",
+				ID:          m.ID,
+				Name:        name,
+				Provider:    "xai",
 				Description: description,
 			})
 		}

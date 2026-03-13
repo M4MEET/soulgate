@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -296,6 +297,13 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.thinking = true
 			m.status = "Thinking..."
 			m.spinnerFrame = 0
+
+			if m.streamingEnabled {
+				// In streaming mode, add a placeholder message for live updates
+				m.streamBuffer = ""
+				m.addMessage(formatAIResponse(""))
+			}
+
 			// Start both the AI request and thinking animation
 			return m, tea.Batch(
 				m.sendToAI(value),
@@ -321,6 +329,10 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case responseMsg:
 		m.thinking = false
 		m.status = "Ready"
+		m.thinkingActivity = ""
+		m.thinkingLog = nil
+		// Refresh model info to show actual model name from API response
+		m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
 		if msg.err != nil {
 			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
@@ -329,10 +341,28 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sb.WriteString("  " + errStyle.Render(msg.err.Error()) + "\n\n")
 			sb.WriteString(dim.Render("  Check: echo $OPENAI_API_KEY") + "\n")
 			sb.WriteString(dim.Render("  Check: cat ~/.soulgate/config.yml") + "\n")
-			m.addMessage(sb.String())
+			if m.streamingEnabled && len(m.messages) > 0 {
+				// Replace the stream placeholder
+				m.messages[len(m.messages)-1] = sb.String()
+				m.output.SetContent(strings.Join(m.messages, "\n\n"))
+			} else {
+				m.addMessage(sb.String())
+			}
 		} else {
-			m.addMessage(formatAIResponse(msg.text))
+			if m.streamingEnabled && len(m.messages) > 0 {
+				// Replace the stream placeholder with the final formatted response
+				m.messages[len(m.messages)-1] = formatAIResponse(msg.text)
+				m.output.SetContent(strings.Join(m.messages, "\n\n"))
+				m.output.GotoBottom()
+			} else if m.streamBuffer != "" && len(m.messages) > 0 {
+				// Non-streaming with thinking output: finalize the thinking panel, then add response
+				m.messages[len(m.messages)-1] = formatThinkingPanel(m.streamBuffer)
+				m.addMessage(formatAIResponse(msg.text))
+			} else {
+				m.addMessage(formatAIResponse(msg.text))
+			}
 		}
+		m.streamBuffer = ""
 		return m, nil
 
 	case thinkingMsg:
@@ -353,9 +383,76 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.permissionResponse = msg.Response
 		return m, nil
 
+	case thinkingEventMsg:
+		// Live thinking event from the agentic loop
+		evt := msg.event
+
+		// Keep a bounded log of recent events
+		m.thinkingLog = append(m.thinkingLog, evt)
+		if len(m.thinkingLog) > 50 {
+			m.thinkingLog = m.thinkingLog[len(m.thinkingLog)-50:]
+		}
+
+		// Update status bar activity
+		switch evt.Kind {
+		case core.ThinkingIteration:
+			m.thinkingActivity = fmt.Sprintf("iteration %d", evt.Iteration)
+		case core.ThinkingModelCall:
+			m.thinkingActivity = "calling model..."
+		case core.ThinkingModelDone:
+			modelName := evt.Model
+			if modelName == "" {
+				modelName = evt.Provider
+			}
+			m.thinkingActivity = fmt.Sprintf("model: %s (%s, %d tok, %s)",
+				modelName, evt.StopReason, evt.TokensUsed, evt.Duration.Round(time.Millisecond))
+		case core.ThinkingToolStart:
+			m.thinkingActivity = fmt.Sprintf("running %s", evt.ToolName)
+
+			// Show tool call in the chat output for live view
+			toolLine := formatThinkingToolCall(evt.ToolName, evt.ToolArgs)
+			if m.streamingEnabled && len(m.messages) > 0 {
+				m.streamBuffer += toolLine
+				m.messages[len(m.messages)-1] = formatAIResponse(m.streamBuffer)
+			} else {
+				// Non-streaming: update the last thinking placeholder
+				m.ensureThinkingPlaceholder()
+				m.streamBuffer += toolLine
+				m.messages[len(m.messages)-1] = formatThinkingPanel(m.streamBuffer)
+			}
+			m.output.SetContent(strings.Join(m.messages, "\n\n"))
+			m.output.GotoBottom()
+		case core.ThinkingToolDone:
+			m.thinkingActivity = fmt.Sprintf("%s done (%s)", evt.ToolName, evt.Duration.Round(time.Millisecond))
+
+			// Show abbreviated result in live view
+			resultLine := formatThinkingToolResult(evt.ToolName, evt.ToolResult, evt.Duration)
+			if m.streamingEnabled && len(m.messages) > 0 {
+				m.streamBuffer += resultLine
+				m.messages[len(m.messages)-1] = formatAIResponse(m.streamBuffer)
+			} else {
+				m.ensureThinkingPlaceholder()
+				m.streamBuffer += resultLine
+				m.messages[len(m.messages)-1] = formatThinkingPanel(m.streamBuffer)
+			}
+			m.output.SetContent(strings.Join(m.messages, "\n\n"))
+			m.output.GotoBottom()
+		}
+		return m, nil
+
+	case streamChunkMsg:
+		// Streaming token arrived - append to buffer and update display
+		m.streamBuffer += msg.chunk
+		// Update the last message in the output with accumulated stream content
+		if len(m.messages) > 0 {
+			m.messages[len(m.messages)-1] = formatAIResponse(m.streamBuffer)
+			m.output.SetContent(strings.Join(m.messages, "\n\n"))
+			m.output.GotoBottom()
+		}
+		return m, nil
+
 	case dependencyInstallCompleteMsg:
 		// Dependency installation completed
-		// Just trigger a re-render - the onboarding state has been updated
 		return m, nil
 	}
 

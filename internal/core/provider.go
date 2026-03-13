@@ -20,7 +20,7 @@ func (o *Orchestrator) SetProvider(providerName string, modelName string) error 
 			return fmt.Errorf("OPENAI_API_KEY environment variable not set")
 		}
 		if modelName == "" {
-			modelName = "gpt-4o-mini"
+			modelName = "gpt-4.1-mini"
 		}
 		newProvider = openai.NewProvider(apiKey, modelName, "")
 
@@ -137,7 +137,7 @@ func (o *Orchestrator) SetProvider(providerName string, modelName string) error 
 			return fmt.Errorf("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables required")
 		}
 		if modelName == "" {
-			modelName = "gpt-4o"
+			modelName = "gpt-4.1"
 		}
 		newProvider = openai.NewProvider(apiKey, modelName, endpoint)
 
@@ -147,6 +147,7 @@ func (o *Orchestrator) SetProvider(providerName string, modelName string) error 
 
 	// Switch provider
 	o.provider = newProvider
+	o.actualModelName = "" // Reset - will be set on next API response
 
 	// Update workspace config
 	o.workspace.Config.Model.DefaultProvider = providerName
@@ -174,7 +175,7 @@ func (o *Orchestrator) GetCurrentProvider() (string, string) {
 	case "openai":
 		modelName = o.workspace.Config.Model.OpenAI.Model
 		if modelName == "" {
-			modelName = "gpt-4o-mini"
+			modelName = "gpt-4.1-mini"
 		}
 	case "anthropic":
 		modelName = o.workspace.Config.Model.Anthropic.Model
@@ -234,8 +235,13 @@ func (o *Orchestrator) GetCurrentProvider() (string, string) {
 	case "azure":
 		modelName = o.workspace.Config.Model.OpenAI.Model
 		if modelName == "" {
-			modelName = "gpt-4o"
+			modelName = "gpt-4.1"
 		}
+	}
+
+	// If we have the actual model name from the API response, use it
+	if o.actualModelName != "" {
+		modelName = o.actualModelName
 	}
 
 	return providerName, modelName

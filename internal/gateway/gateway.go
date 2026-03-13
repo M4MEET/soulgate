@@ -45,9 +45,9 @@ type Gateway struct {
 	router *Router
 
 	// Authentication
-	tokenManager  *auth.TokenManager
+	tokenManager   *auth.TokenManager
 	pairingManager *auth.PairingManager
-	authEnabled   bool
+	authEnabled    bool
 
 	// Configuration
 	config *Config
@@ -367,8 +367,8 @@ func (g *Gateway) ListActivePairingCodes() []*auth.PairingCode {
 // GetAuthStats returns authentication statistics
 func (g *Gateway) GetAuthStats() map[string]interface{} {
 	return map[string]interface{}{
-		"auth_enabled":       g.authEnabled,
-		"active_tokens":      g.tokenManager.TokenCount(),
+		"auth_enabled":         g.authEnabled,
+		"active_tokens":        g.tokenManager.TokenCount(),
 		"active_pairing_codes": g.pairingManager.ActiveCodeCount(),
 	}
 }

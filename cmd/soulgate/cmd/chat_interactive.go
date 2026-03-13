@@ -34,8 +34,14 @@ func RunInteractiveTUI(orch *core.Orchestrator) error {
 		m.ShowWelcome()
 	}
 
+	// Initialize the double-pointer for tea.Program sharing
+	m.SetProgram(nil)
+
 	// Create program first
 	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// Set the program reference (writes through the double pointer, visible to all copies)
+	m.SetProgram(p)
 
 	// Set up permission callback
 	orch.SetPermissionCallback(func(req core.PermissionRequest) core.PermissionResponse {

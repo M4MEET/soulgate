@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/ui/onboarding"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -148,6 +149,15 @@ func (m *InteractiveChatModel) executeCommand(cmdName string, args []string) tea
 		m.addMessage(m.renderDebugInfo())
 		return nil
 
+	case "/stream":
+		m.streamingEnabled = !m.streamingEnabled
+		if m.streamingEnabled {
+			m.addMessage(colorSuccess("Streaming enabled - responses will appear token by token"))
+		} else {
+			m.addMessage(colorMuted("Streaming disabled - responses will appear when complete"))
+		}
+		return nil
+
 	case "/hub":
 		// Hub browser
 		if len(args) == 0 {
@@ -231,6 +241,74 @@ func (m *InteractiveChatModel) executeCommand(cmdName string, args []string) tea
 		}
 		return nil
 
+	case "/think":
+		if len(args) == 0 {
+			m.addMessage(colorAccent(fmt.Sprintf("Thinking level: %s", m.orch.GetDirectives().ThinkingLevel)))
+			m.addMessage(colorMuted("  Usage: /think <off|minimal|low|medium|high|xhigh|adaptive>"))
+		} else {
+			_, applied := core.ParseDirectives("/think "+args[0], m.orch.GetDirectives())
+			if len(applied) > 0 {
+				m.addMessage(colorSuccess(fmt.Sprintf("Set: %s", applied[0])))
+			} else {
+				m.addMessage(colorError("Invalid level. Use: off, minimal, low, medium, high, xhigh, adaptive"))
+			}
+		}
+		return nil
+
+	case "/fast":
+		toggle := "on"
+		if len(args) > 0 {
+			toggle = args[0]
+		}
+		_, applied := core.ParseDirectives("/fast "+toggle, m.orch.GetDirectives())
+		if len(applied) > 0 {
+			m.addMessage(colorSuccess(fmt.Sprintf("Set: %s", applied[0])))
+		}
+		return nil
+
+	case "/verbose":
+		if len(args) == 0 {
+			m.addMessage(colorAccent(fmt.Sprintf("Verbose: %s", m.orch.GetDirectives().VerboseMode)))
+		} else {
+			_, applied := core.ParseDirectives("/verbose "+args[0], m.orch.GetDirectives())
+			if len(applied) > 0 {
+				m.addMessage(colorSuccess(fmt.Sprintf("Set: %s", applied[0])))
+			}
+		}
+		return nil
+
+	case "/processes":
+		procs := m.orch.GetProcessManager().List()
+		if len(procs) == 0 {
+			m.addMessage(colorMuted("  No background processes running."))
+		} else {
+			var sb strings.Builder
+			sb.WriteString(colorAccentBright("Background Processes:\n"))
+			for _, p := range procs {
+				sb.WriteString(fmt.Sprintf("  %s  %-10s  pid:%d  %s\n", p.ID, p.Status, p.PID, p.Command))
+			}
+			m.addMessage(sb.String())
+		}
+		return nil
+
+	case "/cron":
+		jobs := m.orch.GetCronScheduler().List()
+		if len(jobs) == 0 {
+			m.addMessage(colorMuted("  No scheduled jobs. AI can create them with cron_add tool."))
+		} else {
+			var sb strings.Builder
+			sb.WriteString(colorAccentBright("Scheduled Jobs:\n"))
+			for _, j := range jobs {
+				next := "-"
+				if j.NextRun != nil {
+					next = j.NextRun.Format("15:04:05")
+				}
+				sb.WriteString(fmt.Sprintf("  %s  %-15s  %-8s  %-10s  next:%s\n", j.ID, j.Name, j.Kind, j.Status, next))
+			}
+			m.addMessage(sb.String())
+		}
+		return nil
+
 	default:
 		m.addMessage(colorError("Unknown command: " + cmdName))
 		return nil
@@ -274,16 +352,34 @@ func (m *InteractiveChatModel) executeShellCommand(shellCmd string) tea.Cmd {
 	}
 }
 
-// sendToAI sends a prompt to the AI and returns the response
+// sendToAI sends a prompt to the AI and returns the response.
+// When streaming is enabled, it sets up a stream callback that sends
+// chunks to the TUI via the Bubble Tea program.
 func (m *InteractiveChatModel) sendToAI(prompt string) tea.Cmd {
 	return func() tea.Msg {
-		// Create context with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
+
+		if m.teaProgram != nil && *m.teaProgram != nil {
+			prog := *m.teaProgram
+
+			// Always set up thinking callback for live thinking output
+			m.orch.SetThinkingCallback(func(event core.ThinkingEvent) {
+				prog.Send(thinkingEventMsg{event: event})
+			})
+			defer m.orch.SetThinkingCallback(nil)
+
+			if m.streamingEnabled {
+				// Enable streaming on the orchestrator with a callback that sends chunks to the TUI
+				m.orch.SetStreaming(true, func(chunk string) {
+					prog.Send(streamChunkMsg{chunk: chunk})
+				})
+				defer m.orch.SetStreaming(false, nil)
+			}
+		}
 
 		result, err := m.orch.Run(ctx, prompt)
 		if err != nil {
-			// Return detailed error
 			return responseMsg{
 				text: "",
 				err:  fmt.Errorf("AI request failed: %w", err),

@@ -95,31 +95,31 @@ type EventMessageFrame struct {
 
 // EventToolStartFrame indicates a tool is starting execution
 type EventToolStartFrame struct {
-	Type           FrameType              `json:"type"` // "event.tool.start"
-	SessionID      string                 `json:"sessionId"`
-	ToolName       string                 `json:"toolName"`
-	ToolID         string                 `json:"toolId"` // Unique ID for this tool execution
-	Args           map[string]interface{} `json:"args"`
-	Metadata       ToolMetadata           `json:"metadata,omitempty"`
-	Timestamp      int64                  `json:"ts"`
+	Type      FrameType              `json:"type"` // "event.tool.start"
+	SessionID string                 `json:"sessionId"`
+	ToolName  string                 `json:"toolName"`
+	ToolID    string                 `json:"toolId"` // Unique ID for this tool execution
+	Args      map[string]interface{} `json:"args"`
+	Metadata  ToolMetadata           `json:"metadata,omitempty"`
+	Timestamp int64                  `json:"ts"`
 }
 
 // EventToolEndFrame indicates a tool finished execution
 type EventToolEndFrame struct {
-	Type         FrameType   `json:"type"` // "event.tool.end"
-	SessionID    string      `json:"sessionId"`
-	ToolName     string      `json:"toolName"`
-	ToolID       string      `json:"toolId"`
-	Result       interface{} `json:"result"`
-	Error        string      `json:"error,omitempty"`
-	ErrorCode    string      `json:"errorCode,omitempty"`
-	ErrorStack   string      `json:"errorStack,omitempty"`
-	Duration     int64       `json:"duration"` // milliseconds
-	BytesRead    int64       `json:"bytesRead,omitempty"`
-	BytesWritten int64       `json:"bytesWritten,omitempty"`
-	ExitCode     int         `json:"exitCode,omitempty"`
+	Type         FrameType    `json:"type"` // "event.tool.end"
+	SessionID    string       `json:"sessionId"`
+	ToolName     string       `json:"toolName"`
+	ToolID       string       `json:"toolId"`
+	Result       interface{}  `json:"result"`
+	Error        string       `json:"error,omitempty"`
+	ErrorCode    string       `json:"errorCode,omitempty"`
+	ErrorStack   string       `json:"errorStack,omitempty"`
+	Duration     int64        `json:"duration"` // milliseconds
+	BytesRead    int64        `json:"bytesRead,omitempty"`
+	BytesWritten int64        `json:"bytesWritten,omitempty"`
+	ExitCode     int          `json:"exitCode,omitempty"`
 	Metadata     ToolMetadata `json:"metadata,omitempty"`
-	Timestamp    int64       `json:"ts"`
+	Timestamp    int64        `json:"ts"`
 }
 
 // EventToolLogFrame is emitted during tool execution for progress updates
@@ -134,16 +134,16 @@ type EventToolLogFrame struct {
 
 // EventToolProgressFrame reports progress during long-running tool execution
 type EventToolProgressFrame struct {
-	Type       FrameType `json:"type"` // "event.tool.progress"
-	SessionID  string    `json:"sessionId"`
-	ToolID     string    `json:"toolId"`
-	ToolName   string    `json:"toolName"`
-	Progress   float64   `json:"progress"`   // 0.0 to 1.0 (percentage)
-	Status     string    `json:"status"`     // human-readable status
-	Current    int64     `json:"current,omitempty"`    // current progress value
-	Total      int64     `json:"total,omitempty"`      // total expected value
-	Unit       string    `json:"unit,omitempty"`       // bytes, files, lines, etc.
-	Timestamp  int64     `json:"ts"`
+	Type      FrameType `json:"type"` // "event.tool.progress"
+	SessionID string    `json:"sessionId"`
+	ToolID    string    `json:"toolId"`
+	ToolName  string    `json:"toolName"`
+	Progress  float64   `json:"progress"`          // 0.0 to 1.0 (percentage)
+	Status    string    `json:"status"`            // human-readable status
+	Current   int64     `json:"current,omitempty"` // current progress value
+	Total     int64     `json:"total,omitempty"`   // total expected value
+	Unit      string    `json:"unit,omitempty"`    // bytes, files, lines, etc.
+	Timestamp int64     `json:"ts"`
 }
 
 // EventToolOutputFrame streams tool output in chunks
@@ -152,8 +152,8 @@ type EventToolOutputFrame struct {
 	SessionID string    `json:"sessionId"`
 	ToolID    string    `json:"toolId"`
 	ToolName  string    `json:"toolName"`
-	Stream    string    `json:"stream"`  // stdout, stderr, or custom stream name
-	Data      string    `json:"data"`    // output chunk
+	Stream    string    `json:"stream"`            // stdout, stderr, or custom stream name
+	Data      string    `json:"data"`              // output chunk
 	LineNum   int       `json:"lineNum,omitempty"` // line number if applicable
 	Timestamp int64     `json:"ts"`
 }

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/model"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -40,12 +40,13 @@ func (m *InteractiveChatModel) buildStaticModelOptions() []modelOption {
 
 	if hasOpenAI {
 		options = append(options,
-			modelOption{num, "GPT-4o", "openai", "gpt-4o", "Most capable OpenAI - Complex coding & analysis"},
-			modelOption{num + 1, "GPT-4o-mini", "openai", "gpt-4o-mini", "Fast & economical - Simple tasks"},
-			modelOption{num + 2, "GPT-4-Turbo", "openai", "gpt-4-turbo", "Previous gen - Reliable for most tasks"},
-			modelOption{num + 3, "GPT-3.5-Turbo", "openai", "gpt-3.5-turbo", "Budget friendly - Quick responses"},
+			modelOption{num, "GPT-4.1", "openai", "gpt-4.1", "Latest OpenAI flagship - Complex coding & analysis"},
+			modelOption{num + 1, "GPT-4.1-mini", "openai", "gpt-4.1-mini", "Fast & economical - Balanced tasks"},
+			modelOption{num + 2, "GPT-4.1-nano", "openai", "gpt-4.1-nano", "Fastest & cheapest - Simple tasks"},
+			modelOption{num + 3, "o3", "openai", "o3", "Deep reasoning - Complex problem-solving"},
+			modelOption{num + 4, "o4-mini", "openai", "o4-mini", "Efficient reasoning - Cost-effective"},
 		)
-		num += 4
+		num += 5
 	}
 
 	if hasAnthropic {
@@ -68,9 +69,9 @@ func (m *InteractiveChatModel) buildStaticModelOptions() []modelOption {
 
 	if hasGoogle {
 		options = append(options,
-			modelOption{num, "Gemini 2.0 Flash", "google", "gemini-2.0-flash-exp", "Latest Gemini - Experimental features"},
-			modelOption{num + 1, "Gemini 1.5 Pro", "google", "gemini-1.5-pro", "Powerful - 2M context window"},
-			modelOption{num + 2, "Gemini 1.5 Flash", "google", "gemini-1.5-flash", "Fast & efficient - Quick tasks"},
+			modelOption{num, "Gemini 2.5 Pro", "google", "gemini-2.5-pro", "Most powerful stable - Complex tasks"},
+			modelOption{num + 1, "Gemini 2.5 Flash", "google", "gemini-2.5-flash", "Fast & efficient - Real-time capable"},
+			modelOption{num + 2, "Gemini 2.5 Flash Lite", "google", "gemini-2.5-flash-lite", "Lightweight - Quick responses"},
 		)
 		num += 3
 	}
@@ -103,7 +104,7 @@ func (m *InteractiveChatModel) buildStaticModelOptions() []modelOption {
 	if hasOpenRouter {
 		options = append(options,
 			modelOption{num, "Auto (OpenRouter)", "openrouter", "openrouter/auto", "Best available model - Auto-selected"},
-			modelOption{num + 1, "GPT-4o (OpenRouter)", "openrouter", "openai/gpt-4o", "OpenAI via OpenRouter - Fallback routing"},
+			modelOption{num + 1, "GPT-4.1 (OpenRouter)", "openrouter", "openai/gpt-4.1", "OpenAI via OpenRouter - Fallback routing"},
 			modelOption{num + 2, "Claude Opus 4 (OpenRouter)", "openrouter", "anthropic/claude-opus-4", "Claude via OpenRouter - Fallback routing"},
 		)
 		num += 3

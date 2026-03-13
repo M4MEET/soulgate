@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	maxFileChars      = 20000 // Max chars per workspace file
-	maxTotalChars     = 40000 // Max total workspace files
-	truncationMarker  = "\n\n[... file truncated - too large ...]"
+	maxFileChars     = 20000 // Max chars per workspace file
+	maxTotalChars    = 40000 // Max total workspace files
+	truncationMarker = "\n\n[... file truncated - too large ...]"
 )
 
 // buildSystemPrompt builds a dynamic system prompt based on context
@@ -153,16 +153,48 @@ func buildToolingSection(tools []string) string {
 	sb.WriteString("- memory_search: Search your persistent memory\n")
 	sb.WriteString("- memory_get: Retrieve specific memory by key\n")
 	sb.WriteString("- switch_model: Autonomously switch AI models for optimal performance\n")
+	sb.WriteString("- agent_create: Create a background agent for a specific task\n")
+	sb.WriteString("- agent_list: List all background agents and their status/results\n")
+	sb.WriteString("- agent_stop: Stop a running background agent\n")
+	sb.WriteString("\nWeb Tools:\n")
+	sb.WriteString("- web_search: Search the web (uses Brave Search or DuckDuckGo)\n")
+	sb.WriteString("- web_fetch: Fetch a URL and extract readable text content\n")
+	sb.WriteString("\nProcess Management:\n")
+	sb.WriteString("- process_start: Start a background process (servers, watchers, builds)\n")
+	sb.WriteString("- process_list: List all managed background processes\n")
+	sb.WriteString("- process_poll: Get recent output from a background process\n")
+	sb.WriteString("- process_log: Get full log from a background process\n")
+	sb.WriteString("- process_write: Send input to a running process stdin\n")
+	sb.WriteString("- process_kill: Terminate a background process\n")
+	sb.WriteString("\nDocument Tools:\n")
+	sb.WriteString("- pdf_read: Read and extract text from PDF files (local or URL)\n")
+	sb.WriteString("\nScheduler:\n")
+	sb.WriteString("- cron_add: Schedule a recurring or one-shot job\n")
+	sb.WriteString("- cron_list: List all scheduled jobs\n")
+	sb.WriteString("- cron_remove: Remove a scheduled job\n")
+	sb.WriteString("- cron_pause / cron_resume: Pause or resume jobs\n")
+	sb.WriteString("\nAdvanced:\n")
+	sb.WriteString("- llm_task: Run a focused LLM task returning structured JSON\n")
+	sb.WriteString("- apply_patch: Apply multi-file patches (add/update/delete/move files)\n")
 	sb.WriteString("\n")
-	sb.WriteString("🎯 Model Switching Guidelines:\n")
+	sb.WriteString("Background Agents:\n")
+	sb.WriteString("When the user asks to create an agent, automate a task, or run something in the background:\n")
+	sb.WriteString("- Use agent_create with a clear name and detailed task description\n")
+	sb.WriteString("- The agent runs independently with its own agentic loop and full tool access\n")
+	sb.WriteString("- Check status with agent_list to see if agents completed and get their results\n")
+	sb.WriteString("- Agents cannot create other agents (no recursion)\n")
+	sb.WriteString("\n")
+	sb.WriteString("Model Switching:\n")
 	sb.WriteString("YOU can autonomously switch models using the switch_model tool:\n")
-	sb.WriteString("- Use 'gpt-4o' for complex coding, debugging, architecture (most capable, higher cost)\n")
-	sb.WriteString("- Use 'gpt-4o-mini' for simple tasks, quick responses (fast, economical)\n")
+	sb.WriteString("- Use 'gpt-4.1' for complex coding, debugging, architecture (latest OpenAI flagship)\n")
+	sb.WriteString("- Use 'gpt-4.1-mini' for simple tasks, quick responses (fast, economical)\n")
+	sb.WriteString("- Use 'gpt-4.1-nano' for trivial tasks (fastest, cheapest)\n")
+	sb.WriteString("- Use 'o3' for deep reasoning and complex problem-solving\n")
 	sb.WriteString("- Use 'claude-sonnet' for balanced reasoning and coding (good middle ground)\n")
 	sb.WriteString("- Use 'claude-opus' for deep analysis, complex reasoning (most capable Claude)\n")
 	sb.WriteString("\n")
 	sb.WriteString("ALWAYS explain to the user why you're switching models!\n")
-	sb.WriteString("Example: switch_model(model='gpt-4o', reason='Switching to GPT-4o for complex debugging')\n")
+	sb.WriteString("Example: switch_model(model='gpt-4.1', reason='Switching to GPT-4.1 for complex debugging')\n")
 
 	// Count integration tools
 	integrationCount := 0
@@ -378,7 +410,32 @@ func isCoreTool(name string) bool {
 		"memory_write":  true,
 		"memory_search": true,
 		"memory_get":    true,
+		"agent_create":  true,
+		"agent_list":    true,
+		"agent_stop":    true,
 		"switch_model":  true,
+		// Web tools
+		"web_search": true,
+		"web_fetch":  true,
+		// Process tools
+		"process_start": true,
+		"process_list":  true,
+		"process_poll":  true,
+		"process_log":   true,
+		"process_write": true,
+		"process_kill":  true,
+		// PDF tool
+		"pdf_read": true,
+		// Cron tools
+		"cron_add":    true,
+		"cron_list":   true,
+		"cron_remove": true,
+		"cron_pause":  true,
+		"cron_resume": true,
+		// LLM task
+		"llm_task": true,
+		// Patch tool
+		"apply_patch": true,
 	}
 	return coreTools[name]
 }

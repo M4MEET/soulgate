@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -28,7 +29,7 @@ func NewProvider(apiKey, modelName, baseURL string) *Provider {
 		baseURL = "https://api.openai.com/v1"
 	}
 	if modelName == "" {
-		modelName = "gpt-4"
+		modelName = "gpt-4.1"
 	}
 
 	// Create secure HTTP client
@@ -63,24 +64,23 @@ func (p *Provider) SupportedFeatures() model.FeatureSet {
 func (p *Provider) usesMaxCompletionTokens() bool {
 	modelLower := strings.ToLower(p.model)
 
+	// GPT-4.1 family uses max_completion_tokens
+	if strings.HasPrefix(modelLower, "gpt-4.1") {
+		return true
+	}
+
 	// GPT-5 and newer models use max_completion_tokens
 	if strings.HasPrefix(modelLower, "gpt-5") {
 		return true
 	}
 
 	// GPT-4o models from 2024-08-06 onwards use max_completion_tokens
-	if strings.HasPrefix(modelLower, "gpt-4o-2024-08") ||
-	   strings.HasPrefix(modelLower, "gpt-4o-2024-09") ||
-	   strings.HasPrefix(modelLower, "gpt-4o-2024-10") ||
-	   strings.HasPrefix(modelLower, "gpt-4o-2024-11") ||
-	   strings.HasPrefix(modelLower, "gpt-4o-2024-12") ||
-	   strings.HasPrefix(modelLower, "gpt-4o-2025") ||
-	   strings.HasPrefix(modelLower, "gpt-4o-2026") {
+	if strings.HasPrefix(modelLower, "gpt-4o") {
 		return true
 	}
 
-	// o1 models use max_completion_tokens
-	if strings.HasPrefix(modelLower, "o1-") || strings.HasPrefix(modelLower, "o1") {
+	// o1/o3/o4 reasoning models use max_completion_tokens
+	if strings.HasPrefix(modelLower, "o1") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
 		return true
 	}
 
@@ -133,6 +133,141 @@ func (p *Provider) Complete(ctx context.Context, req model.CompletionRequest) (*
 
 	// Convert to common format
 	return p.convertResponse(openAIResp), nil
+}
+
+// StreamComplete streams a completion response from OpenAI
+func (p *Provider) StreamComplete(ctx context.Context, req model.CompletionRequest) (<-chan model.StreamChunk, error) {
+	openAIReq := p.convertRequest(req)
+	openAIReq.Stream = true
+
+	body, err := json.Marshal(openAIReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	ch := make(chan model.StreamChunk, 64)
+
+	go func() {
+		defer resp.Body.Close()
+		defer close(ch)
+
+		var fullContent strings.Builder
+		var toolCalls []model.ToolCall
+		toolCallArgs := make(map[int]*strings.Builder) // index -> accumulated args
+		var finishReason string
+		var actualModel string
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				break
+			}
+
+			var chunk openAIStreamResponse
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+
+			if chunk.Model != "" && actualModel == "" {
+				actualModel = chunk.Model
+			}
+
+			if len(chunk.Choices) == 0 {
+				continue
+			}
+
+			delta := chunk.Choices[0].Delta
+
+			// Accumulate content
+			if delta.Content != "" {
+				fullContent.WriteString(delta.Content)
+				select {
+				case ch <- model.StreamChunk{Delta: delta.Content}:
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			// Accumulate tool calls
+			for _, tc := range delta.ToolCalls {
+				idx := tc.Index
+				if _, ok := toolCallArgs[idx]; !ok {
+					toolCallArgs[idx] = &strings.Builder{}
+					// New tool call
+					toolCalls = append(toolCalls, model.ToolCall{
+						ID:   tc.ID,
+						Name: tc.Function.Name,
+					})
+				}
+				if tc.Function.Arguments != "" {
+					toolCallArgs[idx].WriteString(tc.Function.Arguments)
+				}
+			}
+
+			if chunk.Choices[0].FinishReason != "" {
+				finishReason = chunk.Choices[0].FinishReason
+			}
+		}
+
+		// Assemble final tool calls with accumulated arguments
+		for i := range toolCalls {
+			if args, ok := toolCallArgs[i]; ok {
+				toolCalls[i].Input = json.RawMessage(args.String())
+			}
+		}
+
+		// Map finish reason
+		stopReason := model.StopReasonEndTurn
+		switch finishReason {
+		case "tool_calls":
+			stopReason = model.StopReasonToolUse
+		case "length":
+			stopReason = model.StopReasonMaxTokens
+		}
+
+		finalResp := &model.CompletionResponse{
+			Message: model.Message{
+				Role:    model.RoleAssistant,
+				Content: fullContent.String(),
+			},
+			ToolCalls:  toolCalls,
+			StopReason: stopReason,
+			Model:      actualModel,
+		}
+
+		select {
+		case ch <- model.StreamChunk{Done: true, Response: finalResp}:
+		case <-ctx.Done():
+		}
+	}()
+
+	return ch, nil
 }
 
 // convertRequest converts common format to OpenAI format
@@ -236,6 +371,7 @@ func (p *Provider) convertResponse(resp openAIResponse) *model.CompletionRespons
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
 		},
+		Model: resp.Model,
 	}
 
 	// Convert stop reason
@@ -267,20 +403,21 @@ func (p *Provider) convertResponse(resp openAIResponse) *model.CompletionRespons
 
 // OpenAI API types
 type openAIRequest struct {
-	Model                string          `json:"model"`
-	Messages             []openAIMessage `json:"messages"`
-	Tools                []openAITool    `json:"tools,omitempty"`
-	MaxTokens            int             `json:"max_tokens,omitempty"`             // For older models
-	MaxCompletionTokens  int             `json:"max_completion_tokens,omitempty"`  // For newer models (GPT-5+, GPT-4o-2024-08-06+)
-	Temperature          float64         `json:"temperature,omitempty"`
+	Model               string          `json:"model"`
+	Messages            []openAIMessage `json:"messages"`
+	Tools               []openAITool    `json:"tools,omitempty"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	Temperature         float64         `json:"temperature,omitempty"`
+	Stream              bool            `json:"stream,omitempty"`
 }
 
 type openAIMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	ToolCalls  []openAIToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
-	Name       string            `json:"name,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Name       string           `json:"name,omitempty"`
 }
 
 type openAITool struct {
@@ -295,9 +432,9 @@ type openAIFunction struct {
 }
 
 type openAIToolCall struct {
-	ID       string               `json:"id"`
-	Type     string               `json:"type"`
-	Function openAIFunctionCall   `json:"function"`
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIFunctionCall `json:"function"`
 }
 
 type openAIFunctionCall struct {
@@ -306,12 +443,12 @@ type openAIFunctionCall struct {
 }
 
 type openAIResponse struct {
-	ID      string          `json:"id"`
-	Object  string          `json:"object"`
-	Created int64           `json:"created"`
-	Model   string          `json:"model"`
-	Choices []openAIChoice  `json:"choices"`
-	Usage   openAIUsage     `json:"usage"`
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Choices []openAIChoice `json:"choices"`
+	Usage   openAIUsage    `json:"usage"`
 }
 
 type openAIChoice struct {
@@ -324,4 +461,30 @@ type openAIUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+// Streaming types
+type openAIStreamResponse struct {
+	ID      string               `json:"id"`
+	Model   string               `json:"model"`
+	Choices []openAIStreamChoice `json:"choices"`
+}
+
+type openAIStreamChoice struct {
+	Index        int               `json:"index"`
+	Delta        openAIStreamDelta `json:"delta"`
+	FinishReason string            `json:"finish_reason"`
+}
+
+type openAIStreamDelta struct {
+	Role      string                 `json:"role,omitempty"`
+	Content   string                 `json:"content,omitempty"`
+	ToolCalls []openAIStreamToolCall `json:"tool_calls,omitempty"`
+}
+
+type openAIStreamToolCall struct {
+	Index    int                `json:"index"`
+	ID       string             `json:"id,omitempty"`
+	Type     string             `json:"type,omitempty"`
+	Function openAIFunctionCall `json:"function"`
 }

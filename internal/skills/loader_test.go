@@ -111,10 +111,10 @@ func TestValidateSkill(t *testing.T) {
 
 func TestParseSkillHeader(t *testing.T) {
 	tests := []struct {
-		name        string
-		content     string
-		wantName    string
-		wantDesc    string
+		name     string
+		content  string
+		wantName string
+		wantDesc string
 	}{
 		{
 			name: "with skill prefix",

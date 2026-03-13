@@ -156,10 +156,10 @@ func (s *OnboardingState) SaveAPIKeys() error {
 
 	// Set default model based on selection
 	switch s.SelectedModel {
-	case "gpt-4o":
-		cfg.Model.OpenAI.Model = "gpt-4o"
-	case "gpt-4o-mini":
-		cfg.Model.OpenAI.Model = "gpt-4o-mini"
+	case "gpt-4.1":
+		cfg.Model.OpenAI.Model = "gpt-4.1"
+	case "gpt-4.1-mini":
+		cfg.Model.OpenAI.Model = "gpt-4.1-mini"
 	case "claude-opus":
 		cfg.Model.Anthropic.Model = "claude-opus-4-20250514"
 	case "claude-sonnet":

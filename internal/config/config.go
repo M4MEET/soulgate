@@ -59,10 +59,10 @@ type ModelConfig struct {
 
 // OpenAIConfig defines OpenAI-specific settings
 type OpenAIConfig struct {
-	APIKey      string `yaml:"api_key"`
-	Model       string `yaml:"model"`
-	BaseURL     string `yaml:"base_url"`
-	MaxTokens   int    `yaml:"max_tokens"`
+	APIKey      string  `yaml:"api_key"`
+	Model       string  `yaml:"model"`
+	BaseURL     string  `yaml:"base_url"`
+	MaxTokens   int     `yaml:"max_tokens"`
 	Temperature float64 `yaml:"temperature"`
 }
 
@@ -151,7 +151,7 @@ func DefaultConfig() *Config {
 		Model: ModelConfig{
 			DefaultProvider: "openai",
 			OpenAI: OpenAIConfig{
-				Model:       "gpt-4",
+				Model:       "gpt-4.1",
 				MaxTokens:   4096,
 				Temperature: 0.7,
 			},
@@ -175,9 +175,9 @@ func DefaultConfig() *Config {
 		},
 		Execution: ExecutionConfig{
 			MaxIterations:       10,
-			TotalTimeoutSec:     300,  // 5 minutes
-			IterationTimeoutSec: 60,   // 1 minute
-			APICallTimeoutSec:   30,   // 30 seconds
+			TotalTimeoutSec:     300, // 5 minutes
+			IterationTimeoutSec: 60,  // 1 minute
+			APICallTimeoutSec:   30,  // 30 seconds
 			MaxTokens:           100000,
 			MaxToolResultKB:     1024, // 1MB
 		},

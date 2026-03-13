@@ -109,19 +109,36 @@ func (m *InteractiveChatModel) renderStatusBar() string {
 	if m.thinking {
 		spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		spinner := spinners[m.spinnerFrame%len(spinners)]
+		activity := "thinking..."
+		if m.thinkingActivity != "" {
+			activity = m.thinkingActivity
+		}
 		status = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("208")).
-			Render(spinner+" thinking...")
+			Render(spinner + " " + activity)
 	} else {
 		status = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("242")).
 			Render("ready")
 	}
 
-	model := dim.Render(fmt.Sprintf("%s:%s", m.currentProvider, m.currentModel))
+	modelInfo := dim.Render(fmt.Sprintf("%s:%s", m.currentProvider, m.currentModel))
 	msgs := dim.Render(fmt.Sprintf("%d messages", len(m.history)))
 
-	return "  " + status + dot + model + dot + msgs
+	streamStatus := ""
+	if m.streamingEnabled {
+		streamStatus = dot + lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("stream")
+	}
+
+	directivesStr := ""
+	if d := m.orch.GetDirectives(); d != nil {
+		ds := d.String()
+		if ds != "defaults" {
+			directivesStr = dot + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(ds)
+		}
+	}
+
+	return "  " + status + dot + modelInfo + dot + msgs + streamStatus + directivesStr
 }
 
 // renderHints renders keyboard shortcut hints

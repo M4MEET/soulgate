@@ -64,10 +64,10 @@ func (o *Observer) Connect(ctx context.Context) error {
 
 	// Send connect frame
 	connectFrame := &protocol.ConnectFrame{
-		Type:      protocol.FrameConnect,
-		Role:      protocol.RoleUI,
-		ClientID:  o.clientID,
-		Version:   protocol.ProtocolVersion,
+		Type:     protocol.FrameConnect,
+		Role:     protocol.RoleUI,
+		ClientID: o.clientID,
+		Version:  protocol.ProtocolVersion,
 		Metadata: protocol.Metadata{
 			"type": "cli_observer",
 		},

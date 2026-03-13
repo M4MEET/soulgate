@@ -18,14 +18,14 @@ import (
 
 // Connector is a Telegram bot that connects to the Gateway
 type Connector struct {
-	config      *Config
-	gatewayURL  string
-	clientID    string
-	conn        *websocket.Conn
-	done        chan struct{}
-	bot         *bot.Bot
-	botCtx      context.Context
-	botCancel   context.CancelFunc
+	config     *Config
+	gatewayURL string
+	clientID   string
+	conn       *websocket.Conn
+	done       chan struct{}
+	bot        *bot.Bot
+	botCtx     context.Context
+	botCancel  context.CancelFunc
 }
 
 // Config holds Telegram connector configuration
@@ -108,8 +108,8 @@ func (c *Connector) Connect(ctx context.Context) error {
 		ClientID: c.clientID,
 		Version:  protocol.ProtocolVersion,
 		Metadata: protocol.Metadata{
-			"channel":     "telegram",
-			"bot_id":      botInfo.ID,
+			"channel":      "telegram",
+			"bot_id":       botInfo.ID,
 			"bot_username": botInfo.Username,
 		},
 		Timestamp: time.Now().Unix(),

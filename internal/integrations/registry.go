@@ -36,7 +36,7 @@ type ConfigField struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
-	Secret      bool   `json:"secret"`      // Whether to hide value (API keys, passwords)
+	Secret      bool   `json:"secret"` // Whether to hide value (API keys, passwords)
 	Default     string `json:"default"`
 	Example     string `json:"example"`
 }
@@ -136,11 +136,11 @@ func (r *Registry) Close() error {
 
 // IntegrationInfo provides metadata about an integration
 type IntegrationInfo struct {
-	Name          string        `json:"name"`
-	Description   string        `json:"description"`
-	Configured    bool          `json:"configured"`
+	Name           string        `json:"name"`
+	Description    string        `json:"description"`
+	Configured     bool          `json:"configured"`
 	RequiredConfig []ConfigField `json:"required_config"`
-	ToolsCount    int           `json:"tools_count"`
+	ToolsCount     int           `json:"tools_count"`
 }
 
 // ListInfo returns information about all integrations
@@ -152,11 +152,11 @@ func (r *Registry) ListInfo() []IntegrationInfo {
 	for _, integration := range r.integrations {
 		tools := integration.GetTools()
 		info = append(info, IntegrationInfo{
-			Name:          integration.Name(),
-			Description:   integration.Description(),
-			Configured:    integration.IsConfigured(),
+			Name:           integration.Name(),
+			Description:    integration.Description(),
+			Configured:     integration.IsConfigured(),
 			RequiredConfig: integration.RequiredConfig(),
-			ToolsCount:    len(tools),
+			ToolsCount:     len(tools),
 		})
 	}
 

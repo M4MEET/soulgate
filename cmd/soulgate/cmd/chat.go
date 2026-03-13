@@ -82,8 +82,8 @@ func runChat(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(globalConfigFile); os.IsNotExist(err) {
 		// First time - create default config and prompt for setup
 		workspace = &config.Workspace{
-			Root:      cwd,              // Work from current directory
-			ConfigDir: globalConfigDir,  // But config is in ~/.soulgate
+			Root:      cwd,             // Work from current directory
+			ConfigDir: globalConfigDir, // But config is in ~/.soulgate
 			Config:    config.DefaultConfig(),
 		}
 		workspace.Config.Workspace.Root = cwd
@@ -103,8 +103,8 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 
 		workspace = &config.Workspace{
-			Root:      cwd,              // Work from current directory
-			ConfigDir: globalConfigDir,  // But config is in ~/.soulgate
+			Root:      cwd,             // Work from current directory
+			ConfigDir: globalConfigDir, // But config is in ~/.soulgate
 			Config:    cfg,
 		}
 
@@ -355,7 +355,7 @@ func promptChatConfiguration(workspace *config.Workspace) error {
 	fmt.Println()
 	fmt.Println("  " + colorGray("Config location: ~/.soulgate/config.yml"))
 	if apiKeyEnvVar != "" {
-		fmt.Println("  " + colorGray("Tip: You can also set " + apiKeyEnvVar + " environment variable"))
+		fmt.Println("  " + colorGray("Tip: You can also set "+apiKeyEnvVar+" environment variable"))
 	}
 	fmt.Println()
 

@@ -58,6 +58,24 @@ func (p *Provider) SupportedFeatures() model.FeatureSet {
 	}
 }
 
+// StreamComplete falls back to Complete for Anthropic (streaming not yet implemented)
+func (p *Provider) StreamComplete(ctx context.Context, req model.CompletionRequest) (<-chan model.StreamChunk, error) {
+	resp, err := p.Complete(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan model.StreamChunk, 2)
+	go func() {
+		defer close(ch)
+		if resp.Message.Content != "" {
+			ch <- model.StreamChunk{Delta: resp.Message.Content}
+		}
+		ch <- model.StreamChunk{Done: true, Response: resp}
+	}()
+	return ch, nil
+}
+
 // Complete sends a completion request to Anthropic
 func (p *Provider) Complete(ctx context.Context, req model.CompletionRequest) (*model.CompletionResponse, error) {
 	// Convert to Anthropic format
@@ -135,9 +153,9 @@ func (p *Provider) convertRequest(req model.CompletionRequest) anthropicRequest 
 		if msg.Role == model.RoleTool {
 			anthropicMsg.Role = "user" // Tool results go in user messages
 			anthropicMsg.Content = append(anthropicMsg.Content, anthropicContent{
-				Type:       "tool_result",
-				ToolUseID:  msg.ToolCallID,
-				Content:    msg.Content,
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   msg.Content,
 			})
 		}
 
@@ -175,6 +193,7 @@ func (p *Provider) convertResponse(resp anthropicResponse) *model.CompletionResp
 			CompletionTokens: resp.Usage.OutputTokens,
 			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
 		},
+		Model: resp.Model,
 	}
 
 	// Extract text and tool calls from content blocks

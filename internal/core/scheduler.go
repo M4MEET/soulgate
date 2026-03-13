@@ -14,9 +14,9 @@ type ScheduleEntry struct {
 	ID          string        `json:"id" yaml:"id"`
 	Name        string        `json:"name" yaml:"name"`
 	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
-	Type        ScheduleType  `json:"type" yaml:"type"` // "skill", "agent", "prompt"
-	Target      string        `json:"target" yaml:"target"` // skill ID, agent ID, or raw prompt
-	Interval    time.Duration `json:"interval" yaml:"interval"` // How often to run
+	Type        ScheduleType  `json:"type" yaml:"type"`                               // "skill", "agent", "prompt"
+	Target      string        `json:"target" yaml:"target"`                           // skill ID, agent ID, or raw prompt
+	Interval    time.Duration `json:"interval" yaml:"interval"`                       // How often to run
 	CronExpr    string        `json:"cron_expr,omitempty" yaml:"cron_expr,omitempty"` // Optional cron expression
 	Enabled     bool          `json:"enabled" yaml:"enabled"`
 	LastRun     *time.Time    `json:"last_run,omitempty" yaml:"last_run,omitempty"`
@@ -37,12 +37,12 @@ const (
 
 // Scheduler manages periodic task execution for agents and skills
 type Scheduler struct {
-	entries  map[string]*ScheduleEntry
-	mu       sync.RWMutex
-	cancel   context.CancelFunc
-	running  bool
-	orch     *Orchestrator
-	audit    audit.Logger
+	entries map[string]*ScheduleEntry
+	mu      sync.RWMutex
+	cancel  context.CancelFunc
+	running bool
+	orch    *Orchestrator
+	audit   audit.Logger
 }
 
 // NewScheduler creates a new scheduler

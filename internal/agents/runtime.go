@@ -23,17 +23,17 @@ import (
 
 // Runtime is the agent runtime that connects to the Gateway
 type Runtime struct {
-	config      *Config
-	gatewayURL  string
-	clientID    string
-	conn        *websocket.Conn
-	done        chan struct{}
-	workspace   *config.Workspace
-	provider    model.Provider
-	tools       []model.ToolSchema
-	fileBroker  *files.Broker
-	skills      []skills.Skill
-	skillsDir   string
+	config     *Config
+	gatewayURL string
+	clientID   string
+	conn       *websocket.Conn
+	done       chan struct{}
+	workspace  *config.Workspace
+	provider   model.Provider
+	tools      []model.ToolSchema
+	fileBroker *files.Broker
+	skills     []skills.Skill
+	skillsDir  string
 }
 
 // Config holds agent runtime configuration
@@ -428,8 +428,6 @@ func (r *Runtime) executeTool(ctx context.Context, sessionID, toolID string, too
 		}
 
 		return r.executeReadFile(ctx, brokerCtx, path, toolCall)
-
-
 
 	case "list_files":
 		// Extract directory path from input

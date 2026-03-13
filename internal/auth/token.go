@@ -12,13 +12,13 @@ import (
 
 // Token represents an authentication token
 type Token struct {
-	Value      string
-	ClientID   string
-	Role       protocol.ClientRole
-	IssuedAt   time.Time
-	ExpiresAt  time.Time
-	Metadata   map[string]string
-	Revoked    bool
+	Value     string
+	ClientID  string
+	Role      protocol.ClientRole
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+	Metadata  map[string]string
+	Revoked   bool
 }
 
 // TokenManager manages authentication tokens

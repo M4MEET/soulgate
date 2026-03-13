@@ -24,6 +24,8 @@ import (
 	"github.com/M4MEET/soulgate/internal/model/anthropic"
 	"github.com/M4MEET/soulgate/internal/model/openai"
 	"github.com/M4MEET/soulgate/internal/policy"
+	"github.com/M4MEET/soulgate/internal/tools/cron"
+	"github.com/M4MEET/soulgate/internal/tools/process"
 )
 
 // Orchestrator coordinates model calls, plugin execution, and broker access
@@ -39,7 +41,16 @@ type Orchestrator struct {
 	integrationsReg    *integrations.Registry
 	integrationsStore  *integrations.Store
 	memoryStore        *MemoryStore
-	permissionCallback PermissionCallback // Optional: called when permission is needed
+	agentManager       *AgentManager
+	processManager     *process.Manager
+	cronScheduler      *cron.Scheduler
+	directives         *Directives
+	loopDetector       *LoopDetector
+	streaming          bool
+	streamCallback     func(chunk string)        // Called for each streamed token
+	thinkingCallback   func(event ThinkingEvent) // Called for live thinking output
+	permissionCallback PermissionCallback        // Optional: called when permission is needed
+	actualModelName    string                    // Actual model name from last API response
 }
 
 // RunResult represents the result of a run
@@ -163,6 +174,11 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 		integrationsReg:   integrationsReg,
 		integrationsStore: integrationsStore,
 		memoryStore:       memoryStore,
+		agentManager:      NewAgentManager(),
+		processManager:    process.NewManager(),
+		cronScheduler:     cron.NewScheduler(workspace.ConfigDir),
+		directives:        DefaultDirectives(),
+		loopDetector:      NewLoopDetector(),
 	}, nil
 }
 
@@ -320,8 +336,47 @@ func (o *Orchestrator) GetMemoryStore() *MemoryStore {
 	return o.memoryStore
 }
 
+// SetStreaming enables or disables streaming mode
+func (o *Orchestrator) SetStreaming(enabled bool, callback func(chunk string)) {
+	o.streaming = enabled
+	o.streamCallback = callback
+}
+
+// IsStreaming returns whether streaming mode is enabled
+func (o *Orchestrator) IsStreaming() bool {
+	return o.streaming
+}
+
+// GetAgentManager returns the agent manager
+func (o *Orchestrator) GetAgentManager() *AgentManager {
+	return o.agentManager
+}
+
+// GetProcessManager returns the process manager
+func (o *Orchestrator) GetProcessManager() *process.Manager {
+	return o.processManager
+}
+
+// GetCronScheduler returns the cron scheduler
+func (o *Orchestrator) GetCronScheduler() *cron.Scheduler {
+	return o.cronScheduler
+}
+
+// GetDirectives returns the current session directives
+func (o *Orchestrator) GetDirectives() *Directives {
+	return o.directives
+}
+
+// GetLoopDetector returns the loop detector
+func (o *Orchestrator) GetLoopDetector() *LoopDetector {
+	return o.loopDetector
+}
+
 // Close cleans up resources
 func (o *Orchestrator) Close() error {
+	// Stop cron scheduler
+	o.cronScheduler.Stop()
+
 	// Log session end
 	event := audit.NewEvent(audit.EventSessionEnd, audit.CategorySession).
 		WithSessionID(o.session.ID)

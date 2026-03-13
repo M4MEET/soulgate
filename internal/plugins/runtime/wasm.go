@@ -16,17 +16,17 @@ import (
 
 // WASMRuntime implements the Runtime interface using wazero
 type WASMRuntime struct {
-	runtime     wazero.Runtime
-	plugins     map[string]*wasmPlugin
-	fileBroker  *files.Broker
-	brokerCtx   brokers.BrokerContext
+	runtime    wazero.Runtime
+	plugins    map[string]*wasmPlugin
+	fileBroker *files.Broker
+	brokerCtx  brokers.BrokerContext
 }
 
 // wasmPlugin represents a loaded WASM plugin
 type wasmPlugin struct {
-	id          string
-	module      api.Module
-	manifest    *loader.Plugin
+	id       string
+	module   api.Module
+	manifest *loader.Plugin
 }
 
 // NewWASMRuntime creates a new WASM runtime

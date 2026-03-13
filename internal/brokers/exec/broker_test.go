@@ -273,7 +273,7 @@ func TestExecuteAuditDeniedCommand(t *testing.T) {
 
 	events, err := auditLogger.Query(ctx, filter)
 	require.NoError(t, err)
-	
+
 	// Should have at least one event (denied or error)
 	if len(events) > 0 {
 		// Verify it was denied or error

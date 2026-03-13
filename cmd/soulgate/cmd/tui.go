@@ -339,7 +339,7 @@ func Banner() string {
 func StatusLine(items map[string]string) string {
 	var parts []string
 	for key, value := range items {
-		parts = append(parts, colorMuted(key+":") + " " + colorAccent(value))
+		parts = append(parts, colorMuted(key+":")+" "+colorAccent(value))
 	}
 	return "  " + strings.Join(parts, colorMuted(" • ")) + "\n"
 }

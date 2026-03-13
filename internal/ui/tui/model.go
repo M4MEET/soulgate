@@ -7,9 +7,9 @@ import (
 	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/ui/onboarding"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -46,25 +46,32 @@ type InteractiveChatModel struct {
 	spinnerFrame int
 	lastUpdate   time.Time
 	// Model selection mode
-	showModelSelector    bool
-	modelSelectionStep   int    // 1 = provider selection, 2 = model selection
-	selectedProvider     string // Provider selected in step 1
-	modelOptions         []modelOption
-	selectedModelIndex   int // For arrow key navigation
+	showModelSelector  bool
+	modelSelectionStep int    // 1 = provider selection, 2 = model selection
+	selectedProvider   string // Provider selected in step 1
+	modelOptions       []modelOption
+	selectedModelIndex int // For arrow key navigation
 	// Setup wizard mode
-	showSetupWizard     bool
-	setupStep           int
-	setupIntegrationID  string
-	setupFieldValues    map[string]string
-	setupCurrentField   int
+	showSetupWizard    bool
+	setupStep          int
+	setupIntegrationID string
+	setupFieldValues   map[string]string
+	setupCurrentField  int
 	// Onboarding mode (exported to allow auto-trigger from parent)
-	ShowOnboarding   bool
-	OnboardingState  *onboarding.OnboardingState
-	onboardingInput  string
+	ShowOnboarding  bool
+	OnboardingState *onboarding.OnboardingState
+	onboardingInput string
 	// API key prompt
 	showAPIKeyPrompt bool
 	apiKeyProvider   string
 	apiKeyInput      textinput.Model
+	// Streaming mode
+	streamingEnabled bool
+	streamBuffer     string        // Accumulates streamed chunks
+	teaProgram       **tea.Program // Double pointer: shared across copies
+	// Live thinking output
+	thinkingLog      []core.ThinkingEvent // Recent thinking events
+	thinkingActivity string               // Current activity for status bar
 }
 
 // modelOption represents a selectable model option
@@ -83,6 +90,14 @@ type (
 		err  error
 	}
 	thinkingMsg struct{}
+	// streamChunkMsg carries a streamed token from the AI
+	streamChunkMsg struct {
+		chunk string
+	}
+	// thinkingEventMsg carries a live thinking event from the agentic loop
+	thinkingEventMsg struct {
+		event core.ThinkingEvent
+	}
 	// PermissionRequestMsg is exported so it can be sent from parent package
 	PermissionRequestMsg struct {
 		Request  core.PermissionRequest
@@ -120,6 +135,7 @@ func NewInteractiveChatModel(orch *core.Orchestrator) InteractiveChatModel {
 	provider, modelName := orch.GetCurrentProvider()
 	discovery := model.NewModelDiscovery()
 
+	progPtr := new(*tea.Program)
 	return InteractiveChatModel{
 		orch:            orch,
 		input:           ti,
@@ -130,6 +146,7 @@ func NewInteractiveChatModel(orch *core.Orchestrator) InteractiveChatModel {
 		currentProvider: provider,
 		currentModel:    modelName,
 		modelDiscovery:  discovery,
+		teaProgram:      progPtr,
 	}
 }
 
@@ -149,6 +166,15 @@ func welcomeMessage() string {
 	sb.WriteString(dim.Render("  Type a message to chat with the AI.") + "\n")
 	sb.WriteString(dim.Render("  Use ") + cmd.Render("/help") + dim.Render(" for commands, ") + cmd.Render("ctrl+h") + dim.Render(" for shortcuts.") + "\n")
 	return sb.String()
+}
+
+// SetProgram sets the tea.Program reference for sending messages from goroutines.
+// Uses a double pointer so the value persists across Bubble Tea model copies.
+func (m *InteractiveChatModel) SetProgram(p *tea.Program) {
+	if m.teaProgram == nil {
+		m.teaProgram = new(*tea.Program)
+	}
+	*m.teaProgram = p
 }
 
 // Init initializes the Bubble Tea model

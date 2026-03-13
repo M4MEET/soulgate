@@ -55,6 +55,7 @@ type CompletionResponse struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	StopReason string     `json:"stop_reason"` // "end_turn", "tool_use", "max_tokens"
 	Usage      TokenUsage `json:"usage"`
+	Model      string     `json:"model,omitempty"` // Actual model used (from API response)
 }
 
 // StopReason constants

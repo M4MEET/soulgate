@@ -305,10 +305,10 @@ func TestPromptChoice(t *testing.T) {
 // TestCreateSetupConfig tests the createSetupConfig function
 func TestCreateSetupConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		cfg       setupConfig
-		wantErr   bool
-		validate  func(t *testing.T, configDir string)
+		name     string
+		cfg      setupConfig
+		wantErr  bool
+		validate func(t *testing.T, configDir string)
 	}{
 		{
 			name: "creates config for OpenAI provider",

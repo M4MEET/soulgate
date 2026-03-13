@@ -8,10 +8,11 @@ func BuildModelOptionsForProvider(provider string) []ModelOption {
 	switch provider {
 	case "openai":
 		return []ModelOption{
-			{ID: "gpt-4o", Name: "GPT-4o", Description: "Most capable - Complex coding & analysis"},
-			{ID: "gpt-4o-mini", Name: "GPT-4o-mini", Description: "Fast & economical - Simple tasks"},
-			{ID: "gpt-4-turbo", Name: "GPT-4-Turbo", Description: "Previous gen - Reliable for most tasks"},
-			{ID: "gpt-3.5-turbo", Name: "GPT-3.5-Turbo", Description: "Budget friendly - Quick responses"},
+			{ID: "gpt-4.1", Name: "GPT-4.1", Description: "Latest flagship - Complex coding & analysis"},
+			{ID: "gpt-4.1-mini", Name: "GPT-4.1-mini", Description: "Fast & economical - Balanced tasks"},
+			{ID: "gpt-4.1-nano", Name: "GPT-4.1-nano", Description: "Fastest & cheapest - Simple tasks"},
+			{ID: "o3", Name: "o3", Description: "Deep reasoning - Complex problem-solving"},
+			{ID: "o4-mini", Name: "o4-mini", Description: "Efficient reasoning - Cost-effective"},
 		}
 	case "anthropic":
 		return []ModelOption{
@@ -58,7 +59,7 @@ func BuildModelOptionsForProvider(provider string) []ModelOption {
 	case "openrouter":
 		return []ModelOption{
 			{ID: "openrouter/auto", Name: "Auto", Description: "Best available model - Auto-selected"},
-			{ID: "openai/gpt-4o", Name: "GPT-4o (OpenRouter)", Description: "OpenAI via OpenRouter - Fallback routing"},
+			{ID: "openai/gpt-4.1", Name: "GPT-4.1 (OpenRouter)", Description: "OpenAI via OpenRouter - Fallback routing"},
 			{ID: "anthropic/claude-opus-4", Name: "Claude Opus 4 (OpenRouter)", Description: "Claude via OpenRouter - Fallback routing"},
 		}
 	case "together":

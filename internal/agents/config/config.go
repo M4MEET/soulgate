@@ -9,29 +9,29 @@ import (
 
 // AgentsConfig holds multiple agent configurations
 type AgentsConfig struct {
-	Version string              `yaml:"version"`
-	Agents  []AgentDefinition   `yaml:"agents"`
-	Routing RoutingConfig       `yaml:"routing,omitempty"`
+	Version string            `yaml:"version"`
+	Agents  []AgentDefinition `yaml:"agents"`
+	Routing RoutingConfig     `yaml:"routing,omitempty"`
 }
 
 // AgentDefinition defines a single agent
 type AgentDefinition struct {
-	ID          string         `yaml:"id"`
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description,omitempty"`
-	Enabled     bool           `yaml:"enabled"`
-	Model       ModelConfig    `yaml:"model"`
-	Tools       []string       `yaml:"tools,omitempty"`
-	Skills      []string       `yaml:"skills,omitempty"`
-	SystemPrompt string        `yaml:"system_prompt,omitempty"`
-	MaxIterations int          `yaml:"max_iterations,omitempty"`
-	Metadata    map[string]string `yaml:"metadata,omitempty"`
+	ID            string            `yaml:"id"`
+	Name          string            `yaml:"name"`
+	Description   string            `yaml:"description,omitempty"`
+	Enabled       bool              `yaml:"enabled"`
+	Model         ModelConfig       `yaml:"model"`
+	Tools         []string          `yaml:"tools,omitempty"`
+	Skills        []string          `yaml:"skills,omitempty"`
+	SystemPrompt  string            `yaml:"system_prompt,omitempty"`
+	MaxIterations int               `yaml:"max_iterations,omitempty"`
+	Metadata      map[string]string `yaml:"metadata,omitempty"`
 }
 
 // ModelConfig defines model configuration for an agent
 type ModelConfig struct {
-	Provider    string  `yaml:"provider"`    // openai, anthropic, etc.
-	Model       string  `yaml:"model"`       // gpt-4, claude-3-opus, etc.
+	Provider    string  `yaml:"provider"` // openai, anthropic, etc.
+	Model       string  `yaml:"model"`    // gpt-4, claude-3-opus, etc.
 	Temperature float64 `yaml:"temperature,omitempty"`
 	MaxTokens   int     `yaml:"max_tokens,omitempty"`
 	APIKey      string  `yaml:"api_key,omitempty"` // Can reference env var

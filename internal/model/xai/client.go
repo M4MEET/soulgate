@@ -47,8 +47,12 @@ func (p *Provider) SupportedFeatures() model.FeatureSet {
 
 // Complete sends a completion request to xAI
 func (p *Provider) Complete(ctx context.Context, req model.CompletionRequest) (*model.CompletionResponse, error) {
-	// Delegate to OpenAI provider (API compatible)
 	return p.openaiProvider.Complete(ctx, req)
+}
+
+// StreamComplete streams a completion response from xAI
+func (p *Provider) StreamComplete(ctx context.Context, req model.CompletionRequest) (<-chan model.StreamChunk, error) {
+	return p.openaiProvider.StreamComplete(ctx, req)
 }
 
 // GetModelName returns the current model name

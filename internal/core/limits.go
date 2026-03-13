@@ -34,7 +34,7 @@ func DefaultExecutionLimits() ExecutionLimits {
 		TotalTimeout:      5 * time.Minute,
 		IterationTimeout:  60 * time.Second,
 		APICallTimeout:    30 * time.Second,
-		MaxTokens:         100000, // ~$1 with GPT-4
+		MaxTokens:         100000,      // ~$1 with GPT-4
 		MaxToolResultSize: 1024 * 1024, // 1MB
 	}
 }

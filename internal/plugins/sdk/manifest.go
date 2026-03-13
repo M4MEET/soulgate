@@ -20,11 +20,11 @@ type Manifest struct {
 
 // PermissionsConfig defines the permissions requested by a plugin
 type PermissionsConfig struct {
-	FilesRead  []string `yaml:"files.read,omitempty"`
-	FilesWrite []string `yaml:"files.write,omitempty"`
-	FilesList  []string `yaml:"files.list,omitempty"`
-	FilesStat  []string `yaml:"files.stat,omitempty"`
-	NetRequest []string `yaml:"net.request,omitempty"`
+	FilesRead   []string `yaml:"files.read,omitempty"`
+	FilesWrite  []string `yaml:"files.write,omitempty"`
+	FilesList   []string `yaml:"files.list,omitempty"`
+	FilesStat   []string `yaml:"files.stat,omitempty"`
+	NetRequest  []string `yaml:"net.request,omitempty"`
 	ExecCommand []string `yaml:"exec.command,omitempty"`
 }
 
@@ -37,10 +37,10 @@ type ToolDef struct {
 
 // CommandDef defines a command provided by the plugin
 type CommandDef struct {
-	Name        string        `yaml:"name"`
-	Description string        `yaml:"description"`
-	Usage       string        `yaml:"usage,omitempty"`
-	Args        []CommandArg  `yaml:"args,omitempty"`
+	Name        string       `yaml:"name"`
+	Description string       `yaml:"description"`
+	Usage       string       `yaml:"usage,omitempty"`
+	Args        []CommandArg `yaml:"args,omitempty"`
 }
 
 // CommandArg defines a command argument

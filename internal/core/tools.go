@@ -13,6 +13,12 @@ import (
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/brokers"
 	"github.com/M4MEET/soulgate/internal/model"
+	"github.com/M4MEET/soulgate/internal/tools/cron"
+	"github.com/M4MEET/soulgate/internal/tools/llmtask"
+	"github.com/M4MEET/soulgate/internal/tools/patch"
+	"github.com/M4MEET/soulgate/internal/tools/pdf"
+	"github.com/M4MEET/soulgate/internal/tools/process"
+	"github.com/M4MEET/soulgate/internal/tools/web"
 )
 
 // executeAgenticLoop runs the agentic loop: model call -> tool execution -> repeat
@@ -50,11 +56,22 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 
 	tracker := NewExecutionTracker(limits)
 
+	// Parse directives from user message (e.g. /think high, /fast on)
+	cleanedPrompt, appliedDirectives := ParseDirectives(userPrompt, o.directives)
+	if len(appliedDirectives) > 0 && o.streamCallback != nil {
+		for _, d := range appliedDirectives {
+			o.streamCallback(fmt.Sprintf("[directive: %s]\n", d))
+		}
+	}
+	if cleanedPrompt == "" {
+		cleanedPrompt = userPrompt // fallback if all content was directives
+	}
+
 	// Initialize conversation with user message
 	messages := []model.Message{
 		{
 			Role:    model.RoleUser,
-			Content: userPrompt,
+			Content: cleanedPrompt,
 		},
 	}
 
@@ -83,6 +100,12 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 			return "", err
 		}
 
+		o.emitThinking(ThinkingEvent{
+			Kind:      ThinkingIteration,
+			Iteration: tracker.iterations,
+			Message:   fmt.Sprintf("iteration %d", tracker.iterations),
+		})
+
 		// Create completion request
 		req := model.CompletionRequest{
 			Messages:    messages,
@@ -94,11 +117,63 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 
 		// Call model provider with API call timeout
 		apiCtx, apiCancel := tracker.APICallContext(ctx)
-		resp, err := o.provider.Complete(apiCtx, req)
-		apiCancel()
-		if err != nil {
-			return "", fmt.Errorf("model provider error: %w", err)
+		modelCallStart := time.Now()
+
+		o.emitThinking(ThinkingEvent{
+			Kind:     ThinkingModelCall,
+			Provider: o.provider.Name(),
+			Message:  "calling model...",
+		})
+
+		var resp *model.CompletionResponse
+
+		if o.streaming && o.streamCallback != nil {
+			// Streaming mode: read chunks and forward to callback
+			streamCh, err := o.provider.StreamComplete(apiCtx, req)
+			apiCancel()
+			if err != nil {
+				return "", fmt.Errorf("model provider error: %w", err)
+			}
+
+			for chunk := range streamCh {
+				if chunk.Error != nil {
+					return "", fmt.Errorf("streaming error: %w", chunk.Error)
+				}
+				if chunk.Delta != "" {
+					o.streamCallback(chunk.Delta)
+				}
+				if chunk.Done && chunk.Response != nil {
+					resp = chunk.Response
+				}
+			}
+
+			if resp == nil {
+				return "", fmt.Errorf("streaming completed without final response")
+			}
+		} else {
+			// Non-streaming mode
+			var err error
+			resp, err = o.provider.Complete(apiCtx, req)
+			apiCancel()
+			if err != nil {
+				return "", fmt.Errorf("model provider error: %w", err)
+			}
 		}
+
+		// Track actual model name from API response
+		if resp.Model != "" {
+			o.actualModelName = resp.Model
+		}
+
+		o.emitThinking(ThinkingEvent{
+			Kind:       ThinkingModelDone,
+			Provider:   o.provider.Name(),
+			Model:      resp.Model,
+			Duration:   time.Since(modelCallStart),
+			TokensUsed: resp.Usage.TotalTokens,
+			StopReason: resp.StopReason,
+			Message:    fmt.Sprintf("model responded (%s)", resp.StopReason),
+		})
 
 		// Track token usage
 		if err := tracker.AddTokens(resp.Usage.TotalTokens); err != nil {
@@ -110,11 +185,11 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 			WithSessionID(o.session.ID).
 			WithRunID(runID).
 			WithMetadata("provider", o.provider.Name()).
+			WithMetadata("model", resp.Model).
 			WithMetadata("stop_reason", resp.StopReason).
 			WithMetadata("tokens", fmt.Sprintf("%d", resp.Usage.TotalTokens)))
 
 		// Add assistant message to conversation
-		// Include tool_calls if present so they're sent in the next API request
 		assistantMsg := resp.Message
 		if len(resp.ToolCalls) > 0 {
 			assistantMsg.ToolCalls = resp.ToolCalls
@@ -123,22 +198,37 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 
 		// Check stop reason
 		if resp.StopReason == model.StopReasonEndTurn || resp.StopReason == model.StopReasonMaxTokens {
-			// Model finished - return response
 			return resp.Message.Content, nil
 		}
 
 		// Handle tool calls
 		if resp.StopReason == model.StopReasonToolUse && len(resp.ToolCalls) > 0 {
+			// Loop detection: record and check
+			for _, tc := range resp.ToolCalls {
+				var args map[string]interface{}
+				_ = json.Unmarshal(tc.Input, &args)
+				o.loopDetector.Record(tc.Name, args)
+			}
+			detection := o.loopDetector.Check()
+			if detection.Level == "critical" {
+				return "", fmt.Errorf("loop detected: %s. %s", detection.Pattern, detection.Suggestion)
+			}
+			if detection.Level == "warning" && o.streaming && o.streamCallback != nil {
+				o.streamCallback(fmt.Sprintf("\n[warning: %s]\n", detection.Pattern))
+			}
+
+			// Notify stream callback about tool use
+			if o.streaming && o.streamCallback != nil {
+				for _, tc := range resp.ToolCalls {
+					o.streamCallback(fmt.Sprintf("\n[calling %s...]\n", tc.Name))
+				}
+			}
+
 			toolResults := o.executeToolCallsParallel(ctx, runID, tracker, resp.ToolCalls)
-
-			// Append results in original tool call order
 			messages = append(messages, toolResults...)
-
-			// Continue loop to get next model response
 			continue
 		}
 
-		// Unknown stop reason
 		return "", fmt.Errorf("unexpected stop reason: %s", resp.StopReason)
 	}
 }
@@ -168,6 +258,20 @@ func (o *Orchestrator) executeToolCallsParallel(
 		go func(idx int, toolCall model.ToolCall) {
 			defer wg.Done()
 
+			// Abbreviate args for display
+			argsSummary := string(toolCall.Input)
+			if len(argsSummary) > 120 {
+				argsSummary = argsSummary[:120] + "..."
+			}
+
+			o.emitThinking(ThinkingEvent{
+				Kind:     ThinkingToolStart,
+				ToolName: toolCall.Name,
+				ToolArgs: argsSummary,
+				Message:  fmt.Sprintf("calling %s", toolCall.Name),
+			})
+
+			toolStart := time.Now()
 			result, err := o.executeToolCall(ctx, runID, toolCall)
 			if err != nil {
 				result = fmt.Sprintf("Error: %v", err)
@@ -189,6 +293,20 @@ func (o *Orchestrator) executeToolCallsParallel(
 					limit,
 				)
 			}
+
+			// Abbreviate result for display
+			resultSummary := result
+			if len(resultSummary) > 200 {
+				resultSummary = resultSummary[:200] + "..."
+			}
+
+			o.emitThinking(ThinkingEvent{
+				Kind:       ThinkingToolDone,
+				ToolName:   toolCall.Name,
+				ToolResult: resultSummary,
+				Duration:   time.Since(toolStart),
+				Message:    fmt.Sprintf("%s completed", toolCall.Name),
+			})
 
 			results[idx] = toolResult{
 				index: idx,
@@ -318,6 +436,54 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 
 	case "switch_model":
 		return o.handleSwitchModel(ctx, brokerCtx, toolCall.Input)
+
+	case "agent_create":
+		return o.handleAgentCreate(ctx, toolCall.Input)
+
+	case "agent_list":
+		return o.handleAgentList(ctx, toolCall.Input)
+
+	case "agent_stop":
+		return o.handleAgentStop(ctx, toolCall.Input)
+
+	case "web_search", "web_fetch":
+		return web.ExecuteTool(ctx, toolCall.Name, toolCall.Input)
+
+	case "process_start", "process_list", "process_poll", "process_log", "process_write", "process_kill":
+		var args map[string]interface{}
+		if err := json.Unmarshal(toolCall.Input, &args); err != nil {
+			return "", fmt.Errorf("invalid tool input: %w", err)
+		}
+		return process.ExecuteTool(ctx, o.processManager, toolCall.Name, args)
+
+	case "pdf_read":
+		var args map[string]interface{}
+		if err := json.Unmarshal(toolCall.Input, &args); err != nil {
+			return "", fmt.Errorf("invalid tool input: %w", err)
+		}
+		return pdf.ExecuteTool(ctx, toolCall.Name, args)
+
+	case "cron_add", "cron_list", "cron_remove", "cron_pause", "cron_resume":
+		var args map[string]interface{}
+		if err := json.Unmarshal(toolCall.Input, &args); err != nil {
+			return "", fmt.Errorf("invalid tool input: %w", err)
+		}
+		return cron.ExecuteTool(ctx, o.cronScheduler, toolCall.Name, args)
+
+	case "llm_task":
+		var args map[string]interface{}
+		if err := json.Unmarshal(toolCall.Input, &args); err != nil {
+			return "", fmt.Errorf("invalid tool input: %w", err)
+		}
+		executor := &llmTaskExecutor{orch: o}
+		return llmtask.ExecuteTool(ctx, executor, toolCall.Name, args)
+
+	case "apply_patch":
+		var args map[string]interface{}
+		if err := json.Unmarshal(toolCall.Input, &args); err != nil {
+			return "", fmt.Errorf("invalid tool input: %w", err)
+		}
+		return patch.ExecuteTool(ctx, o.workspace.Root, toolCall.Name, args)
 
 	default:
 		// Try integration tools
@@ -477,14 +643,14 @@ func (o *Orchestrator) getToolSchemas() []model.ToolSchema {
 		},
 		{
 			Name:        "switch_model",
-			Description: "Switch to a different AI model based on task requirements. Use this to optimize performance and cost. Available models: 'gpt-4o' (best for complex coding/analysis), 'gpt-4o-mini' (fast and economical for simple tasks), 'claude-sonnet' (excellent reasoning), 'claude-opus' (most capable for complex tasks). Always explain to the user why you're switching models.",
+			Description: "Switch to a different AI model based on task requirements. Use this to optimize performance and cost. Available models: 'gpt-4.1' (latest OpenAI flagship), 'gpt-4.1-mini' (fast and economical), 'gpt-4.1-nano' (fastest/cheapest), 'o3' (deep reasoning), 'claude-sonnet' (excellent reasoning), 'claude-opus' (most capable for complex tasks). Always explain to the user why you're switching models.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"model": {
 						"type": "string",
-						"description": "Model to switch to. Options: 'gpt-4o', 'gpt-4o-mini', 'claude-sonnet', 'claude-opus'",
-						"enum": ["gpt-4o", "gpt-4o-mini", "claude-sonnet", "claude-opus"]
+						"description": "Model to switch to. Options: 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'claude-sonnet', 'claude-opus'",
+						"enum": ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "claude-sonnet", "claude-opus"]
 					},
 					"reason": {
 						"type": "string",
@@ -494,6 +660,109 @@ func (o *Orchestrator) getToolSchemas() []model.ToolSchema {
 				"required": ["model", "reason"]
 			}`),
 		},
+	}
+
+	// Agent management tools
+	tools = append(tools, model.ToolSchema{
+		Name:        "agent_create",
+		Description: "Create a task-specific background agent. The agent runs independently with its own agentic loop and can use all tools (files, exec, net, memory). Use this when the user asks to create an agent, automate a task, or when a task benefits from running in the background.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"description": "Short name for the agent (e.g., 'log-monitor', 'code-reviewer', 'test-runner')"
+				},
+				"task": {
+					"type": "string",
+					"description": "Detailed description of what the agent should do. Be specific about the task, what files to look at, what to check for, and what output to produce."
+				}
+			},
+			"required": ["name", "task"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "agent_list",
+		Description: "List all background agents and their status (running, completed, failed, stopped). Shows agent results when completed.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {}
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "agent_stop",
+		Description: "Stop a running background agent by its ID.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"description": "The agent ID to stop (e.g., 'agent_1')"
+				}
+			},
+			"required": ["id"]
+		}`),
+	})
+
+	// Web tools (web_search, web_fetch)
+	for _, s := range web.ToolSchemas() {
+		tools = append(tools, model.ToolSchema{
+			Name:        s.Name,
+			Description: s.Description,
+			InputSchema: s.InputSchema,
+		})
+	}
+
+	// Process management tools
+	for _, s := range process.ToolSchemas() {
+		schemaJSON, _ := json.Marshal(s["input_schema"])
+		tools = append(tools, model.ToolSchema{
+			Name:        s["name"].(string),
+			Description: s["description"].(string),
+			InputSchema: json.RawMessage(schemaJSON),
+		})
+	}
+
+	// PDF tool
+	for _, s := range pdf.ToolSchemas() {
+		schemaJSON, _ := json.Marshal(s["input_schema"])
+		tools = append(tools, model.ToolSchema{
+			Name:        s["name"].(string),
+			Description: s["description"].(string),
+			InputSchema: json.RawMessage(schemaJSON),
+		})
+	}
+
+	// Cron scheduler tools
+	for _, s := range cron.ToolSchemas() {
+		schemaJSON, _ := json.Marshal(s["input_schema"])
+		tools = append(tools, model.ToolSchema{
+			Name:        s["name"].(string),
+			Description: s["description"].(string),
+			InputSchema: json.RawMessage(schemaJSON),
+		})
+	}
+
+	// LLM Task tool
+	for _, s := range llmtask.ToolSchemas() {
+		schemaJSON, _ := json.Marshal(s["input_schema"])
+		tools = append(tools, model.ToolSchema{
+			Name:        s["name"].(string),
+			Description: s["description"].(string),
+			InputSchema: json.RawMessage(schemaJSON),
+		})
+	}
+
+	// Apply Patch tool
+	for _, s := range patch.ToolSchemas() {
+		schemaJSON, _ := json.Marshal(s["input_schema"])
+		tools = append(tools, model.ToolSchema{
+			Name:        s["name"].(string),
+			Description: s["description"].(string),
+			InputSchema: json.RawMessage(schemaJSON),
+		})
 	}
 
 	// Add tools from configured integrations
@@ -520,6 +789,25 @@ func (o *Orchestrator) handleIntegrationTool(ctx context.Context, toolName strin
 	}
 
 	return "", fmt.Errorf("unknown tool: %s", toolName)
+}
+
+// llmTaskExecutor adapts the orchestrator to the llmtask.Executor interface
+type llmTaskExecutor struct {
+	orch *Orchestrator
+}
+
+func (e *llmTaskExecutor) Complete(ctx context.Context, prompt string, jsonMode bool) (string, error) {
+	req := model.CompletionRequest{
+		Messages: []model.Message{
+			{Role: model.RoleUser, Content: prompt},
+		},
+		MaxTokens: 4096,
+	}
+	resp, err := e.orch.provider.Complete(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return resp.Message.Content, nil
 }
 
 // handleFileRead handles the files_read tool call
@@ -710,8 +998,10 @@ func (o *Orchestrator) handleSwitchModel(ctx context.Context, brokerCtx brokers.
 		provider  string
 		modelName string
 	}{
-		"gpt-4o":        {"openai", "gpt-4o"},
-		"gpt-4o-mini":   {"openai", "gpt-4o-mini"},
+		"gpt-4.1":       {"openai", "gpt-4.1"},
+		"gpt-4.1-mini":  {"openai", "gpt-4.1-mini"},
+		"gpt-4.1-nano":  {"openai", "gpt-4.1-nano"},
+		"o3":            {"openai", "o3"},
 		"claude-sonnet": {"anthropic", "claude-sonnet-4-20250514"},
 		"claude-opus":   {"anthropic", "claude-opus-4-20250514"},
 	}
@@ -719,7 +1009,7 @@ func (o *Orchestrator) handleSwitchModel(ctx context.Context, brokerCtx brokers.
 	// Get model info
 	modelInfo, ok := modelMap[params.Model]
 	if !ok {
-		return "", fmt.Errorf("unknown model: %s. Available: gpt-4o, gpt-4o-mini, claude-sonnet, claude-opus", params.Model)
+		return "", fmt.Errorf("unknown model: %s. Available: gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, claude-sonnet, claude-opus", params.Model)
 	}
 
 	// Get current provider/model for logging

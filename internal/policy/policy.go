@@ -8,14 +8,14 @@ type Policy struct {
 
 // PolicyRule represents a single policy rule
 type PolicyRule struct {
-	Name        string           `yaml:"name"`
-	Description string           `yaml:"description,omitempty"`
-	Action      string           `yaml:"action"`             // e.g., "files.read", "files.*"
-	Resource    string           `yaml:"resource"`           // e.g., "./**", "../**"
-	Decision    Decision         `yaml:"decision"`           // allow, deny, or require_approval
-	Priority    int              `yaml:"priority,omitempty"` // Higher priority = evaluated first
-	Role        string           `yaml:"role,omitempty"`     // admin, user, agent, plugin
-	AgentID     string           `yaml:"agent_id,omitempty"` // scope rule to a specific agent
+	Name        string            `yaml:"name"`
+	Description string            `yaml:"description,omitempty"`
+	Action      string            `yaml:"action"`             // e.g., "files.read", "files.*"
+	Resource    string            `yaml:"resource"`           // e.g., "./**", "../**"
+	Decision    Decision          `yaml:"decision"`           // allow, deny, or require_approval
+	Priority    int               `yaml:"priority,omitempty"` // Higher priority = evaluated first
+	Role        string            `yaml:"role,omitempty"`     // admin, user, agent, plugin
+	AgentID     string            `yaml:"agent_id,omitempty"` // scope rule to a specific agent
 	Conditions  []PolicyCondition `yaml:"conditions,omitempty"`
 }
 

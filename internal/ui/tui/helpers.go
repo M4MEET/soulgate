@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -18,7 +20,7 @@ func (m *InteractiveChatModel) addMessage(text string) {
 func (m *InteractiveChatModel) updateAutocomplete() {
 	value := m.input.Value()
 	if strings.HasPrefix(value, "/") {
-		commands := []string{"/status", "/tools", "/skills", "/memory", "/soul", "/schedule", "/history", "/clear", "/help", "/model", "/debug", "/hub", "/setup", "/onboarding", "/exit", "/quit"}
+		commands := []string{"/status", "/tools", "/skills", "/memory", "/soul", "/schedule", "/history", "/clear", "/help", "/model", "/debug", "/hub", "/setup", "/onboarding", "/stream", "/think", "/fast", "/verbose", "/processes", "/cron", "/exit", "/quit"}
 		newAutocomplete := filterStrings(commands, value)
 
 		wasShowing := m.showAutocomplete
@@ -131,17 +133,17 @@ func formatAIResponse(text string) string {
 				sb.WriteString("\n")
 				sb.WriteString(lipgloss.NewStyle().
 					Foreground(lipgloss.Color("240")).
-					Render("    "+codeLanguage))
+					Render("    " + codeLanguage))
 				sb.WriteString("\n")
 				sb.WriteString(lipgloss.NewStyle().
 					Foreground(lipgloss.Color("238")).
-					Render("   "+strings.Repeat("─", 50)))
+					Render("   " + strings.Repeat("─", 50)))
 				sb.WriteString("\n")
 			} else {
 				// Code block footer
 				sb.WriteString(lipgloss.NewStyle().
 					Foreground(lipgloss.Color("238")).
-					Render("   "+strings.Repeat("─", 50)))
+					Render("   " + strings.Repeat("─", 50)))
 				sb.WriteString("\n")
 			}
 			continue
@@ -258,7 +260,7 @@ func highlightInlineCode(text string) string {
 			sb.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("117")).
 				Background(lipgloss.Color("236")).
-				Render(" "+part+" "))
+				Render(" " + part + " "))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252")).
@@ -267,4 +269,100 @@ func highlightInlineCode(text string) string {
 	}
 
 	return sb.String()
+}
+
+// formatThinkingToolCall formats a tool call for the live thinking output
+func formatThinkingToolCall(toolName string, args string) string {
+	toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
+	argsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+
+	// Parse args to show key info
+	argsSummary := abbreviateArgs(args, 80)
+
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render("  ┌─ "))
+	sb.WriteString(toolStyle.Render(toolName))
+	if argsSummary != "" {
+		sb.WriteString(argsStyle.Render(" " + argsSummary))
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// formatThinkingToolResult formats a tool result for the live thinking output
+func formatThinkingToolResult(toolName string, result string, duration time.Duration) string {
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	resultStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+	// Abbreviate result
+	summary := abbreviateResult(result, 120)
+
+	var sb strings.Builder
+	sb.WriteString(dimStyle.Render("  └─ "))
+	sb.WriteString(okStyle.Render(fmt.Sprintf("done %s", duration.Round(time.Millisecond))))
+	if summary != "" {
+		sb.WriteString(resultStyle.Render(" " + summary))
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// abbreviateArgs shortens tool arguments for display
+func abbreviateArgs(args string, maxLen int) string {
+	args = strings.TrimSpace(args)
+	if args == "" || args == "{}" || args == "null" {
+		return ""
+	}
+	// Clean up JSON for readability
+	args = strings.ReplaceAll(args, "\"", "")
+	args = strings.ReplaceAll(args, "{", "")
+	args = strings.ReplaceAll(args, "}", "")
+	args = strings.TrimSpace(args)
+	if len(args) > maxLen {
+		args = args[:maxLen] + "..."
+	}
+	return args
+}
+
+// ensureThinkingPlaceholder makes sure there's a placeholder message for thinking output
+func (m *InteractiveChatModel) ensureThinkingPlaceholder() {
+	if len(m.messages) == 0 || !strings.Contains(m.messages[len(m.messages)-1], "thinking") {
+		m.messages = append(m.messages, formatThinkingPanel(""))
+	}
+}
+
+// formatThinkingPanel renders the thinking output panel (non-streaming mode)
+func formatThinkingPanel(content string) string {
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+
+	var sb strings.Builder
+	sb.WriteString("  ")
+	sb.WriteString(labelStyle.Render("thinking"))
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 50)))
+	sb.WriteString("\n")
+	if content != "" {
+		sb.WriteString(content)
+	}
+	return sb.String()
+}
+
+// abbreviateResult shortens tool results for display
+func abbreviateResult(result string, maxLen int) string {
+	result = strings.TrimSpace(result)
+	if result == "" {
+		return ""
+	}
+	// Take first line only
+	if idx := strings.IndexByte(result, '\n'); idx >= 0 {
+		result = result[:idx]
+	}
+	if len(result) > maxLen {
+		result = result[:maxLen] + "..."
+	}
+	return result
 }
