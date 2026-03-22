@@ -1088,7 +1088,16 @@ export default function ChatView() {
             break;
           case 'stream':
             fullText += evt.message;
-            updateMessage(capturedTid, aiId, m => ({ ...m, content: fullText }));
+            // Show streaming text in thinking log as "🤖 text..."
+            const lastThinkIdx = thinkingLog.length - 1;
+            if (lastThinkIdx >= 0 && thinkingLog[lastThinkIdx].startsWith('🤖 ')) {
+              // Update existing streaming line
+              thinkingLog[lastThinkIdx] = `🤖 ${fullText.slice(0, 200)}${fullText.length > 200 ? '...' : ''}`;
+            } else {
+              // Start new streaming line
+              thinkingLog.push(`🤖 ${fullText.slice(0, 200)}${fullText.length > 200 ? '...' : ''}`);
+            }
+            updateMessage(capturedTid, aiId, m => ({ ...m, content: fullText, thinkingLog: [...thinkingLog] }));
             break;
           case 'done':
             if (evt.message && !fullText) fullText = evt.message;

@@ -141,7 +141,8 @@ export default function ChatMessage({
                 else if (line.startsWith('⟵')) color = 'text-emerald-400';
                 else if (line.startsWith('⚡')) color = 'text-amber-400';
                 else if (line.startsWith('  ↳')) color = 'text-emerald-400/70';
-                return <div key={i} className={color}>{line}</div>;
+                else if (line.startsWith('🤖')) color = 'text-zinc-200 italic';
+                return <div key={i} className={`${color} ${line.startsWith('🤖') ? 'pl-2 border-l-2 border-indigo-500/30 ml-1' : ''}`}>{line}</div>;
               })}
               {message.streaming && (
                 <div className="text-amber-400 animate-pulse">thinking...</div>
