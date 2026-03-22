@@ -406,10 +406,11 @@ export default function ChatInput({ onSend, onCancel, onCommand, disabled, strea
             <span>⌘ Commands</span>
             <span className="text-zinc-700 normal-case tracking-normal">↑↓ navigate · ↵ select · esc close</span>
           </div>
-          <div className="max-h-72 overflow-y-auto py-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
+          <div className="max-h-[420px] overflow-y-auto py-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
             {filteredCommands.map((cmd, i) => (
               <button
                 key={cmd.command}
+                ref={el => { if (i === slashIndex && el) el.scrollIntoView({ block: 'nearest' }); }}
                 onMouseDown={e => {
                   e.preventDefault();
                   executeSlashCommand(cmd);
