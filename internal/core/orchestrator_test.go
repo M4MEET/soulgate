@@ -35,8 +35,8 @@ func TestOrchestratorBasic(t *testing.T) {
 	assert.Equal(t, tmpDir, session.WorkspaceID)
 	assert.Equal(t, SessionActive, session.Status)
 
-	// Verify audit log was created (date-rotated file in the audit directory)
-	auditDir := workspace.ConfigDir
+	// Verify audit log was created (date-rotated file in the logs/ subdirectory)
+	auditDir := workspace.ConfigDir + "/logs"
 	entries, err := os.ReadDir(auditDir)
 	require.NoError(t, err)
 	var hasAuditFile bool
@@ -46,7 +46,7 @@ func TestOrchestratorBasic(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, hasAuditFile, "audit log file should exist in config dir")
+	assert.True(t, hasAuditFile, "audit log file should exist in config dir/logs")
 }
 
 func TestOrchestratorRun(t *testing.T) {

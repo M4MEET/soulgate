@@ -361,7 +361,7 @@ func (am *AgentManager) statePath() string {
 	if am.configDir == "" {
 		return ""
 	}
-	return filepath.Join(am.configDir, "agents_state.json")
+	return filepath.Join(am.configDir, "state", "agents.json")
 }
 
 func (am *AgentManager) saveState() {
@@ -397,6 +397,7 @@ func (am *AgentManager) saveState() {
 	if err != nil {
 		return
 	}
+	_ = os.MkdirAll(filepath.Dir(path), 0700)
 	os.WriteFile(path, data, 0600)
 }
 

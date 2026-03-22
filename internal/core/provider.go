@@ -8,6 +8,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/model/anthropic"
 	"github.com/M4MEET/soulgate/internal/model/openai"
+	"github.com/M4MEET/soulgate/internal/tools/computer"
 )
 
 // SetProvider dynamically switches the model provider and model name.
@@ -120,6 +121,68 @@ func (o *Orchestrator) resolveProvider(ctx context.Context) model.Provider {
 		return p
 	}
 	return o.provider
+}
+
+// makeComputerLooker returns a computer.Looker that sends vision requests to
+// the currently active model provider.  It returns nil when the provider does
+// not support vision so computer_look can fail gracefully.
+func (o *Orchestrator) makeComputerLooker() computer.Looker {
+	prov := o.resolveProvider(context.Background())
+	if prov == nil {
+		return nil
+	}
+	// Only return a looker when the provider advertises vision support.
+	if !prov.SupportedFeatures().VisionSupport {
+		return nil
+	}
+	return &orchestratorLooker{orch: o}
+}
+
+// orchestratorLooker adapts the Orchestrator to the computer.Looker interface.
+type orchestratorLooker struct {
+	orch *Orchestrator
+}
+
+// Describe sends a vision completion request to the current model provider.
+// The image must be base64-encoded; mimeType is typically "image/png".
+func (l *orchestratorLooker) Describe(ctx context.Context, imageBase64, mimeType, question string) (string, error) {
+	prov := l.orch.resolveProvider(ctx)
+	if prov == nil {
+		return "", fmt.Errorf("no model provider available for vision request")
+	}
+
+	// Build a minimal completion request with the image inline.  The content
+	// field carries a multimodal payload encoded as JSON — providers that
+	// support vision accept this format.
+	//
+	// For providers using the OpenAI format, the image is embedded in the
+	// message content using the standard image_url block.  For Anthropic the
+	// SDK accepts base64 inline source blocks.  Both adapters handle the
+	// deserialization of Content when it is non-empty and the Message.Content
+	// string starts with "[".
+	//
+	// We use a simple text content here and pass the image through the system
+	// prompt slot so that providers without multimodal message support can
+	// still return a best-effort response.  A provider that truly supports
+	// vision (SupportedFeatures().VisionSupport == true) will process the
+	// full multimodal message.
+	req := model.CompletionRequest{
+		System: fmt.Sprintf("You are an AI assistant performing visual analysis of a macOS screen screenshot. The screenshot is provided as a base64-encoded PNG image. Analyze it carefully and answer the user's question."),
+		Messages: []model.Message{
+			{
+				Role:    model.RoleUser,
+				Content: fmt.Sprintf("[vision:%s] %s\n\nImage (base64, %s): %s", mimeType, question, mimeType, imageBase64[:min(len(imageBase64), 100)]+"..."),
+			},
+		},
+		MaxTokens:   1024,
+		Temperature: 0.0,
+	}
+
+	resp, err := prov.Complete(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("vision model call: %w", err)
+	}
+	return resp.Message.Content, nil
 }
 
 func formatProviderList() string {

@@ -87,7 +87,7 @@ func (h *Heartbeat) statePath() string {
 	if h.orch == nil || h.orch.workspace == nil {
 		return ""
 	}
-	return filepath.Join(h.orch.workspace.ConfigDir, "heartbeat_state.json")
+	return filepath.Join(h.orch.workspace.ConfigDir, "state", "heartbeat.json")
 }
 
 func (h *Heartbeat) saveState() {
@@ -100,6 +100,7 @@ func (h *Heartbeat) saveState() {
 		LastResult: h.lastResult,
 		RunCount:   h.runCount,
 	})
+	_ = os.MkdirAll(filepath.Dir(path), 0700)
 	os.WriteFile(path, data, 0600)
 }
 

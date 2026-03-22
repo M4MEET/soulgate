@@ -294,12 +294,12 @@ func DefaultConfig() *Config {
 			MaxMemory: 64 * 1024 * 1024, // 64MB
 		},
 		Audit: AuditConfig{
-			DatabasePath: ".soulgate/audit.jsonl",
+			DatabasePath: ".soulgate/logs/audit.jsonl",
 			Enabled:      true,
 		},
 		Policy: PolicyConfig{
-			FilePath:       ".soulgate/policy.yml",
-			ScopedFilePath: ".soulgate/scoped_policy.yml",
+			FilePath:       ".soulgate/security/policy.yml",
+			ScopedFilePath: ".soulgate/security/scoped_policy.yml",
 		},
 		Execution: ExecutionConfig{
 			MaxIterations:       0,     // unlimited

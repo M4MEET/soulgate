@@ -155,9 +155,9 @@ func TestApprovalBroker_Persistence(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	require.Len(t, b.ListPending(), 1)
 
-	// Verify the file was written.
-	_, err := os.Stat(dir + "/approval_requests.json")
-	require.NoError(t, err, "approval_requests.json should exist")
+	// Verify the file was written to security/approvals.json.
+	_, err := os.Stat(dir + "/security/approvals.json")
+	require.NoError(t, err, "security/approvals.json should exist")
 }
 
 func TestApprovalBroker_HandlerNotification(t *testing.T) {

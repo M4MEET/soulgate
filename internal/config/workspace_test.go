@@ -31,8 +31,8 @@ func TestInitWorkspace(t *testing.T) {
 	_, err = os.Stat(configPath)
 	assert.NoError(t, err)
 
-	// Verify policy.yml exists
-	policyPath := filepath.Join(workspace.ConfigDir, "policy.yml")
+	// Verify policy.yml exists in security/ subdirectory
+	policyPath := filepath.Join(workspace.ConfigDir, "security", "policy.yml")
 	_, err = os.Stat(policyPath)
 	assert.NoError(t, err)
 
@@ -64,8 +64,8 @@ func TestInitWorkspacePolicyContent(t *testing.T) {
 	workspace, err := InitWorkspace(workspaceDir)
 	require.NoError(t, err)
 
-	// Read policy file
-	policyPath := filepath.Join(workspace.ConfigDir, "policy.yml")
+	// Read policy file from new security/ subdirectory
+	policyPath := filepath.Join(workspace.ConfigDir, "security", "policy.yml")
 	content, err := os.ReadFile(policyPath)
 	require.NoError(t, err)
 
@@ -89,8 +89,8 @@ func TestInitWorkspaceConfigValues(t *testing.T) {
 	assert.Equal(t, workspaceDir, workspace.Config.Workspace.Root)
 	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate"), workspace.Config.Workspace.ConfigDir)
 	assert.Equal(t, filepath.Join(workspaceDir, "plugins"), workspace.Config.Plugins.Dir)
-	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "audit.jsonl"), workspace.Config.Audit.DatabasePath)
-	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "policy.yml"), workspace.Config.Policy.FilePath)
+	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "logs", "audit.jsonl"), workspace.Config.Audit.DatabasePath)
+	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "security", "policy.yml"), workspace.Config.Policy.FilePath)
 }
 
 func TestIsInitialized(t *testing.T) {

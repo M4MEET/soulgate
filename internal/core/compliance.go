@@ -318,9 +318,9 @@ func purgeUserFromCostLog(configDir, userID string) error {
 }
 
 // purgeUserFromMemory removes all MemoryEntry records whose AgentID matches
-// userID from memory.json.
+// userID from state/memory.json.
 func purgeUserFromMemory(configDir, userID string) error {
-	path := filepath.Join(configDir, "memory.json")
+	path := filepath.Join(configDir, "state", "memory.json")
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil

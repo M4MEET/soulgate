@@ -15,6 +15,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/M4MEET/soulgate/internal/tools/browser"
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
+	"github.com/M4MEET/soulgate/internal/tools/computer"
 	"github.com/M4MEET/soulgate/internal/tools/cron"
 	"github.com/M4MEET/soulgate/internal/tools/email"
 	"github.com/M4MEET/soulgate/internal/tools/embeddings"
@@ -209,6 +210,13 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 
 	case "git_status", "git_diff", "git_log", "git_commit", "git_branch", "git_stash":
 		return gittools.ExecuteTool(ctx, o.workspace.Root, toolCall.Name, toolCall.Input)
+
+	case "computer_screenshot", "computer_click", "computer_type", "computer_move", "computer_look":
+		var args map[string]interface{}
+		if err := json.Unmarshal(toolCall.Input, &args); err != nil {
+			return "", fmt.Errorf("invalid tool input: %w", err)
+		}
+		return computer.ExecuteTool(ctx, o.makeComputerLooker(), toolCall.Name, args)
 
 	default:
 		// Try plugin tools (prefixed with pluginname__)

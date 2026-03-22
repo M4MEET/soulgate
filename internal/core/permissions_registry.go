@@ -475,6 +475,36 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		},
 	},
 
+	// Computer / desktop-automation tools — each requires an explicit
+	// "computer.*" policy rule.  computer_look requires a vision-capable model
+	// and falls back gracefully when one is not configured.
+	"computer_screenshot": {
+		Action:         "computer.screenshot",
+		Resource:       "computer:screen",
+		SchemaResource: "computer:*",
+	},
+	"computer_click": {
+		Action:         "computer.click",
+		Resource:       "computer:click",
+		SchemaResource: "computer:*",
+	},
+	"computer_type": {
+		Action:         "computer.type",
+		Resource:       "computer:type",
+		SchemaResource: "computer:*",
+	},
+	"computer_move": {
+		Action:         "computer.move",
+		Resource:       "computer:move",
+		SchemaResource: "computer:*",
+	},
+	"computer_look": {
+		Action:          "computer.look",
+		FallbackActions: []string{"computer.screenshot"},
+		Resource:        "computer:look",
+		SchemaResource:  "computer:*",
+	},
+
 	// No-permission tools
 	"search_available_tools": {NoPermissionRequired: true},
 	"llm_task":               {NoPermissionRequired: true},

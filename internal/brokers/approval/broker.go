@@ -40,7 +40,8 @@ const (
 
 	// pendingFile is where in-flight requests are persisted so that a gateway
 	// restart can surface them in the UI even if the response channel is gone.
-	pendingFile = "approval_requests.json"
+	// Path is relative to the configDir passed to NewBroker.
+	pendingFile = "security/approvals.json"
 )
 
 // ApprovalRequest represents a single pending approval.
@@ -330,6 +331,11 @@ func (b *Broker) persistToDisk() {
 	}
 
 	path := filepath.Join(b.dataDir, pendingFile)
+	// Ensure the parent directory (e.g. security/) exists before writing.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "approval broker: mkdir %s: %v\n", filepath.Dir(path), err)
+		return
+	}
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "approval broker: write %s: %v\n", path, err)
 	}

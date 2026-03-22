@@ -47,7 +47,11 @@ type Connector struct {
 
 // gatewayRequest matches the /api/chat request body expected by the SoulGate API server.
 type gatewayRequest struct {
-	Message string `json:"message"`
+	Message        string `json:"message"`
+	Channel        string `json:"channel,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	SenderID       string `json:"sender_id,omitempty"`
+	SenderName     string `json:"sender_name,omitempty"`
 }
 
 // gatewayResponse matches the /api/chat response body returned by the SoulGate API server.
@@ -212,7 +216,16 @@ func (c *Connector) handleMessage(ev *slackevents.MessageEvent) {
 
 	text := cleanMentions(ev.Text)
 
-	response, err := c.sendToGateway(text)
+	// Look up user info for a friendly name
+	userName := ev.User
+	if info, err := c.api.GetUserInfo(ev.User); err == nil {
+		userName = info.RealName
+		if userName == "" {
+			userName = info.Name
+		}
+	}
+
+	response, err := c.sendToGatewayWithMeta(text, ev.Channel, ev.User, userName)
 	if err != nil {
 		log.Printf("slack connector: gateway error for message: %v", err)
 		_ = c.sendResponse(ev.Channel, ev.ThreadTimeStamp, fmt.Sprintf("Cannot reach SoulGate API: %v", err))
@@ -237,10 +250,17 @@ func (c *Connector) handleAppMention(ev *slackevents.AppMentionEvent) {
 
 	log.Printf("slack connector: app mention from user=%s channel=%s: %s", ev.User, ev.Channel, ev.Text)
 
-	// Strip the @mention prefix so the model sees clean input.
 	text := cleanMentions(ev.Text)
 
-	response, err := c.sendToGateway(text)
+	userName := ev.User
+	if info, err := c.api.GetUserInfo(ev.User); err == nil {
+		userName = info.RealName
+		if userName == "" {
+			userName = info.Name
+		}
+	}
+
+	response, err := c.sendToGatewayWithMeta(text, ev.Channel, ev.User, userName)
 	if err != nil {
 		log.Printf("slack connector: gateway error for mention: %v", err)
 		_ = c.sendResponse(ev.Channel, ev.ThreadTimeStamp, fmt.Sprintf("Cannot reach SoulGate API: %v", err))
@@ -252,11 +272,22 @@ func (c *Connector) handleAppMention(ev *slackevents.AppMentionEvent) {
 	}
 }
 
-// sendToGateway POSTs the message to the SoulGate /api/chat endpoint and
-// returns the response text. The HTTP client has no timeout because agentic
-// loops involving tool use can take several minutes to complete.
-func (c *Connector) sendToGateway(message string) (string, error) {
-	body, err := json.Marshal(gatewayRequest{Message: message})
+// sendToGatewayWithMeta sends a message with channel/user metadata so the
+// gateway can create sessions and log activity.
+func (c *Connector) sendToGatewayWithMeta(message, channelID, userID, userName string) (string, error) {
+	return c.sendToGateway(gatewayRequest{
+		Message:        message,
+		Channel:        "slack",
+		ConversationID: channelID,
+		SenderID:       userID,
+		SenderName:     userName,
+	})
+}
+
+// sendToGateway POSTs a request to the SoulGate /api/chat endpoint and
+// returns the response text.
+func (c *Connector) sendToGateway(req gatewayRequest) (string, error) {
+	body, err := json.Marshal(req)
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}

@@ -28,8 +28,10 @@ const (
 const (
 	defaultRegistryURL = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/registry.json"
 	hubCacheTTL        = 30 * time.Minute
-	hubInstalledFile   = "hub-installed.json"
-	rawBaseURL         = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/%ss/%s/"
+	// hubInstalledFile is the path to the installed-package manifest relative to
+	// the workspace .soulgate directory.
+	hubInstalledFile = "hub/installed.json"
+	rawBaseURL       = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/%ss/%s/"
 )
 
 // Package describes a single package in the remote registry.
@@ -483,7 +485,7 @@ func (h *Hub) removeMCPEntry(name string) error {
 // ---- installed manifest ----
 
 func (h *Hub) installedPath() string {
-	return filepath.Join(h.workDir, ".soulgate", hubInstalledFile)
+	return filepath.Join(h.workDir, ".soulgate", hubInstalledFile) // .soulgate/hub/installed.json
 }
 
 func (h *Hub) loadInstalled() ([]InstalledPackage, error) {
@@ -555,15 +557,15 @@ func (h *Hub) saveInstalled(pkgs []InstalledPackage) error {
 // ---- path helpers ----
 
 // packageDir returns the local directory for a given package.
-// The directory layout mirrors how each type is stored in the workspace:
-//   - skill:X     → skills/X/
-//   - plugin:X    → plugins/X/
-//   - agent:X     → agents/X/
-//   - mcp:X       → mcp/X/          (also patched into config.yml)
-//   - connector:X → connectors/X/
-//   - extension:X → extensions/X/
+// All hub packages now live under .soulgate/hub/<type>s/<name>/:
+//   - skill:X     → .soulgate/hub/skills/X/
+//   - plugin:X    → .soulgate/hub/plugins/X/
+//   - agent:X     → .soulgate/hub/agents/X/
+//   - mcp:X       → .soulgate/hub/mcp/X/      (also patched into config.yml)
+//   - connector:X → .soulgate/hub/connectors/X/
+//   - extension:X → .soulgate/hub/extensions/X/
 func (h *Hub) packageDir(pkgType PackageType, name string) string {
-	return filepath.Join(h.workDir, string(pkgType)+"s", name)
+	return filepath.Join(h.workDir, ".soulgate", "hub", string(pkgType)+"s", name)
 }
 
 // ---- download helpers ----

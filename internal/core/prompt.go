@@ -79,9 +79,15 @@ func buildWorkspaceFilesSection(configDir string) string {
 	return sb.String()
 }
 
-// buildSkillsSection loads and injects skills into the prompt
+// buildSkillsSection loads and injects skills into the prompt.
+// It checks .soulgate/hub/skills/ first (new layout), then falls back to
+// skills/ at the workspace root for backward compatibility.
 func buildSkillsSection(workspaceRoot string) string {
-	skillsDir := filepath.Join(workspaceRoot, "skills")
+	skillsDir := filepath.Join(workspaceRoot, ".soulgate", "hub", "skills")
+	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+		// Backward compatibility: old workspaces store skills at workspace root.
+		skillsDir = filepath.Join(workspaceRoot, "skills")
+	}
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		return ""

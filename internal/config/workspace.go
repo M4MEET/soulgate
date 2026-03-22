@@ -6,6 +6,106 @@ import (
 	"path/filepath"
 )
 
+// subDirs lists all subdirectories that must exist inside .soulgate/.
+// Created with 0700 permissions so only the owner can read them.
+var subDirs = []string{
+	"hub",
+	"hub/skills",
+	"hub/agents",
+	"hub/tools",
+	"hub/connectors",
+	"hub/mcp",
+	"hub/plugins",
+	"state",
+	"state/vectors",
+	"security",
+	"logs",
+	"logs/sessions",
+	"canvas",
+}
+
+// MigrateFilesystem moves files from the old flat .soulgate/ layout to the
+// new organised subdirectory layout.  It is safe to run on a workspace that
+// has already been migrated — moves are skipped when the source file does not
+// exist or the destination already exists.
+//
+// Callers outside this package (e.g. cmd/soulgate/cmd/chat.go) may invoke
+// this directly when they manage a global config directory rather than a
+// per-workspace one.
+func MigrateFilesystem(configDir string) {
+	// Ensure new directories exist before moving files into them.
+	for _, dir := range subDirs {
+		_ = os.MkdirAll(filepath.Join(configDir, dir), 0700)
+	}
+
+	// Simple 1-to-1 file renames.
+	moves := map[string]string{
+		"memory.json":             "state/memory.json",
+		"agents_state.json":       "state/agents.json",
+		"branches.json":           "state/branches.json",
+		"web_threads.json":        "state/threads.json",
+		"cron_jobs.json":          "state/cron.json",
+		"heartbeat_state.json":    "state/heartbeat.json",
+		"session_state.json":      "state/session.json",
+		"policy.yml":              "security/policy.yml",
+		"scoped_policy.yml":       "security/scoped_policy.yml",
+		"secrets.json":            "security/secrets.json",
+		"users.json":              "security/users.json",
+		"api_tokens.json":         "security/tokens.json",
+		"approval_requests.json":  "security/approvals.json",
+		"costs.jsonl":             "logs/costs.jsonl",
+		"hub-installed.json":      "hub/installed.json",
+		// Legacy audit DB
+		"audit.jsonl":             "logs/audit.jsonl",
+	}
+	for src, dst := range moves {
+		srcPath := filepath.Join(configDir, src)
+		dstPath := filepath.Join(configDir, dst)
+		// Skip if source does not exist.
+		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+			continue
+		}
+		// Skip if destination already exists (idempotent).
+		if _, err := os.Stat(dstPath); err == nil {
+			continue
+		}
+		// Best-effort rename — ignore errors so a partial migration does
+		// not prevent the runtime from starting.
+		_ = os.Rename(srcPath, dstPath)
+	}
+
+	// Move audit-YYYY-MM-DD.jsonl files to logs/
+	entries, err := os.ReadDir(configDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			// Match audit-YYYY-MM-DD.jsonl pattern (length 22, starts with "audit-")
+			if len(name) == 22 && name[:6] == "audit-" && name[len(name)-6:] == ".jsonl" {
+				src := filepath.Join(configDir, name)
+				dst := filepath.Join(configDir, "logs", name)
+				if _, err := os.Stat(dst); os.IsNotExist(err) {
+					_ = os.Rename(src, dst)
+				}
+			}
+		}
+	}
+
+	// Move vectors/ subdirectory to state/vectors/
+	oldVectors := filepath.Join(configDir, "vectors")
+	newVectors := filepath.Join(configDir, "state", "vectors")
+	if info, err := os.Stat(oldVectors); err == nil && info.IsDir() {
+		if _, err := os.Stat(newVectors); os.IsNotExist(err) {
+			_ = os.Rename(oldVectors, newVectors)
+		}
+	}
+
+	// Move canvas/ contents to canvas/ (already at the right relative path,
+	// nothing to move — directory was already created above).
+}
+
 // Workspace represents a SoulGate workspace
 type Workspace struct {
 	// Root directory of the workspace
@@ -68,6 +168,9 @@ func LoadWorkspaceFromPath(path string) (*Workspace, error) {
 		config.Policy.FilePath = filepath.Join(root, config.Policy.FilePath)
 	}
 
+	// Migrate any pre-existing flat files to the organised subdirectory layout.
+	MigrateFilesystem(configDir)
+
 	workspace := &Workspace{
 		Root:      root,
 		ConfigDir: configDir,
@@ -111,6 +214,10 @@ func InitWorkspace(path string) (*Workspace, error) {
 		return nil, fmt.Errorf("failed to create .soulgate directory: %w", err)
 	}
 
+	// Migrate any pre-existing flat files to the organised subdirectory layout.
+	// This is idempotent — safe to call on a fresh or already-migrated workspace.
+	MigrateFilesystem(configDir)
+
 	// Create plugins directory
 	pluginsDir := filepath.Join(absPath, "plugins")
 	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
@@ -122,8 +229,9 @@ func InitWorkspace(path string) (*Workspace, error) {
 	config.Workspace.Root = absPath
 	config.Workspace.ConfigDir = configDir
 	config.Plugins.Dir = pluginsDir
-	config.Audit.DatabasePath = filepath.Join(configDir, "audit.jsonl")
-	config.Policy.FilePath = filepath.Join(configDir, "policy.yml")
+	config.Audit.DatabasePath = filepath.Join(configDir, "logs", "audit.jsonl")
+	config.Policy.FilePath = filepath.Join(configDir, "security", "policy.yml")
+	config.Policy.ScopedFilePath = filepath.Join(configDir, "security", "scoped_policy.yml")
 
 	// Save configuration
 	configPath := filepath.Join(configDir, "config.yml")

@@ -131,7 +131,7 @@ func auditDateFromFilename(base string) time.Time {
 
 // auditFileStats counts files older than cutoff without removing them.
 func auditFileStats(configDir string, cutoff time.Time) (count int, bytes int64, err error) {
-	matches, err := filepath.Glob(filepath.Join(configDir, "audit-*.jsonl"))
+	matches, err := filepath.Glob(filepath.Join(configDir, "logs", "audit-*.jsonl"))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -156,7 +156,7 @@ func auditFileStats(configDir string, cutoff time.Time) (count int, bytes int64,
 // purgeAuditFiles deletes audit-YYYY-MM-DD.jsonl files whose entire day is
 // before the cutoff.
 func purgeAuditFiles(configDir string, cutoff time.Time) (count int, freed int64, err error) {
-	matches, err := filepath.Glob(filepath.Join(configDir, "audit-*.jsonl"))
+	matches, err := filepath.Glob(filepath.Join(configDir, "logs", "audit-*.jsonl"))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -183,7 +183,7 @@ func purgeAuditFiles(configDir string, cutoff time.Time) (count int, freed int64
 
 // costEntryStats counts JSONL cost entries older than cutoff.
 func costEntryStats(configDir string, cutoff time.Time) (count int, bytes int64, err error) {
-	path := filepath.Join(configDir, "costs.jsonl")
+	path := filepath.Join(configDir, "logs", "costs.jsonl")
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return 0, 0, nil
@@ -210,7 +210,7 @@ func costEntryStats(configDir string, cutoff time.Time) (count int, bytes int64,
 // purgeCostEntries rewrites the cost log file keeping only entries whose
 // timestamp is at or after cutoff.
 func purgeCostEntries(configDir string, cutoff time.Time) (removed int, freed int64, err error) {
-	path := filepath.Join(configDir, "costs.jsonl")
+	path := filepath.Join(configDir, "logs", "costs.jsonl")
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return 0, 0, nil
@@ -294,9 +294,9 @@ func memoryEntryStats(configDir string, cutoff time.Time) (int, error) {
 }
 
 // purgeMemoryEntries removes MemoryEntry records older than cutoff from
-// memory.json and returns the number of entries removed.
+// state/memory.json and returns the number of entries removed.
 func purgeMemoryEntries(configDir string, cutoff time.Time) (int, error) {
-	path := filepath.Join(configDir, "memory.json")
+	path := filepath.Join(configDir, "state", "memory.json")
 	entries, err := loadRawMemory(configDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -337,9 +337,9 @@ func purgeMemoryEntries(configDir string, cutoff time.Time) (int, error) {
 	return removed, nil
 }
 
-// loadRawMemory reads memory.json into the nested map structure.
+// loadRawMemory reads state/memory.json into the nested map structure.
 func loadRawMemory(configDir string) (map[string]map[string]MemoryEntry, error) {
-	path := filepath.Join(configDir, "memory.json")
+	path := filepath.Join(configDir, "state", "memory.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

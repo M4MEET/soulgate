@@ -11,7 +11,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/model"
 )
 
-const branchesFileName = "branches.json"
+const branchesFileName = "state/branches.json"
 
 // ConversationBranch represents a saved snapshot of a conversation timeline.
 // A branch holds the messages up to (and including) the fork point, plus any

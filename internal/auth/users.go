@@ -97,11 +97,11 @@ type UserManager struct {
 	path  string           // persistence path
 }
 
-// NewUserManager loads users and teams from configDir/users.json.
+// NewUserManager loads users and teams from configDir/security/users.json.
 // On first run (empty or missing file) it creates an admin user, prints the
 // API key to stdout, and persists the new state.
 func NewUserManager(configDir string) (*UserManager, error) {
-	path := filepath.Join(configDir, "users.json")
+	path := filepath.Join(configDir, "security", "users.json")
 
 	m := &UserManager{
 		users:  make(map[string]*User),

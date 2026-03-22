@@ -49,9 +49,9 @@ type MemoryStore struct {
 }
 
 // NewMemoryStore creates a new MemoryStore backed by the JSON file at
-// <configDir>/memory.json. Existing entries are loaded on startup.
+// <configDir>/state/memory.json. Existing entries are loaded on startup.
 func NewMemoryStore(configDir string) (*MemoryStore, error) {
-	memoryPath := filepath.Join(configDir, "memory.json")
+	memoryPath := filepath.Join(configDir, "state", "memory.json")
 
 	store := &MemoryStore{
 		path:    memoryPath,

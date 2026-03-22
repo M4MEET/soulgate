@@ -10,6 +10,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/M4MEET/soulgate/internal/tools/browser"
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
+	"github.com/M4MEET/soulgate/internal/tools/computer"
 	"github.com/M4MEET/soulgate/internal/tools/cron"
 	"github.com/M4MEET/soulgate/internal/brokers/secrets"
 	"github.com/M4MEET/soulgate/internal/tools/email"
@@ -499,6 +500,15 @@ func (o *Orchestrator) getAllToolSchemas() []model.ToolSchema {
 
 	// Email tools (email_send via SMTP)
 	for _, s := range email.ToolSchemas() {
+		tools = append(tools, model.ToolSchema{
+			Name:        s.Name,
+			Description: s.Description,
+			InputSchema: s.InputSchema,
+		})
+	}
+
+	// Computer / desktop-automation tools (macOS only)
+	for _, s := range computer.ToolSchemas() {
 		tools = append(tools, model.ToolSchema{
 			Name:        s.Name,
 			Description: s.Description,

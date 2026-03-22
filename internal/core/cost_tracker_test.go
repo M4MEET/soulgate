@@ -78,10 +78,10 @@ func TestCostTrackerPersistence(t *testing.T) {
 	// Wait for background writes to complete.
 	ct1.Flush()
 
-	expectedPath := filepath.Join(dir, "costs.jsonl")
+	expectedPath := filepath.Join(dir, "logs", "costs.jsonl")
 	info, err := os.Stat(expectedPath)
-	require.NoError(t, err, "costs.jsonl should exist after Flush")
-	require.Greater(t, info.Size(), int64(0), "costs.jsonl should be non-empty")
+	require.NoError(t, err, "logs/costs.jsonl should exist after Flush")
+	require.Greater(t, info.Size(), int64(0), "logs/costs.jsonl should be non-empty")
 
 	// Second tracker reads the file on startup and should see the same total.
 	ct2 := NewCostTracker(dir, "session-2")

@@ -84,6 +84,12 @@ func NewBroker(configDir string, auditLogger audit.Logger) (*SecretBroker, error
 		return nil, fmt.Errorf("secrets broker: cannot create config dir: %w", err)
 	}
 
+	// Ensure the security/ subdirectory exists before writing secrets.json.
+	secDir := filepath.Join(absDir, "security")
+	if err := os.MkdirAll(secDir, 0o700); err != nil {
+		return nil, fmt.Errorf("secrets broker: cannot create security dir: %w", err)
+	}
+
 	key, err := deriveKey(absDir)
 	if err != nil {
 		return nil, fmt.Errorf("secrets broker: key derivation failed: %w", err)
@@ -91,7 +97,7 @@ func NewBroker(configDir string, auditLogger audit.Logger) (*SecretBroker, error
 
 	sb := &SecretBroker{
 		secrets:     make(map[string]*Secret),
-		path:        filepath.Join(absDir, "secrets.json"),
+		path:        filepath.Join(absDir, "security", "secrets.json"),
 		encKey:      key,
 		auditLogger: auditLogger,
 	}

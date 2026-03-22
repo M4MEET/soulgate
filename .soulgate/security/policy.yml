@@ -1,0 +1,9 @@
+version: "1"
+
+# Default policy: allow all operations
+policies:
+  - name: "allow-all-operations"
+    description: "Allow all operations"
+    action: "*"
+    resource: "*"
+    decision: allow

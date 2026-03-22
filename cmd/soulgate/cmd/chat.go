@@ -88,19 +88,22 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Migrate any files from the old flat layout to the organised subdirectory
+	// layout.  This is idempotent — safe on first run and after migration.
+	config.MigrateFilesystem(globalConfigDir)
+
 	// Harden permissions on existing installations: ensure owner-only access.
 	// This corrects directories and sensitive files created with looser permissions
 	// by earlier versions of SoulGate.
 	_ = os.Chmod(globalConfigDir, 0700)
 	for _, sensitiveFile := range []string{
 		"config.yml",
-		"policy.yml",
-		"memory.json",
-		"costs.jsonl",
-		"branches.json",
-		"session_state.json",
 		"SOUL.md",
 		".onboarding_complete",
+		"security/policy.yml",
+		"state/memory.json",
+		"logs/costs.jsonl",
+		"state/session.json",
 	} {
 		p := filepath.Join(globalConfigDir, sensitiveFile)
 		if _, err := os.Stat(p); err == nil {
@@ -119,8 +122,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 		workspace.Config.Workspace.Root = cwd
 		workspace.Config.Workspace.ConfigDir = globalConfigDir
-		workspace.Config.Audit.DatabasePath = filepath.Join(globalConfigDir, "audit.jsonl")
-		workspace.Config.Policy.FilePath = filepath.Join(globalConfigDir, "policy.yml")
+		workspace.Config.Audit.DatabasePath = filepath.Join(globalConfigDir, "logs", "audit.jsonl")
+		workspace.Config.Policy.FilePath = filepath.Join(globalConfigDir, "security", "policy.yml")
+		workspace.Config.Policy.ScopedFilePath = filepath.Join(globalConfigDir, "security", "scoped_policy.yml")
 
 		// Prompt for configuration
 		if err := promptChatConfiguration(workspace); err != nil {

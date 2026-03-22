@@ -277,11 +277,11 @@ func TestConfigDefaults(t *testing.T) {
 	assert.Equal(t, int64(64*1024*1024), cfg.Plugins.MaxMemory)
 
 	// Audit defaults
-	assert.Equal(t, ".soulgate/audit.jsonl", cfg.Audit.DatabasePath)
+	assert.Equal(t, ".soulgate/logs/audit.jsonl", cfg.Audit.DatabasePath)
 	assert.True(t, cfg.Audit.Enabled)
 
 	// Policy defaults
-	assert.Equal(t, ".soulgate/policy.yml", cfg.Policy.FilePath)
+	assert.Equal(t, ".soulgate/security/policy.yml", cfg.Policy.FilePath)
 
 	// Execution defaults
 	assert.Equal(t, 0, cfg.Execution.MaxIterations)

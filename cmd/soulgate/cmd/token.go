@@ -18,7 +18,7 @@ var tokenCmd = &cobra.Command{
 	Short: "Manage gateway API tokens",
 	Long: `Manage Bearer tokens for the SoulGate gateway HTTP API.
 
-Tokens are stored in .soulgate/api_tokens.json in the current workspace.
+Tokens are stored in .soulgate/security/tokens.json in the current workspace.
 When the gateway is started with --auth, every /api/* request must include:
 
   Authorization: Bearer sg_<value>
@@ -38,7 +38,7 @@ var tokenCreateCmd = &cobra.Command{
 	Short: "Generate a new API token",
 	Long: `Generate a new gateway API token and print it to stdout.
 
-The token is stored in .soulgate/api_tokens.json and can be used immediately
+The token is stored in .soulgate/security/tokens.json and can be used immediately
 with a running gateway that has --auth enabled.
 
 Example:
@@ -145,17 +145,18 @@ func runTokenRevoke(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveTokensFile returns the path to api_tokens.json inside the workspace
-// config directory, creating the directory if it does not exist.
+// resolveTokensFile returns the path to security/tokens.json inside the
+// workspace config directory, creating the directory if it does not exist.
 func resolveTokensFile() (string, error) {
 	ws, err := config.LoadWorkspace()
 	if err != nil {
 		return "", fmt.Errorf("load workspace: %w", err)
 	}
-	if err := os.MkdirAll(ws.ConfigDir, 0o755); err != nil {
-		return "", fmt.Errorf("ensure config dir: %w", err)
+	secDir := filepath.Join(ws.ConfigDir, "security")
+	if err := os.MkdirAll(secDir, 0o700); err != nil {
+		return "", fmt.Errorf("ensure security dir: %w", err)
 	}
-	return filepath.Join(ws.ConfigDir, "api_tokens.json"), nil
+	return filepath.Join(secDir, "tokens.json"), nil
 }
 
 func labelOrEmpty(s string) string {

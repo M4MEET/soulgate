@@ -48,7 +48,7 @@ const (
 )
 
 const (
-	jobsFilename = "cron_jobs.json"
+	jobsFilename = "state/cron.json"
 	tickInterval = 30 * time.Second
 	maxLookahead = 366 * 24 * time.Hour
 )
@@ -409,11 +409,13 @@ type persistedState struct {
 	Jobs   map[string]*Job `json:"jobs"`
 }
 
-// save writes the current scheduler state to dataDir/cron_jobs.json.
+// save writes the current scheduler state to dataDir/state/cron.json.
 // Caller must hold s.mu (at least for reading when called from dispatch).
 // In practice, save is always called under a write lock.
 func (s *Scheduler) save() error {
-	if err := os.MkdirAll(s.dataDir, 0o755); err != nil {
+	path := filepath.Join(s.dataDir, jobsFilename)
+	// Ensure the full directory path (including subdirs from jobsFilename) exists.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("cron: cannot create data directory: %w", err)
 	}
 
@@ -426,8 +428,6 @@ func (s *Scheduler) save() error {
 	if err != nil {
 		return fmt.Errorf("cron: failed to marshal jobs: %w", err)
 	}
-
-	path := filepath.Join(s.dataDir, jobsFilename)
 	// Write to a temporary file first and rename for atomic replacement.
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {

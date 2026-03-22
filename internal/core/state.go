@@ -48,7 +48,7 @@ type AgentSnapshot struct {
 	ActivityLog []AgentLogEntry `json:"activity_log,omitempty"`
 }
 
-const stateFileName = "session_state.json"
+const stateFileName = "state/session.json"
 
 // SaveSessionState writes the session state to disk.
 func SaveSessionState(configDir string, state *SessionState) error {
@@ -60,6 +60,9 @@ func SaveSessionState(configDir string, state *SessionState) error {
 	}
 
 	path := filepath.Join(configDir, stateFileName)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("failed to create state directory: %w", err)
+	}
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write session state: %w", err)
 	}

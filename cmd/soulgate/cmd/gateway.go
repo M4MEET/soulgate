@@ -29,7 +29,7 @@ import (
 const maxStoredThreads = 100
 
 // threadStore provides thread-safe CRUD for chat threads persisted to a single
-// JSON file at .soulgate/web_threads.json.
+// JSON file at .soulgate/state/threads.json.
 type threadStore struct {
 	path string
 	mu   sync.RWMutex
@@ -228,7 +228,7 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 	defer orch.Close()
 
 	// Thread store — persists web UI chat threads across restarts.
-	threads := newThreadStore(filepath.Join(workspace.ConfigDir, "web_threads.json"))
+	threads := newThreadStore(filepath.Join(workspace.ConfigDir, "state", "threads.json"))
 
 	provider, modelName := orch.GetCurrentProvider()
 	fmt.Printf("   Provider: %s (%s)\n", provider, modelName)
@@ -329,7 +329,7 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 		APIAuthEnabled:    gatewayAuth,
 		APIDevMode:        gatewayDevMode,
 		APIRateLimit:      gatewayRateLimit,
-		APITokensFile:     filepath.Join(workspace.ConfigDir, "api_tokens.json"),
+		APITokensFile:     filepath.Join(workspace.ConfigDir, "security", "tokens.json"),
 		OnChat: func(ctx context.Context, message string) (string, error) {
 			fmt.Printf("\n%s┌─ 📨 %s%s\n", gwCyan, message, gwReset)
 

@@ -172,7 +172,7 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	}
 	if embeddingKey != "" {
 		embProvider := embeddings.NewOpenAIProvider(embeddingKey, "", "")
-		vs, err := embeddings.NewVectorStore(filepath.Join(workspace.ConfigDir, "vectors"), embProvider)
+		vs, err := embeddings.NewVectorStore(filepath.Join(workspace.ConfigDir, "state", "vectors"), embProvider)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: vector store: %v\n", err)
 		} else {
@@ -237,6 +237,7 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	}
 
 	// Initialize canvas manager (best-effort — failure is non-fatal)
+	// Canvas artifacts live under .soulgate/canvas/.
 	canvasDir := filepath.Join(workspace.ConfigDir, "canvas")
 	canvasMgr, canvasErr := canvas.NewManager(canvasDir)
 	if canvasErr != nil {

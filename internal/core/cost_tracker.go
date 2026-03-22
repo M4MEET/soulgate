@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -90,7 +91,7 @@ type CostTracker struct {
 // If the file already exists its historical entries are loaded into memory so
 // TodayCost and TotalCost reflect accumulated history across sessions.
 func NewCostTracker(configDir string, sessionID string) *CostTracker {
-	path := configDir + "/costs.jsonl"
+	path := filepath.Join(configDir, "logs", "costs.jsonl")
 	ct := &CostTracker{
 		path:      path,
 		sessionID: sessionID,
@@ -180,6 +181,9 @@ func (ct *CostTracker) appendLine(entry CostEntry) {
 	if err != nil {
 		return
 	}
+
+	// Ensure the logs/ directory exists before the first write.
+	_ = os.MkdirAll(filepath.Dir(ct.path), 0700)
 
 	// Open with O_APPEND | O_CREATE so concurrent writers from different sessions
 	// are safe at the OS level (each write is atomic for small payloads on POSIX).
