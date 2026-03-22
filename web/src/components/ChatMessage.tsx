@@ -270,7 +270,17 @@ export default function ChatMessage({
                             <CopyButton text={code} />
                           </div>
                           <SyntaxHighlighter
-                            style={oneDark}
+                            style={{
+                              ...oneDark,
+                              'pre[class*="language-"]': {
+                                ...oneDark['pre[class*="language-"]'],
+                                background: '#0c0c14',
+                              },
+                              'code[class*="language-"]': {
+                                ...oneDark['code[class*="language-"]'],
+                                background: 'none',
+                              },
+                            }}
                             language={match[1]}
                             customStyle={{
                               margin: 0,
@@ -280,8 +290,13 @@ export default function ChatMessage({
                               background: '#0c0c14',
                               padding: '16px',
                             }}
+                            codeTagProps={{
+                              style: { background: 'none' },
+                            }}
                             showLineNumbers={code.split('\n').length > 3}
                             lineNumberStyle={{ color: '#3f3f46', fontSize: '11px', paddingRight: '12px', minWidth: '2em', userSelect: 'none' }}
+                            wrapLines
+                            lineProps={() => ({ style: { background: 'none', display: 'block' } })}
                           >
                             {code}
                           </SyntaxHighlighter>
