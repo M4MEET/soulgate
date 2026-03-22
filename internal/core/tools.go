@@ -58,6 +58,18 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 		cleanedPrompt = userPrompt // fallback if all content was directives
 	}
 
+	// Handle /compact directive: force compaction before the run starts
+	if o.directives.CompactRequested {
+		o.directives.CompactRequested = false
+		if err := o.compactHistory(ctx); err != nil {
+			if o.streaming && o.streamCallback != nil {
+				o.streamCallback(fmt.Sprintf("\n[compaction failed: %v]\n", err))
+			}
+		} else if o.streaming && o.streamCallback != nil {
+			o.streamCallback("\n[history compacted]\n")
+		}
+	}
+
 	// Seed conversation with prior history (if any) plus the new user message
 	userMsg := model.Message{
 		Role:    model.RoleUser,
@@ -195,10 +207,11 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 			assistantMsg.ToolCalls = resp.ToolCalls
 		}
 		messages = append(messages, assistantMsg)
-		o.appendToHistory(assistantMsg)
 
 		// Check stop reason
 		if resp.StopReason == model.StopReasonEndTurn || resp.StopReason == model.StopReasonMaxTokens {
+			// Final response — record text to history
+			o.appendToHistory(assistantMsg)
 			return resp.Message.Content, nil
 		}
 
@@ -233,10 +246,28 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 			toolResults := o.executeToolCallsParallel(ctx, runID, tracker, resp.ToolCalls)
 			messages = append(messages, toolResults...)
 
+			// Instead of recording raw tool calls/results to history,
+			// generate a compact breadcrumb summary.
+			o.appendToolSummaryToHistory(assistantMsg, toolResults)
+
 			o.emitThinking(ThinkingEvent{
 				Kind:    ThinkingStatus,
 				Message: "tool execution complete, continuing",
 			})
+
+			// Check if history needs compaction before next model call
+			if o.maybeCompact(ctx) {
+				// History was compacted — rebuild the messages slice
+				// from the compacted history + current user message.
+				prior := o.GetConversationHistory()
+				messages = make([]model.Message, 0, len(prior)+1)
+				messages = append(messages, prior...)
+				// Re-append the user message at the end if it's not
+				// already the last user message in history.
+				if len(prior) == 0 || prior[len(prior)-1].Role != model.RoleUser || prior[len(prior)-1].Content != cleanedPrompt {
+					messages = append(messages, userMsg)
+				}
+			}
 
 			continue
 		}

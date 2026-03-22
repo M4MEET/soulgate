@@ -29,6 +29,25 @@ type HeartbeatConfig struct {
 	PromptFile string `yaml:"prompt_file" json:"prompt_file"`
 }
 
+// ContextConfig controls conversation history management and compaction.
+type ContextConfig struct {
+	// MaxHistoryMessages is the maximum number of messages to retain.
+	// Default 50 (~25 user/assistant turns).
+	MaxHistoryMessages int `yaml:"max_history_messages" json:"max_history_messages"`
+
+	// MaxHistoryChars is the approximate character budget for history.
+	// Default 100000 (~25k tokens).
+	MaxHistoryChars int `yaml:"max_history_chars" json:"max_history_chars"`
+
+	// CompactionEnabled controls whether LLM-based history compaction runs
+	// when the history approaches its limits.
+	CompactionEnabled bool `yaml:"compaction_enabled" json:"compaction_enabled"`
+
+	// CompactionThreshold is the fraction of MaxHistoryChars at which
+	// compaction triggers (e.g. 0.8 = 80%). Default 0.8.
+	CompactionThreshold float64 `yaml:"compaction_threshold" json:"compaction_threshold"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	// Workspace settings
@@ -48,6 +67,9 @@ type Config struct {
 
 	// Execution limits
 	Execution ExecutionConfig `yaml:"execution"`
+
+	// Context management settings
+	Context ContextConfig `yaml:"context"`
 
 	// HTTP client settings
 	HTTPClient HTTPClientConfig `yaml:"http_client"`
@@ -281,6 +303,12 @@ func DefaultConfig() *Config {
 			APICallTimeoutSec:   0,     // unlimited
 			MaxTokens:           0,     // unlimited
 			MaxToolResultKB:     10240, // 10MB
+		},
+		Context: ContextConfig{
+			MaxHistoryMessages:  50,
+			MaxHistoryChars:     100000,
+			CompactionEnabled:   true,
+			CompactionThreshold: 0.8,
 		},
 		HTTPClient: HTTPClientConfig{
 			ConnectTimeoutSec:  10,

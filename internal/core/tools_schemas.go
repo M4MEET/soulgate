@@ -352,6 +352,26 @@ func (o *Orchestrator) getAllToolSchemas() []model.ToolSchema {
 		}`),
 	})
 
+	tools = append(tools, model.ToolSchema{
+		Name:        "delegate_task",
+		Description: "Delegate a complex sub-task to an isolated sub-agent. The sub-agent runs with its own context window — tool calls and intermediate results stay in its context, only the final result is returned. Use this for tasks that involve many tool calls to avoid filling the main context.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"task": {
+					"type": "string",
+					"description": "Description of the task to delegate"
+				},
+				"tools": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Optional list of tool names the sub-agent should use. If omitted, all tools are available."
+				}
+			},
+			"required": ["task"]
+		}`),
+	})
+
 	// Web tools (web_search, web_fetch)
 	for _, s := range web.ToolSchemas() {
 		tools = append(tools, model.ToolSchema{

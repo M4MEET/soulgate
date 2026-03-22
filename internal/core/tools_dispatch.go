@@ -107,6 +107,9 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 	case "agent_message":
 		return o.handleAgentMessage(ctx, toolCall.Input)
 
+	case "delegate_task":
+		return o.handleDelegateTask(ctx, runID, toolCall.Input)
+
 	case "web_search", "web_fetch":
 		return web.ExecuteTool(ctx, toolCall.Name, toolCall.Input)
 
@@ -477,6 +480,39 @@ func (e *llmTaskExecutor) Complete(ctx context.Context, prompt string, jsonMode 
 		return "", err
 	}
 	return resp.Message.Content, nil
+}
+
+// handleDelegateTask spawns an isolated sub-agent to handle a complex task.
+// The sub-agent runs with its own context window — tool calls and intermediate
+// results stay isolated, only the final text result is returned to the caller.
+func (o *Orchestrator) handleDelegateTask(ctx context.Context, runID string, input json.RawMessage) (string, error) {
+	var params struct {
+		Task  string   `json:"task"`
+		Tools []string `json:"tools,omitempty"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid delegate_task input: %w", err)
+	}
+	if params.Task == "" {
+		return "", fmt.Errorf("delegate_task: task is required")
+	}
+
+	// Use the existing agent delegation mechanism with wait=true so
+	// the sub-agent's tool interactions stay in its own context.
+	_, result, err := o.agentManager.Delegate(o, "orchestrator", params.Task, AgentRoleGeneral, true)
+	if err != nil {
+		return "", fmt.Errorf("delegate_task failed: %w", err)
+	}
+
+	// Log the delegation
+	o.audit.Log(ctx, audit.NewEvent(audit.EventToolExecute, audit.CategoryTool).
+		WithSessionID(o.session.ID).
+		WithRunID(runID).
+		WithMetadata("tool", "delegate_task").
+		WithMetadata("task", params.Task).
+		WithStatus(audit.StatusSuccess))
+
+	return result, nil
 }
 
 // maxFileReadChars caps file content returned to the model to avoid token explosion.

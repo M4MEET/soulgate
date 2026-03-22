@@ -242,9 +242,15 @@ export default function ChatMessage({ message }: { message: Message }) {
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  code({ className, children, ...props }) {
+                  pre({ children }) {
+                    return <>{children}</>;
+                  },
+                  code({ className, children, node, ...props }) {
                     const match = /language-(\w+)/.exec(className || '');
                     const code = String(children).replace(/\n$/, '');
+                    const isBlock = (node?.position && node.position.start.line !== node.position.end.line)
+                      || code.includes('\n')
+                      || (className || '').includes('language-');
                     if (match) {
                       return (
                         <div className="rounded-xl overflow-hidden my-3 border border-zinc-700/30 shadow-lg shadow-black/20">
@@ -295,6 +301,36 @@ export default function ChatMessage({ message }: { message: Message }) {
                         </div>
                       );
                     }
+                    // Block-level code without a language (diagrams, ASCII art, plain blocks)
+                    if (isBlock) {
+                      const isDiagram = /[→←↑↓│├└┌┐┘┤┬┴┼╭╮╰╯─═║▼▲◆●]/.test(code);
+                      return (
+                        <div className={`rounded-xl overflow-hidden my-3 border shadow-lg shadow-black/20 ${
+                          isDiagram ? 'border-emerald-500/20' : 'border-zinc-700/30'
+                        }`}>
+                          <div className="flex items-center justify-between px-4 py-2 bg-zinc-800/90 border-b border-zinc-700/30">
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1.5">
+                                <span className={`w-2.5 h-2.5 rounded-full ${isDiagram ? 'bg-emerald-500/40' : 'bg-zinc-600/60'}`} />
+                                <span className={`w-2.5 h-2.5 rounded-full ${isDiagram ? 'bg-emerald-500/30' : 'bg-zinc-600/60'}`} />
+                                <span className={`w-2.5 h-2.5 rounded-full ${isDiagram ? 'bg-emerald-500/20' : 'bg-zinc-600/60'}`} />
+                              </div>
+                              {isDiagram && (
+                                <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-emerald-500/60 font-medium ml-1">
+                                  diagram
+                                </span>
+                              )}
+                            </div>
+                            <CopyButton text={code} />
+                          </div>
+                          <pre className={`p-4 overflow-x-auto font-mono text-[12.5px] leading-[1.7] ${
+                            isDiagram ? 'bg-[#0a100f] text-cyan-200' : 'bg-[#0c0c14] text-zinc-200'
+                          }`}>
+                            <code>{code}</code>
+                          </pre>
+                        </div>
+                      );
+                    }
                     return (
                       <code
                         className="bg-zinc-900/80 text-indigo-300 px-1.5 py-0.5 rounded-md text-[12.5px] font-mono border border-zinc-700/30"
@@ -316,25 +352,40 @@ export default function ChatMessage({ message }: { message: Message }) {
                       </a>
                     );
                   },
+                  h1({ children }) {
+                    return <h1 className="text-base font-bold text-violet-300 mt-4 mb-2 pb-1.5 border-b border-zinc-700/50 first:mt-0">{children}</h1>;
+                  },
+                  h2({ children }) {
+                    return <h2 className="text-[15px] font-semibold text-indigo-300 mt-3.5 mb-1.5 first:mt-0">{children}</h2>;
+                  },
+                  h3({ children }) {
+                    return <h3 className="text-sm font-semibold text-zinc-200 mt-3 mb-1 first:mt-0">{children}</h3>;
+                  },
+                  hr() {
+                    return <hr className="border-none h-px bg-gradient-to-r from-transparent via-zinc-600/50 to-transparent my-4" />;
+                  },
                   blockquote({ children }) {
                     return (
-                      <blockquote className="border-l-2 border-indigo-500/50 pl-3 text-zinc-400 italic my-2">
+                      <blockquote className="border-l-2 border-indigo-500/40 pl-3 py-1 my-2.5 bg-indigo-500/[0.04] rounded-r-lg text-zinc-400 italic">
                         {children}
                       </blockquote>
                     );
                   },
                   table({ children }) {
                     return (
-                      <div className="overflow-x-auto my-2">
+                      <div className="overflow-x-auto my-3 rounded-lg border border-zinc-700/40">
                         <table className="text-xs border-collapse w-full">{children}</table>
                       </div>
                     );
                   },
                   th({ children }) {
-                    return <th className="border border-zinc-700 px-2 py-1 bg-zinc-800 text-left">{children}</th>;
+                    return <th className="border-b-2 border-zinc-700/60 px-3 py-2 bg-zinc-800/60 text-left text-indigo-300 font-semibold text-[11px] uppercase tracking-wider">{children}</th>;
                   },
                   td({ children }) {
-                    return <td className="border border-zinc-700 px-2 py-1">{children}</td>;
+                    return <td className="border-b border-zinc-700/30 px-3 py-1.5 text-zinc-200">{children}</td>;
+                  },
+                  strong({ children }) {
+                    return <strong className="font-bold text-zinc-50">{children}</strong>;
                   },
                 }}
               >

@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -663,13 +665,36 @@ func (o *Orchestrator) SetConversationHistory(messages []model.Message) {
 	o.conversationHistory = messages
 }
 
-// maxHistoryMessages is the maximum number of messages to keep in conversation history.
-// Each user+assistant pair counts as 2, so this allows ~10 turns of conversation.
-const maxHistoryMessages = 20
+// contextMaxMessages returns the configured (or default) max history messages.
+func (o *Orchestrator) contextMaxMessages() int {
+	if n := o.workspace.Config.Context.MaxHistoryMessages; n > 0 {
+		return n
+	}
+	return 50
+}
 
-// maxHistoryChars is the approximate character budget for conversation history.
-// ~4 chars per token, so 20k chars ≈ 5k tokens of context.
-const maxHistoryChars = 20000
+// contextMaxChars returns the configured (or default) max history chars.
+func (o *Orchestrator) contextMaxChars() int {
+	if n := o.workspace.Config.Context.MaxHistoryChars; n > 0 {
+		return n
+	}
+	return 100000
+}
+
+// contextCompactionEnabled returns whether LLM compaction is turned on.
+func (o *Orchestrator) contextCompactionEnabled() bool {
+	return o.workspace.Config.Context.CompactionEnabled
+}
+
+// contextCompactionThreshold returns the fraction (0–1) of max chars that
+// triggers compaction.
+func (o *Orchestrator) contextCompactionThreshold() float64 {
+	t := o.workspace.Config.Context.CompactionThreshold
+	if t <= 0 || t > 1 {
+		return 0.8
+	}
+	return t
+}
 
 // appendToHistory adds messages to the persistent conversation history.
 // Only user and assistant text messages are kept. Tool calls, tool results,
@@ -697,9 +722,12 @@ func (o *Orchestrator) appendToHistory(msgs ...model.Message) {
 		}
 	}
 
+	maxMessages := o.contextMaxMessages()
+	maxChars := o.contextMaxChars()
+
 	// Cap history by message count
-	if len(o.conversationHistory) > maxHistoryMessages {
-		o.conversationHistory = o.conversationHistory[len(o.conversationHistory)-maxHistoryMessages:]
+	if len(o.conversationHistory) > maxMessages {
+		o.conversationHistory = o.conversationHistory[len(o.conversationHistory)-maxMessages:]
 	}
 
 	// Cap history by total character count (trim oldest messages first)
@@ -708,11 +736,185 @@ func (o *Orchestrator) appendToHistory(msgs ...model.Message) {
 		for _, m := range o.conversationHistory {
 			total += len(m.Content)
 		}
-		if total <= maxHistoryChars || len(o.conversationHistory) <= 2 {
+		if total <= maxChars || len(o.conversationHistory) <= 2 {
 			break
 		}
 		o.conversationHistory = o.conversationHistory[1:]
 	}
+}
+
+// summarizeToolInteraction builds a concise breadcrumb string from an
+// assistant message containing tool calls and the resulting tool responses.
+// Example: "[Used exec_command(\"ls\"): 15 lines output]"
+func summarizeToolInteraction(assistantMsg model.Message, toolResults []model.Message) string {
+	var sb strings.Builder
+	for i, tc := range assistantMsg.ToolCalls {
+		// Parse first argument value for a compact description
+		argSnippet := ""
+		if len(tc.Input) > 0 {
+			var args map[string]interface{}
+			if err := json.Unmarshal(tc.Input, &args); err == nil {
+				// Use the first string-valued arg as the snippet
+				for _, v := range args {
+					if s, ok := v.(string); ok {
+						if len(s) > 60 {
+							s = s[:60] + "..."
+						}
+						argSnippet = fmt.Sprintf("%q", s)
+						break
+					}
+				}
+			}
+		}
+
+		// Build the call description
+		if argSnippet != "" {
+			sb.WriteString(fmt.Sprintf("[Used %s(%s)", tc.Name, argSnippet))
+		} else {
+			sb.WriteString(fmt.Sprintf("[Used %s()", tc.Name))
+		}
+
+		// Match the result by ToolCallID
+		for _, r := range toolResults {
+			if r.ToolCallID == tc.ID {
+				resultLen := len(r.Content)
+				if strings.HasPrefix(r.Content, "Error:") || strings.HasPrefix(r.Content, "error:") {
+					errMsg := r.Content
+					if len(errMsg) > 80 {
+						errMsg = errMsg[:80] + "..."
+					}
+					sb.WriteString(fmt.Sprintf(": %s", errMsg))
+				} else if resultLen > 200 {
+					sb.WriteString(fmt.Sprintf(": %d chars output", resultLen))
+				} else if resultLen > 0 {
+					// Short results — include inline
+					snippet := r.Content
+					if len(snippet) > 100 {
+						snippet = snippet[:100] + "..."
+					}
+					sb.WriteString(fmt.Sprintf(": %s", snippet))
+				} else {
+					sb.WriteString(": ok")
+				}
+				break
+			}
+		}
+		sb.WriteString("]")
+
+		if i < len(assistantMsg.ToolCalls)-1 {
+			sb.WriteString(" ")
+		}
+	}
+	return sb.String()
+}
+
+// appendToolSummaryToHistory generates a compact breadcrumb for the tool
+// interaction and appends it as a single synthetic assistant message to the
+// conversation history. If the assistant message also had text content, that
+// text is prepended before the breadcrumb.
+func (o *Orchestrator) appendToolSummaryToHistory(assistantMsg model.Message, toolResults []model.Message) {
+	summary := summarizeToolInteraction(assistantMsg, toolResults)
+	if summary == "" {
+		return
+	}
+
+	content := summary
+	if assistantMsg.Content != "" {
+		content = assistantMsg.Content + "\n" + summary
+	}
+
+	o.appendToHistory(model.Message{
+		Role:    model.RoleAssistant,
+		Content: content,
+	})
+}
+
+// historyCharCount returns the total character count of the conversation history.
+// Caller must hold at least historyMu.RLock.
+func (o *Orchestrator) historyCharCount() int {
+	total := 0
+	for _, m := range o.conversationHistory {
+		total += len(m.Content)
+	}
+	return total
+}
+
+// compactHistory uses an LLM call to summarise older conversation history,
+// keeping recent messages intact. It replaces the older portion with a single
+// "[Conversation summary: ...]" message.
+func (o *Orchestrator) compactHistory(ctx context.Context) error {
+	o.historyMu.Lock()
+	histLen := len(o.conversationHistory)
+
+	// Need at least 12 messages for compaction to be meaningful
+	// (keep last 10, summarise at least 2).
+	if histLen < 12 {
+		o.historyMu.Unlock()
+		return nil
+	}
+
+	// Split: keep last 10 messages as "recent", summarise the rest.
+	splitIdx := histLen - 10
+	toSummarise := make([]model.Message, splitIdx)
+	copy(toSummarise, o.conversationHistory[:splitIdx])
+	recent := make([]model.Message, 10)
+	copy(recent, o.conversationHistory[splitIdx:])
+	o.historyMu.Unlock()
+
+	// Build summarisation prompt
+	var sb strings.Builder
+	sb.WriteString("Summarise the following conversation history into a concise paragraph. ")
+	sb.WriteString("Preserve key facts, decisions, file paths, and tool outcomes. ")
+	sb.WriteString("Do NOT include greetings or filler. Output ONLY the summary.\n\n")
+	for _, m := range toSummarise {
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n", m.Role, m.Content))
+	}
+
+	executor := &llmTaskExecutor{orch: o}
+	summaryText, err := executor.Complete(ctx, sb.String(), false)
+	if err != nil {
+		return fmt.Errorf("compaction LLM call failed: %w", err)
+	}
+
+	// Replace history with summary + recent messages
+	summaryMsg := model.Message{
+		Role:    model.RoleAssistant,
+		Content: fmt.Sprintf("[Conversation summary: %s]", strings.TrimSpace(summaryText)),
+	}
+
+	o.historyMu.Lock()
+	newHistory := make([]model.Message, 0, 1+len(recent))
+	newHistory = append(newHistory, summaryMsg)
+	newHistory = append(newHistory, recent...)
+	o.conversationHistory = newHistory
+	o.historyMu.Unlock()
+
+	return nil
+}
+
+// maybeCompact triggers history compaction if the history exceeds the
+// configured threshold. Returns true if compaction was performed.
+func (o *Orchestrator) maybeCompact(ctx context.Context) bool {
+	if !o.contextCompactionEnabled() {
+		return false
+	}
+
+	o.historyMu.RLock()
+	chars := o.historyCharCount()
+	o.historyMu.RUnlock()
+
+	threshold := int(float64(o.contextMaxChars()) * o.contextCompactionThreshold())
+	if chars < threshold {
+		return false
+	}
+
+	if err := o.compactHistory(ctx); err != nil {
+		// Non-fatal: log and continue
+		fmt.Fprintf(os.Stderr, "warning: history compaction failed: %v\n", err)
+		return false
+	}
+
+	return true
 }
 
 // GetHeartbeat returns the heartbeat subsystem. The returned pointer is never

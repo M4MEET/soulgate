@@ -80,7 +80,7 @@ func buildDispatchOrchestrator(t *testing.T) *Orchestrator {
 		integrationsReg: integrations.NewRegistry(),
 		toolRegistry:    NewToolRegistry(),
 		memoryStore:     memStore,
-		agentManager:    NewAgentManager(),
+		agentManager:    NewAgentManager(tmpDir),
 		processManager:  process.NewManagerWithWorkspace(tmpDir),
 		directives:      DefaultDirectives(),
 		loopDetector:    NewLoopDetector(),

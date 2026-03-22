@@ -487,6 +487,7 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 	"agent_stop":      {NoPermissionRequired: true},
 	"agent_delegate":  {NoPermissionRequired: true},
 	"agent_message":   {NoPermissionRequired: true},
+	"delegate_task":   {NoPermissionRequired: true},
 	"soulgate_introspect":  {NoPermissionRequired: true},
 	"soulgate_configure":   {NoPermissionRequired: true},
 }

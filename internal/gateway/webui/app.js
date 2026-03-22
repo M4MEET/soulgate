@@ -103,7 +103,10 @@ function renderMarkdown(text) {
       const rawCode = codeLines.join('\n');
       const highlighted = syntaxHighlight(rawCode, lang);
       const langTag = lang ? `<span class="code-lang">${esc(lang)}</span>` : '';
-      out.push(`<pre>${langTag}<code>${highlighted}</code></pre>`);
+      // Detect diagram/flowchart blocks (contain arrows → ↓ ← ↑ or box-drawing chars)
+      const isDiagram = !lang && /[→←↑↓│├└┌┐┘┤┬┴┼╭╮╰╯─═║▼▲◆●]/.test(rawCode);
+      const preClass = isDiagram ? ' class="diagram"' : '';
+      out.push(`<pre${preClass}>${langTag}<code>${highlighted}</code></pre>`);
       continue;
     }
 
@@ -114,6 +117,30 @@ function renderMarkdown(text) {
       const level = hm[1].length;
       out.push(`<h${level}>${inlineMarkdown(hm[2])}</h${level}>`);
       i++; continue;
+    }
+
+    // Markdown table (header row with | separators, followed by separator row)
+    if (/^\|(.+)\|$/.test(line) && i + 1 < lines.length && /^\|[-:\s|]+\|$/.test(lines[i + 1])) {
+      flushList();
+      // Parse header
+      const headers = line.split('|').slice(1, -1).map(c => c.trim());
+      i += 2; // skip header + separator
+      const rows = [];
+      while (i < lines.length && /^\|(.+)\|$/.test(lines[i])) {
+        rows.push(lines[i].split('|').slice(1, -1).map(c => c.trim()));
+        i++;
+      }
+      let tableHTML = '<table><thead><tr>';
+      for (const h of headers) tableHTML += `<th>${inlineMarkdown(h)}</th>`;
+      tableHTML += '</tr></thead><tbody>';
+      for (const row of rows) {
+        tableHTML += '<tr>';
+        for (const cell of row) tableHTML += `<td>${inlineMarkdown(cell)}</td>`;
+        tableHTML += '</tr>';
+      }
+      tableHTML += '</tbody></table>';
+      out.push(tableHTML);
+      continue;
     }
 
     // Horizontal rule

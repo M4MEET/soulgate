@@ -420,13 +420,30 @@ textarea, input {
 .msg-bubble p:last-child { margin-bottom: 0; }
 
 .msg-bubble h1, .msg-bubble h2, .msg-bubble h3 {
-  margin: 12px 0 6px;
   line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 
-.msg-bubble h1 { font-size: 17px; }
-.msg-bubble h2 { font-size: 15px; }
-.msg-bubble h3 { font-size: 13.5px; }
+.msg-bubble h1 {
+  font-size: 17px;
+  margin: 16px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: #c4b5fd;
+}
+.msg-bubble h2 {
+  font-size: 15px;
+  margin: 14px 0 6px;
+  color: #a5b4fc;
+}
+.msg-bubble h3 {
+  font-size: 13.5px;
+  margin: 10px 0 4px;
+  color: var(--text-primary);
+}
+.msg-bubble h1:first-child, .msg-bubble h2:first-child, .msg-bubble h3:first-child {
+  margin-top: 0;
+}
 
 .msg-bubble code {
   font-family: var(--font-mono);
@@ -445,10 +462,11 @@ textarea, input {
 .msg-bubble pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  padding: 14px 16px;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 10px 0;
   position: relative;
 }
 
@@ -458,7 +476,10 @@ textarea, input {
   right: 10px;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--accent-hover);
+  background: var(--accent-dim);
+  padding: 1px 6px;
+  border-radius: 3px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -468,7 +489,20 @@ textarea, input {
   padding: 0;
   color: #e2e8f0;
   font-size: 12.5px;
-  line-height: 1.6;
+  line-height: 1.7;
+}
+
+/* Diagram / flowchart code blocks — detect by content with arrows */
+.msg-bubble pre.diagram {
+  border-left-color: #22c55e;
+  background: linear-gradient(135deg, #0d0d18 0%, #0f1218 100%);
+  text-align: center;
+}
+
+.msg-bubble pre.diagram code {
+  color: #a5f3fc;
+  text-align: left;
+  display: inline-block;
 }
 
 /* Syntax highlight classes */
@@ -481,15 +515,21 @@ textarea, input {
 .tok-operator { color: #89ddff; }
 .tok-builtin  { color: #89ddff; }
 
-.msg-bubble strong { font-weight: 700; }
+.msg-bubble strong { font-weight: 700; color: #f0f0ff; }
 .msg-bubble em { font-style: italic; color: inherit; opacity: 0.9; }
 
 .msg-bubble ul, .msg-bubble ol {
-  padding-left: 20px;
-  margin: 6px 0;
+  padding-left: 22px;
+  margin: 8px 0;
 }
 
-.msg-bubble li { margin-bottom: 3px; }
+.msg-bubble li {
+  margin-bottom: 4px;
+  line-height: 1.55;
+}
+.msg-bubble li::marker {
+  color: var(--accent-hover);
+}
 
 .msg-bubble a {
   color: var(--accent-hover);
@@ -499,9 +539,46 @@ textarea, input {
 
 .msg-bubble blockquote {
   border-left: 3px solid var(--accent);
-  padding-left: 12px;
-  margin: 8px 0;
+  padding: 6px 12px;
+  margin: 10px 0;
   color: var(--text-secondary);
+  background: var(--accent-dim);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+
+.msg-bubble hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
+/* Tables in chat */
+.msg-bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+.msg-bubble th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--border);
+  color: var(--accent-hover);
+  font-weight: 600;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.msg-bubble td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.msg-bubble tr:last-child td {
+  border-bottom: none;
+}
+.msg-bubble tr:hover td {
+  background: rgba(99,102,241,0.04);
 }
 
 /* Tool call cards */

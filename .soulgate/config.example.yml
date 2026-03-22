@@ -43,6 +43,13 @@ audit:
 policy:
   file_path: .soulgate/policy.yml
 
+# Context management — controls conversation history and compaction
+context:
+  max_history_messages: 50    # Max messages to retain (default 50)
+  max_history_chars: 100000   # Max total chars in history (default 100000, ~25k tokens)
+  compaction_enabled: true    # Enable LLM-based history summarisation (default true)
+  compaction_threshold: 0.8   # Fraction of max_history_chars that triggers compaction (default 0.8)
+
 # MCP (Model Context Protocol) servers
 # Connect to external tool/resource providers via stdio
 mcp:

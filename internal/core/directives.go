@@ -34,12 +34,13 @@ var validThinkingLevels = map[ThinkingLevel]bool{
 // inside their messages. They are stripped from the message text before the
 // content is forwarded to the model.
 type Directives struct {
-	ThinkingLevel ThinkingLevel // Current thinking level
-	FastMode      bool          // Reduced reasoning, faster responses
-	VerboseMode   string        // "off", "on", "full"
-	ReasoningShow string        // "off", "on", "stream" - show thinking in output
-	MaxTokens     int           // Override max response tokens (0 = use default)
-	Temperature   float64       // Override temperature (-1 = use default)
+	ThinkingLevel    ThinkingLevel // Current thinking level
+	FastMode         bool          // Reduced reasoning, faster responses
+	VerboseMode      string        // "off", "on", "full"
+	ReasoningShow    string        // "off", "on", "stream" - show thinking in output
+	MaxTokens        int           // Override max response tokens (0 = use default)
+	Temperature      float64       // Override temperature (-1 = use default)
+	CompactRequested bool          // Set by /compact directive, consumed once
 }
 
 // DefaultDirectives returns sensible defaults that leave all optional
@@ -91,6 +92,7 @@ func ParseDirectives(message string, current *Directives) (cleaned string, appli
 //	/reasoning [off|on|stream]– set reasoning output mode (default: "on")
 //	/temperature <0.0-2.0>    – override temperature
 //	/maxtokens <n>            – override maximum response tokens
+//	/compact                  – trigger LLM-based conversation history compaction
 func tryParseDirective(line string, d *Directives) (string, bool) {
 	if !strings.HasPrefix(line, "/") {
 		return "", false
@@ -183,6 +185,10 @@ func tryParseDirective(line string, d *Directives) (string, bool) {
 		}
 		d.MaxTokens = n
 		return fmt.Sprintf("max tokens set to %d", n), true
+
+	case "/compact":
+		d.CompactRequested = true
+		return "history compaction requested", true
 
 	default:
 		return "", false
