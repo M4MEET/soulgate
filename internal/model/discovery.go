@@ -49,6 +49,12 @@ func NewModelDiscovery() *ModelDiscovery {
 	}
 }
 
+// ModelsFromRegistryPublic converts registry ModelOptions to ModelInfo for a provider.
+// Exported for use by the gateway API.
+func ModelsFromRegistryPublic(providerName string) []ModelInfo {
+	return modelsFromRegistry(providerName)
+}
+
 // modelsFromRegistry converts registry ModelOptions to ModelInfo for a provider.
 func modelsFromRegistry(providerName string) []ModelInfo {
 	def, err := LookupProvider(providerName)

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/auth"
@@ -67,12 +70,27 @@ type Gateway struct {
 	// Webhook and notification subsystems (optional — nil until LoadWebhooks called)
 	webhookStore      *WebhookStore
 	notificationStore *NotificationStore
+	inbox             *InboxStore
 
 	// Health monitoring
 	monitor *healthMonitor
 
 	// Prometheus-compatible metrics collector
 	metrics *MetricsCollector
+
+	// Spawned connectors — tracks connector processes started via the web UI.
+	// HTTP-based connectors (Slack, Discord, etc.) don't register as WebSocket
+	// clients, so this map is the only way to track them.
+	spawnedConnectors   map[string]*SpawnedConnector
+	spawnedConnectorsMu sync.RWMutex
+}
+
+// SpawnedConnector tracks a connector process launched via POST /api/connectors.
+type SpawnedConnector struct {
+	Type      string    `json:"type"`
+	PID       int       `json:"pid"`
+	StartedAt time.Time `json:"started_at"`
+	Status    string    `json:"status"` // "running", "stopped", "error"
 }
 
 // ChatHandler processes a chat message and returns a response.
@@ -181,6 +199,21 @@ type GatewayAPI struct {
 	// RunHeartbeatNow triggers an immediate heartbeat run outside the normal
 	// ticker schedule. Returns the raw AI response or an error.
 	RunHeartbeatNow func() (string, error)
+
+	// ToggleHeartbeat enables or disables the heartbeat. Returns the new state.
+	ToggleHeartbeat func(enabled bool) bool
+
+	// ListProviders returns all available provider names.
+	ListProviders func() []string
+
+	// ListModels returns available models for a provider (dynamic + registry).
+	ListModels func(provider string) []map[string]interface{}
+
+	// GetAPIKeyStatus returns which providers have API keys configured (without exposing keys).
+	GetAPIKeyStatus func() map[string]bool
+
+	// SetAPIKey stores an API key for a provider and persists to config.
+	SetAPIKey func(provider, key string) error
 
 	// GetThreads returns all persisted chat threads.
 	GetThreads func() ([]map[string]interface{}, error)
@@ -338,7 +371,8 @@ func NewGateway(config *Config) (*Gateway, error) {
 		userManager:    userManager,
 		config:         config,
 		startedAt:      time.Now(),
-		metrics:        newMetricsCollector(),
+		metrics:           newMetricsCollector(),
+		spawnedConnectors: make(map[string]*SpawnedConnector),
 	}
 	gw.monitor = newHealthMonitor(gw)
 	return gw, nil
@@ -348,6 +382,39 @@ func NewGateway(config *Config) (*Gateway, error) {
 // is not enabled.
 func (g *Gateway) GetAPIAuth() *APIAuth {
 	return g.apiAuth
+}
+
+// TrackConnector registers a spawned connector process so it shows up
+// in the connectors status endpoint even if it uses HTTP (not WebSocket).
+func (g *Gateway) TrackConnector(connectorType string, pid int) {
+	g.spawnedConnectorsMu.Lock()
+	defer g.spawnedConnectorsMu.Unlock()
+	g.spawnedConnectors[connectorType] = &SpawnedConnector{
+		Type:      connectorType,
+		PID:       pid,
+		StartedAt: time.Now(),
+		Status:    "running",
+	}
+}
+
+// refreshSpawnedConnectors checks if spawned processes are still alive.
+func (g *Gateway) refreshSpawnedConnectors() {
+	g.spawnedConnectorsMu.Lock()
+	defer g.spawnedConnectorsMu.Unlock()
+	for key, sc := range g.spawnedConnectors {
+		if sc.Status != "running" {
+			continue
+		}
+		proc, err := os.FindProcess(sc.PID)
+		if err != nil {
+			delete(g.spawnedConnectors, key)
+			continue
+		}
+		// On Unix, FindProcess always succeeds; send signal 0 to probe.
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			delete(g.spawnedConnectors, key)
+		}
+	}
 }
 
 // LoadWebhooks initialises the inbound webhook subsystem from a JSON config file.
@@ -401,6 +468,10 @@ func (g *Gateway) Start(ctx context.Context) error {
 		}
 	}
 
+	// Initialize persistent inbox for user-facing notifications.
+	inboxPath := filepath.Join(g.config.SessionsDir, "inbox.json")
+	g.inbox = NewInboxStore(inboxPath)
+
 	mux := http.NewServeMux()
 
 	// WebSocket endpoint — never gated by API auth (uses its own token scheme)
@@ -439,6 +510,9 @@ func (g *Gateway) Start(ctx context.Context) error {
 
 	// Rich web-UI endpoints — always registered; handlers degrade gracefully
 	// when the corresponding GatewayAPI callbacks are not wired up.
+	mux.Handle("/api/providers", apiHandler(g.handleAPIProviders))
+	mux.Handle("/api/providers/", apiHandler(g.handleAPIProviderModels))
+	mux.Handle("/api/apikeys", apiHandler(g.handleAPIKeys))
 	mux.Handle("/api/config", apiHandler(g.handleAPIConfig))
 	mux.Handle("/api/tools", apiHandler(g.handleAPITools))
 	mux.Handle("/api/agents", apiHandler(g.handleAPIAgents))
@@ -447,6 +521,8 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/memory", apiHandler(g.handleAPIMemory))
 	mux.Handle("/api/costs", apiHandler(g.handleAPICosts))
 	mux.Handle("/api/audit", apiHandler(g.handleAPIAudit))
+	// mux.Handle("/api/notifications", apiHandler(g.handleAPINotifications)) // TODO
+	// mux.Handle("/api/notifications/", apiHandler(g.handleAPINotificationDetail)) // TODO
 	mux.Handle("/api/files", apiHandler(g.handleAPIFiles))
 	mux.Handle("/api/file", apiHandler(g.handleAPIFile))
 	mux.Handle("/api/exec", apiHandler(g.handleAPIExec))
@@ -577,6 +653,19 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("✓ Client connected: %s (role: %s)\n", clientID, connectFrame.Role)
 
+	// Push notification for connector connections
+	if connectFrame.Role == protocol.RoleChannel {
+		ch := "channel"
+		if v, ok := connectFrame.Metadata["channel"].(string); ok && v != "" {
+			ch = v
+		}
+		detail := fmt.Sprintf("Client %s", clientID)
+		if v, ok := connectFrame.Metadata["bot_username"].(string); ok && v != "" {
+			detail = fmt.Sprintf("@%s (%s)", v, clientID)
+		}
+		g.PushNotification("connection", ch+" connector online", detail)
+	}
+
 	// Start client pumps with a background context (don't tie to HTTP request lifecycle)
 	go client.Start(context.Background())
 }
@@ -628,8 +717,8 @@ func (g *Gateway) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		"channel_clients": channelIDs,
 		"ui_clients":      uiIDs,
 		"node_clients":    nodeIDs,
-		"provider":        g.config.Provider,
-		"model":           g.config.Model,
+		"provider":        g.liveProvider(),
+		"model":           g.liveModel(),
 		"port":            port,
 		"uptime_seconds":  uptimeSeconds,
 		"started_at":      g.startedAt.UTC().Format(time.RFC3339),
@@ -637,6 +726,30 @@ func (g *Gateway) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(payload) //nolint:errcheck
+}
+
+// liveProvider returns the current provider name from the live config API,
+// falling back to the startup value if the API is not wired up.
+func (g *Gateway) liveProvider() string {
+	if g.config.API != nil && g.config.API.GetConfig != nil {
+		cfg := g.config.API.GetConfig()
+		if p, ok := cfg["provider"].(string); ok && p != "" {
+			return p
+		}
+	}
+	return g.config.Provider
+}
+
+// liveModel returns the current model name from the live config API,
+// falling back to the startup value if the API is not wired up.
+func (g *Gateway) liveModel() string {
+	if g.config.API != nil && g.config.API.GetConfig != nil {
+		cfg := g.config.API.GetConfig()
+		if m, ok := cfg["model"].(string); ok && m != "" {
+			return m
+		}
+	}
+	return g.config.Model
 }
 
 // clientIDs returns a map of clientID -> empty struct for JSON serialisation as
@@ -679,11 +792,6 @@ func (g *Gateway) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 // handleAPISessionDetail returns messages for a specific session.
 // GET /api/sessions/{id} → session messages
 func (g *Gateway) handleAPISessionDetail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-
 	// Extract session ID from path: /api/sessions/{id}
 	sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 	sessionID = strings.TrimSuffix(sessionID, "/")
@@ -692,6 +800,17 @@ func (g *Gateway) handleAPISessionDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	switch r.Method {
+	case http.MethodGet:
+		g.handleAPISessionDetailGet(w, sessionID)
+	case http.MethodPost:
+		g.handleAPISessionReply(w, r, sessionID)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (g *Gateway) handleAPISessionDetailGet(w http.ResponseWriter, sessionID string) {
 	// Read session entries from storage
 	if g.sessionStorage == nil {
 		http.Error(w, `{"error":"session storage not available"}`, http.StatusServiceUnavailable)
@@ -710,14 +829,14 @@ func (g *Gateway) handleAPISessionDetail(w http.ResponseWriter, r *http.Request)
 	var meta map[string]interface{}
 	if sess != nil {
 		meta = map[string]interface{}{
-			"id":             sess.ID,
+			"id":              sess.ID,
 			"conversation_id": sess.ConversationID,
-			"channel":        sess.Channel,
-			"state":          sess.GetState(),
-			"message_count":  sess.GetMessageCount(),
-			"assigned_agent": sess.GetAssignedAgent(),
-			"created_at":     sess.CreatedAt.UTC().Format(time.RFC3339),
-			"last_activity":  sess.UpdatedAt.UTC().Format(time.RFC3339),
+			"channel":         sess.Channel,
+			"state":           sess.GetState(),
+			"message_count":   sess.GetMessageCount(),
+			"assigned_agent":  sess.GetAssignedAgent(),
+			"created_at":      sess.CreatedAt.UTC().Format(time.RFC3339),
+			"last_activity":   sess.UpdatedAt.UTC().Format(time.RFC3339),
 		}
 	}
 	g.sessionMux.RUnlock()
@@ -737,6 +856,137 @@ func (g *Gateway) handleAPISessionDetail(w http.ResponseWriter, r *http.Request)
 		"session_id": sessionID,
 		"meta":       meta,
 		"messages":   messages,
+	}) //nolint:errcheck
+}
+
+// handleAPISessionReply sends a message from the web UI into an existing
+// connector session. The message is processed by the built-in chat handler
+// (the orchestrator) and the reply is sent back to the original channel.
+// POST /api/sessions/{id} { "message": "..." }
+func (g *Gateway) handleAPISessionReply(w http.ResponseWriter, r *http.Request, sessionID string) {
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Message == "" {
+		http.Error(w, `{"error":"message is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Look up session — if not in memory, reconstruct from the session ID.
+	// Session IDs are formatted as "channel:conversationID" (e.g. "telegram:12345").
+	// After a gateway restart the in-memory map is empty but the JSONL files persist.
+	g.sessionMux.RLock()
+	sess := g.sessions[sessionID]
+	g.sessionMux.RUnlock()
+
+	if sess == nil {
+		// Try to reconstruct from session ID format
+		parts := strings.SplitN(sessionID, ":", 2)
+		if len(parts) == 2 {
+			sess = g.GetOrCreateSession(parts[1], parts[0])
+		}
+	}
+
+	if sess == nil {
+		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// Find the channel client that matches this session's channel
+	g.roleMux.RLock()
+	var targetChannel *Client
+	for _, c := range g.channels {
+		if c.metadata["channel"] == sess.Channel {
+			targetChannel = c
+			break
+		}
+	}
+	g.roleMux.RUnlock()
+
+	if targetChannel == nil {
+		http.Error(w, fmt.Sprintf(`{"error":"no connected %s channel"}`, sess.Channel), http.StatusServiceUnavailable)
+		return
+	}
+
+	// Log the operator's input message to the session so it appears in the activity feed.
+	operatorMsg := &protocol.EventMessageFrame{
+		Type:           protocol.FrameEventMessage,
+		Channel:        sess.Channel,
+		ConversationID: sess.ConversationID,
+		Text:           body.Message,
+		SessionID:      sess.ID,
+		Sender: protocol.Sender{
+			ID:       "operator",
+			Name:     "Operator",
+			Username: "Web UI",
+		},
+		Timestamp: time.Now().Unix(),
+	}
+	if g.sessionStorage != nil {
+		_ = g.sessionStorage.LogFrame(sess.ID, operatorMsg)
+	}
+	sess.AddMessage(operatorMsg)
+	g.broadcastToUIs(operatorMsg)
+
+	// Send the operator's message to the channel so the user sees it in Telegram/Discord/etc.
+	operatorRelay := &protocol.CmdChannelSendFrame{
+		Type:           protocol.FrameCmdChannelSend,
+		Channel:        sess.Channel,
+		ConversationID: sess.ConversationID,
+		Text:           "[Operator]: " + body.Message,
+		SessionID:      sess.ID,
+		Timestamp:      time.Now().Unix(),
+	}
+	_ = targetChannel.Send(operatorRelay)
+
+	// Process through the built-in chat handler if available
+	responseText := body.Message
+	if g.config.OnChat != nil {
+		resp, err := g.config.OnChat(r.Context(), body.Message)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+			return
+		}
+		responseText = resp
+	}
+
+	// Build reply frame and send to the connector channel
+	reply := &protocol.CmdChannelSendFrame{
+		Type:           protocol.FrameCmdChannelSend,
+		Channel:        sess.Channel,
+		ConversationID: sess.ConversationID,
+		Text:           responseText,
+		SessionID:      sess.ID,
+		Timestamp:      time.Now().Unix(),
+	}
+
+	// Log the AI reply
+	if g.sessionStorage != nil {
+		if err := g.sessionStorage.LogFrame(sess.ID, reply); err != nil {
+			fmt.Printf("Warning: failed to log reply to session: %v\n", err)
+		}
+	}
+	sess.AddMessage(reply)
+	g.broadcastToUIs(reply)
+
+	// Send to channel client (this delivers the AI reply to Telegram/Discord/etc.)
+	if err := targetChannel.Send(reply); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "failed to send to channel: " + err.Error()}) //nolint:errcheck
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "sent",
+		"response": responseText,
 	}) //nolint:errcheck
 }
 
@@ -790,12 +1040,28 @@ func (g *Gateway) handleAPIConnectorsGet(w http.ResponseWriter, _ *http.Request)
 	}
 	g.sessionMux.RUnlock()
 
+	// Include spawned connector processes (HTTP-based connectors that
+	// don't show up as WebSocket clients)
+	g.refreshSpawnedConnectors()
+	g.spawnedConnectorsMu.RLock()
+	spawned := make([]map[string]interface{}, 0, len(g.spawnedConnectors))
+	for _, sc := range g.spawnedConnectors {
+		spawned = append(spawned, map[string]interface{}{
+			"type":       sc.Type,
+			"pid":        sc.PID,
+			"started_at": sc.StartedAt.UTC().Format(time.RFC3339),
+			"status":     sc.Status,
+		})
+	}
+	g.spawnedConnectorsMu.RUnlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"channels":            channelClients,
 		"agents":              agentClients,
 		"uis":                 uiClients,
 		"sessions_by_channel": channelSessions,
+		"spawned":             spawned,
 	}) //nolint:errcheck
 }
 
@@ -824,6 +1090,12 @@ func (g *Gateway) handleAPIConnectorsPost(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
 		return
+	}
+
+	// Extract PID from message (format: "... (pid 12345)") and track it.
+	var pid int
+	if _, scanErr := fmt.Sscanf(msg, "%*[^(](pid %d)", &pid); scanErr == nil && pid > 0 {
+		g.TrackConnector(body.Type, pid)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1111,6 +1383,21 @@ func (g *Gateway) handleEventMessage(ctx context.Context, sender *Client, frame 
 	// Add message to session history
 	session.AddMessage(frame)
 
+	// Push notification for new messages
+	sender_name := frame.Sender.Username
+	if sender_name == "" {
+		sender_name = frame.Sender.Name
+	}
+	if sender_name == "" {
+		sender_name = frame.Sender.ID
+	}
+	msgPreview := frame.Text
+	if len(msgPreview) > 80 {
+		msgPreview = msgPreview[:80] + "..."
+	}
+	g.PushNotification("activity", fmt.Sprintf("Message from %s", sender_name),
+		fmt.Sprintf("[%s] %s", frame.Channel, msgPreview))
+
 	// Log to JSONL
 	if err := g.sessionStorage.LogFrame(session.ID, frame); err != nil {
 		fmt.Printf("Warning: failed to log frame to session: %v\n", err)
@@ -1128,6 +1415,12 @@ func (g *Gateway) handleEventMessage(ctx context.Context, sender *Client, frame 
 	g.roleMux.RUnlock()
 
 	if len(availableAgents) == 0 {
+		// No WebSocket agents connected — fall back to built-in chat handler.
+		// This runs the orchestrator directly and sends the reply back to the channel.
+		if g.config.OnChat != nil {
+			go g.handleBuiltinChat(ctx, sender, session, frame)
+			return nil
+		}
 		return fmt.Errorf("no agents available")
 	}
 
@@ -1151,6 +1444,43 @@ func (g *Gateway) handleEventMessage(ctx context.Context, sender *Client, frame 
 	}
 
 	return nil
+}
+
+// handleBuiltinChat processes a channel message through the built-in OnChat
+// handler (the orchestrator) and sends the reply back to the originating channel.
+// This is the fallback path when no dedicated WebSocket agent is connected.
+func (g *Gateway) handleBuiltinChat(ctx context.Context, sender *Client, session *Session, frame *protocol.EventMessageFrame) {
+	response, err := g.config.OnChat(ctx, frame.Text)
+	if err != nil {
+		fmt.Printf("Warning: built-in chat handler error for %s: %v\n", session.ID, err)
+		response = fmt.Sprintf("Sorry, I encountered an error: %v", err)
+	}
+
+	// Build reply frame
+	reply := &protocol.CmdChannelSendFrame{
+		Type:           protocol.FrameCmdChannelSend,
+		Channel:        frame.Channel,
+		ConversationID: frame.ConversationID,
+		Text:           response,
+		SessionID:      session.ID,
+		Timestamp:      time.Now().Unix(),
+	}
+
+	// Log the reply to the session JSONL
+	if err := g.sessionStorage.LogFrame(session.ID, reply); err != nil {
+		fmt.Printf("Warning: failed to log reply to session: %v\n", err)
+	}
+
+	// Add to in-memory session
+	session.AddMessage(reply)
+
+	// Broadcast to UI observers
+	g.broadcastToUIs(reply)
+
+	// Send back to the originating channel client
+	if err := sender.Send(reply); err != nil {
+		fmt.Printf("Warning: failed to send reply to channel %s: %v\n", frame.Channel, err)
+	}
 }
 
 // handleCmdChannelSend handles send commands from agents
@@ -1367,6 +1697,83 @@ func writeGatewayJSON(w http.ResponseWriter, status int, v interface{}) {
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
+// handleAPIProviders returns all available providers from the live catalog.
+// GET /api/providers → [{id, name, models}]
+func (g *Gateway) handleAPIProviders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.ListProviders == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"providers": []string{}})
+		return
+	}
+	providers := g.config.API.ListProviders()
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"providers": providers})
+}
+
+// handleAPIProviderModels returns models for a specific provider.
+// GET /api/providers/{name} → {provider, models: [{id, name, description}]}
+func (g *Gateway) handleAPIProviderModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	provider := strings.TrimPrefix(r.URL.Path, "/api/providers/")
+	provider = strings.TrimSuffix(provider, "/")
+	if provider == "" {
+		http.Error(w, `{"error":"provider name required"}`, http.StatusBadRequest)
+		return
+	}
+	if g.config.API == nil || g.config.API.ListModels == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"provider": provider, "models": []interface{}{}})
+		return
+	}
+	models := g.config.API.ListModels(provider)
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"provider": provider, "models": models})
+}
+
+// handleAPIKeys handles API key management.
+// GET  /api/apikeys → which providers have keys (no values exposed)
+// POST /api/apikeys → {"provider":"openai","key":"sk-..."} to save a key
+func (g *Gateway) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if g.config.API == nil || g.config.API.GetAPIKeyStatus == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"keys": map[string]bool{}})
+			return
+		}
+		status := g.config.API.GetAPIKeyStatus()
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"keys": status})
+
+	case http.MethodPost:
+		if g.config.API == nil || g.config.API.SetAPIKey == nil {
+			http.Error(w, `{"error":"API key management not available"}`, http.StatusServiceUnavailable)
+			return
+		}
+		var req struct {
+			Provider string `json:"provider"`
+			Key      string `json:"key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Provider == "" || req.Key == "" {
+			http.Error(w, `{"error":"provider and key are required"}`, http.StatusBadRequest)
+			return
+		}
+		if err := g.config.API.SetAPIKey(req.Provider, req.Key); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
 // handleAPIConfig handles GET /api/config and POST /api/config.
 //
 // GET  — returns a sanitised configuration snapshot (no API keys).
@@ -1384,7 +1791,7 @@ func (g *Gateway) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		cfg := g.config.API.GetConfig()
 		writeGatewayJSON(w, http.StatusOK, cfg)
 
-	case http.MethodPost:
+	case http.MethodPost, http.MethodPut:
 		if g.config.API == nil || g.config.API.SetConfig == nil {
 			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"error": "config update not available",
@@ -1561,6 +1968,88 @@ func (g *Gateway) handleAPICosts(w http.ResponseWriter, r *http.Request) {
 	}
 	costs := g.config.API.GetCosts()
 	writeGatewayJSON(w, http.StatusOK, costs)
+}
+
+// ── Persistent Notification Inbox ────────────────────────────────────────────
+
+func (g *Gateway) handleAPINotifications(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		entries := g.inbox.SortedByTime()
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"notifications": entries,
+			"unread":        g.inbox.UnreadCount(),
+			"total":         len(entries),
+		})
+	case http.MethodPost:
+		var req struct {
+			Action string `json:"action"`
+			Kind   string `json:"kind,omitempty"`
+			Title  string `json:"title,omitempty"`
+			Detail string `json:"detail,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		switch req.Action {
+		case "push":
+			if req.Title == "" {
+				http.Error(w, `{"error":"title required"}`, http.StatusBadRequest)
+				return
+			}
+			entry := g.inbox.Push(req.Kind, req.Title, req.Detail, nil)
+			writeGatewayJSON(w, http.StatusOK, entry)
+		case "mark_all_read":
+			g.inbox.MarkAllRead()
+			writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		case "clear_read":
+			for _, e := range g.inbox.List() {
+				if e.Read && !e.Pinned {
+					g.inbox.Delete(e.ID)
+				}
+			}
+			writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		default:
+			http.Error(w, `{"error":"use action: push, mark_all_read, clear_read"}`, http.StatusBadRequest)
+		}
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (g *Gateway) handleAPINotificationDetail(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/notifications/")
+	id = strings.TrimSuffix(id, "/")
+	if id == "" {
+		http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		entry, ok := g.inbox.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, entry)
+	case http.MethodPost:
+		g.inbox.MarkRead(id)
+		entry, _ := g.inbox.Get(id)
+		writeGatewayJSON(w, http.StatusOK, entry)
+	case http.MethodDelete:
+		g.inbox.Delete(id)
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// PushNotification adds a notification to the persistent inbox.
+func (g *Gateway) PushNotification(kind, title, detail string) {
+	if g.inbox != nil {
+		g.inbox.Push(kind, title, detail, nil)
+	}
 }
 
 // handleAPIAudit handles GET /api/audit?limit=N.
@@ -2027,21 +2516,44 @@ func (g *Gateway) handleAPIApprovals(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIHeartbeat serves GET /api/heartbeat — returns the heartbeat status.
 func (g *Gateway) handleAPIHeartbeat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != "" {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-
 	api := g.config.API
-	if api == nil || api.GetHeartbeatStatus == nil {
-		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
-			"enabled": false,
-			"message": "heartbeat not available",
-		})
-		return
-	}
 
-	writeGatewayJSON(w, http.StatusOK, api.GetHeartbeatStatus())
+	switch r.Method {
+	case http.MethodGet, "":
+		if api == nil || api.GetHeartbeatStatus == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+				"enabled": false,
+				"message": "heartbeat not available",
+			})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, api.GetHeartbeatStatus())
+
+	case http.MethodPost:
+		// Toggle heartbeat on/off
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if api == nil || api.ToggleHeartbeat == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+				"enabled": false,
+				"message": "heartbeat not available",
+			})
+			return
+		}
+		newState := api.ToggleHeartbeat(req.Enabled)
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": newState,
+			"message": map[bool]string{true: "heartbeat enabled", false: "heartbeat disabled"}[newState],
+		})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
 }
 
 // handleAPIHeartbeatRun serves POST /api/heartbeat/run — triggers an immediate

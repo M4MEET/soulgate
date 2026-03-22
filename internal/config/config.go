@@ -169,6 +169,11 @@ type ModelConfig struct {
 	OpenAI    OpenAIConfig    `yaml:"openai"`
 	Anthropic AnthropicConfig `yaml:"anthropic"`
 
+	// APIKeys stores API keys for all providers, keyed by provider name.
+	// This allows switching providers without re-entering keys.
+	// Keys: "openai", "anthropic", "groq", "google", "mistral", etc.
+	APIKeys map[string]string `yaml:"api_keys,omitempty"`
+
 	// FallbackChain is an ordered list of providers to try when the primary
 	// provider fails with a retryable error (429, 500, 503, connection loss).
 	// Entries are sorted by Priority ascending before use.
@@ -390,6 +395,65 @@ func (c *Config) Save(path string) error {
 	}
 
 	return nil
+}
+
+// ResolveAPIKey returns the API key for a provider, checking in order:
+// 1. The APIKeys map (multi-provider storage)
+// 2. Legacy provider-specific config fields (openai.api_key, anthropic.api_key)
+// 3. Environment variables
+func (c *Config) ResolveAPIKey(provider string) string {
+	// 1. Multi-provider map
+	if c.Model.APIKeys != nil {
+		if key, ok := c.Model.APIKeys[provider]; ok && key != "" {
+			return key
+		}
+	}
+
+	// 2. Legacy fields
+	switch provider {
+	case "openai":
+		if c.Model.OpenAI.APIKey != "" {
+			return c.Model.OpenAI.APIKey
+		}
+	case "anthropic":
+		if c.Model.Anthropic.APIKey != "" {
+			return c.Model.Anthropic.APIKey
+		}
+	}
+
+	// 3. Env vars — use the registry's env key naming convention
+	envKeys := map[string]string{
+		"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+		"groq": "GROQ_API_KEY", "google": "GOOGLE_API_KEY",
+		"mistral": "MISTRAL_API_KEY", "cohere": "COHERE_API_KEY",
+		"deepseek": "DEEPSEEK_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+		"together": "TOGETHER_API_KEY", "perplexity": "PERPLEXITY_API_KEY",
+		"xai": "XAI_API_KEY", "azure": "AZURE_OPENAI_API_KEY",
+	}
+	if envKey, ok := envKeys[provider]; ok {
+		if val := os.Getenv(envKey); val != "" {
+			return val
+		}
+	}
+
+	return ""
+}
+
+// SetAPIKey stores an API key for a provider in the multi-provider map.
+// Also syncs to legacy fields for backward compatibility.
+func (c *Config) SetAPIKey(provider, key string) {
+	if c.Model.APIKeys == nil {
+		c.Model.APIKeys = make(map[string]string)
+	}
+	c.Model.APIKeys[provider] = key
+
+	// Sync to legacy fields
+	switch provider {
+	case "openai":
+		c.Model.OpenAI.APIKey = key
+	case "anthropic":
+		c.Model.Anthropic.APIKey = key
+	}
 }
 
 // Validate validates the configuration

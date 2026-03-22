@@ -320,11 +320,19 @@ export interface ConnectorClient {
   metadata: Record<string, string>;
 }
 
+export interface SpawnedConnector {
+  type: string;
+  pid: number;
+  started_at: string;
+  status: string;
+}
+
 export interface ConnectorsData {
   channels: ConnectorClient[];
   agents: { client_id: string; metadata: Record<string, string> }[];
   uis: { client_id: string }[];
   sessions_by_channel: Record<string, number>;
+  spawned?: SpawnedConnector[];
 }
 
 export async function fetchConnectors(): Promise<ConnectorsData> {
@@ -336,6 +344,60 @@ export async function fetchConnectors(): Promise<ConnectorsData> {
   });
 }
 
+export async function replyToSession(
+  sessionId: string,
+  message: string,
+): Promise<{ status: string; response: string; error?: string }> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  return res.json();
+}
+
+// ── Provider & Model catalog endpoints ────────────────────────────────────────
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  models: number;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string;
+  provider?: string;
+  context_length?: number;
+}
+
+export async function fetchProviders(): Promise<string[]> {
+  const data = await safeFetch<{ providers?: string[] }>(`${BASE}/api/providers`, {});
+  return data.providers || [];
+}
+
+export async function fetchProviderModels(provider: string): Promise<ModelInfo[]> {
+  const data = await safeFetch<{ models?: ModelInfo[] }>(`${BASE}/api/providers/${encodeURIComponent(provider)}`, {});
+  return data.models || [];
+}
+
+export async function fetchAPIKeyStatus(): Promise<Record<string, boolean>> {
+  const data = await safeFetch<{ keys?: Record<string, boolean> }>(`${BASE}/api/apikeys`, {});
+  return data.keys || {};
+}
+
+export async function saveAPIKey(provider: string, key: string): Promise<{ status?: string; error?: string }> {
+  const res = await fetch(`${BASE}/api/apikeys`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, key }),
+  });
+  return res.json();
+}
+
+// ── Connector endpoints ───────────────────────────────────────────────────────
+
 export async function spawnConnector(
   type: string,
   config: Record<string, string>,
@@ -345,7 +407,12 @@ export async function spawnConnector(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, config }),
   });
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { status: 'error', message: '', error: text || `HTTP ${res.status}` };
+  }
 }
 
 // ── Optional endpoints (404-safe) ────────────────────────────────────────────
@@ -523,11 +590,23 @@ export async function fetchConfig(): Promise<ConfigData | null> {
 }
 
 export async function updateConfig(config: Partial<ConfigData>): Promise<void> {
-  await fetch(`${BASE}/api/config`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
+  // The gateway accepts individual key/value POST updates.
+  // Send provider and model as separate requests.
+  const updates: { key: string; value: string }[] = [];
+  if (config.provider) updates.push({ key: 'provider', value: config.provider });
+  if (config.model) updates.push({ key: 'model', value: config.model });
+
+  for (const update of updates) {
+    const res = await fetch(`${BASE}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error((body as { error?: string }).error || `Failed to update ${update.key}`);
+    }
+  }
 }
 
 export async function tryTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -1108,4 +1187,40 @@ export async function deleteThread(id: string): Promise<void> {
   } catch {
     // Best-effort.
   }
+}
+
+// ── Heartbeat API ─────────────────────────────────────────────────────────────
+
+export interface HeartbeatStatus {
+  enabled: boolean;
+  running: boolean;
+  interval: string;
+  last_run?: string;
+  next_run?: string;
+  last_result?: string;
+  run_count: number;
+}
+
+export async function fetchHeartbeatStatus(): Promise<HeartbeatStatus | null> {
+  return safeFetch<HeartbeatStatus | null>(`${BASE}/api/heartbeat`, null);
+}
+
+export async function toggleHeartbeat(enabled: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json();
+    return data.enabled ?? enabled;
+  } catch {
+    return enabled;
+  }
+}
+
+export async function triggerHeartbeat(): Promise<string> {
+  const res = await fetch(`${BASE}/api/heartbeat/run`, { method: 'POST' });
+  const data = await res.json();
+  return data.result || data.error || 'No response';
 }

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/model/anthropic"
@@ -18,15 +19,29 @@ func (o *Orchestrator) SetProvider(providerName string, modelName string) error 
 			providerName, formatProviderList())
 	}
 
-	// Resolve API key
-	apiKey, err := model.ResolveAPIKey(def)
-	if err != nil {
-		return err
+	// Resolve API key — check multi-provider config, legacy fields, then env vars.
+	apiKey := o.workspace.Config.ResolveAPIKey(providerName)
+	if apiKey == "" && def.RequiresKey {
+		return fmt.Errorf("%s API key not configured — add it in Settings or set %s", providerName, def.EnvKey)
+	}
+	if apiKey == "" {
+		apiKey = "no-key-needed"
 	}
 
 	// Use default model if none specified
 	if modelName == "" {
 		modelName = def.DefaultModel
+	}
+
+	// Normalize OpenRouter-style model IDs (e.g. "anthropic/claude-sonnet-4.6").
+	// If the model has a "provider/" prefix that matches the target provider,
+	// strip it — native APIs don't accept prefixed IDs.
+	if idx := strings.Index(modelName, "/"); idx > 0 {
+		prefix := modelName[:idx]
+		suffix := modelName[idx+1:]
+		if strings.EqualFold(prefix, providerName) {
+			modelName = suffix
+		}
 	}
 
 	// Resolve base URL

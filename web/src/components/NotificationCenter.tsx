@@ -118,7 +118,7 @@ interface PanelProps {
 
 function NotificationPanel({ notifications, unreadCount, onMarkAllRead, onDismiss, connected }: PanelProps) {
   return (
-    <div className="absolute bottom-full mb-2 right-0 w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl z-40 overflow-hidden">
+    <div className="w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
@@ -215,6 +215,8 @@ export default function NotificationCenter({
 }: BellProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [panelPos, setPanelPos] = useState({ left: 0, bottom: 0 });
 
   // Close on outside click
   useEffect(() => {
@@ -226,10 +228,24 @@ export default function NotificationCenter({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // Position the panel relative to the button using fixed positioning
+  // so it's not clipped by the sidebar's overflow-hidden
+  const handleOpen = () => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPanelPos({
+        left: rect.right + 8,
+        bottom: window.innerHeight - rect.bottom,
+      });
+    }
+    setOpen(o => !o);
+  };
+
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={btnRef}
+        onClick={handleOpen}
         title="Notifications"
         className={`relative flex items-center justify-center rounded-lg transition-all ${
           open ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
@@ -247,13 +263,18 @@ export default function NotificationCenter({
       </button>
 
       {open && (
-        <NotificationPanel
-          notifications={notifications}
-          unreadCount={unreadCount}
-          onMarkAllRead={() => { onMarkAllRead(); }}
-          onDismiss={onDismiss}
-          connected={connected}
-        />
+        <div
+          className="fixed z-50"
+          style={{ left: panelPos.left, bottom: panelPos.bottom }}
+        >
+          <NotificationPanel
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onMarkAllRead={() => { onMarkAllRead(); }}
+            onDismiss={onDismiss}
+            connected={connected}
+          />
+        </div>
       )}
     </div>
   );

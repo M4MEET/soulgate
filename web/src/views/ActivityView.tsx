@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Activity, MessageSquare, Bot, Monitor, Radio, RefreshCw,
   ChevronRight, Clock, Hash, User, ArrowRight, Zap, Send,
   Globe, Filter
 } from 'lucide-react';
 import {
-  fetchSessions, fetchConnectors, fetchActivity, fetchSessionDetail,
+  fetchSessions, fetchConnectors, fetchActivity, fetchSessionDetail, replyToSession,
   type SessionData, type ConnectorsData, type ActivityEntry, type SessionMessage,
 } from '../lib/api';
+import toast from 'react-hot-toast';
 
 // Channel color map
 const channelColors: Record<string, { bg: string; text: string; dot: string; border: string }> = {
@@ -46,15 +47,56 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const loadMessages = useCallback(async () => {
+    const d = await fetchSessionDetail(sessionId);
+    setMessages(d.messages);
+    setMeta(d.meta);
+    setLoading(false);
+  }, [sessionId]);
 
   useEffect(() => {
     setLoading(true);
-    fetchSessionDetail(sessionId).then(d => {
-      setMessages(d.messages);
-      setMeta(d.meta);
-      setLoading(false);
-    });
+    loadMessages();
+    // Auto-refresh session chat every 2 seconds
+    const t = setInterval(loadMessages, 2000);
+    return () => clearInterval(t);
+  }, [loadMessages]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length]);
+
+  // Focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus();
   }, [sessionId]);
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+
+    setSending(true);
+    setInput('');
+    try {
+      const result = await replyToSession(sessionId, text);
+      if (result.error) {
+        toast.error(result.error);
+      }
+      // Refresh messages immediately to show the reply
+      await loadMessages();
+    } catch (err) {
+      toast.error(`Failed to send: ${err}`);
+    } finally {
+      setSending(false);
+      inputRef.current?.focus();
+    }
+  };
 
   const channel = String((meta as any)?.channel || sessionId.split(':')[0] || 'unknown');
   const style = getChannelStyle(channel);
@@ -66,7 +108,7 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-200">
           <ChevronRight size={16} className="rotate-180" />
         </button>
-        <div className={`w-2 h-2 rounded-full ${style.dot}`} />
+        <div className={`w-2 h-2 rounded-full ${style.dot} animate-pulse`} />
         <div className="flex-1 min-w-0">
           <div className={`text-sm font-semibold ${style.text} capitalize`}>{channel}</div>
           <div className="text-xs text-zinc-500 truncate">{sessionId}</div>
@@ -77,7 +119,9 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ scrollbarWidth: 'thin' }}>
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">Loading...</div>
+          <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">
+            <RefreshCw size={16} className="animate-spin mr-2" />Loading...
+          </div>
         ) : messages.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">No messages</div>
         ) : (
@@ -98,7 +142,6 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
                     ? 'bg-amber-500/5 border border-amber-500/10 text-amber-200 text-xs font-mono w-full'
                     : 'bg-zinc-800/30 border border-zinc-700/20 text-zinc-400 text-xs w-full'
                 }`}>
-                  {/* Sender info for incoming messages */}
                   {isIncoming && !!data.sender && (
                     <div className="flex items-center gap-1.5 mb-1">
                       <User size={10} className="text-blue-400" />
@@ -119,7 +162,6 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
                       <span className="text-[10px] text-amber-400">{msg.type}: {String(data.tool_name || data.tool || '')}</span>
                     </div>
                   )}
-                  {/* Message text */}
                   <div className="whitespace-pre-wrap break-words">
                     {String(data.text || data.result || data.error || JSON.stringify(data).slice(0, 300))}
                   </div>
@@ -129,6 +171,37 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
             );
           })
         )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Chat input */}
+      <div className="border-t border-zinc-700/40 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder={`Reply to ${channel} conversation...`}
+            disabled={sending}
+            className="flex-1 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 disabled:opacity-50"
+          />
+          <button
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
+            className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+          >
+            {sending ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <Send size={16} />
+            )}
+          </button>
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-1">
+          Your message will be processed by SoulGate AI and the reply sent to the {channel} user
+        </div>
       </div>
     </div>
   );
@@ -143,9 +216,9 @@ export default function ActivityView() {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const prevActivityLen = useRef(0);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
     const [s, c, a] = await Promise.all([
       fetchSessions(),
       fetchConnectors(),
@@ -155,33 +228,49 @@ export default function ActivityView() {
     setConnectors(c);
     setActivity(a);
     setLoading(false);
+
+    // Flash indicator when new activity arrives
+    if (a.length > prevActivityLen.current && prevActivityLen.current > 0) {
+      document.title = `(${a.length - prevActivityLen.current} new) SoulGate`;
+      setTimeout(() => { document.title = 'SoulGate'; }, 3000);
+    }
+    prevActivityLen.current = a.length;
   }, [channelFilter]);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
-  // Auto-refresh every 10s
   useEffect(() => {
-    const t = setInterval(refresh, 10000);
+    setLoading(true);
+    refresh();
+  }, [refresh]);
+
+  // Auto-refresh every 2 seconds for real-time feel
+  useEffect(() => {
+    const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
   }, [refresh]);
 
   // Unique channels from sessions
   const channels = [...new Set(sessions.map(s => s.channel).filter(Boolean))];
 
-  // Sessions filtered by channel
-  const filteredSessions = channelFilter
+  // Sessions filtered by channel, sorted by last activity (most recent first)
+  const filteredSessions = (channelFilter
     ? sessions.filter(s => s.channel === channelFilter)
-    : sessions;
+    : sessions
+  ).sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
 
   return (
     <div className="flex h-full">
-      {/* Left panel — Connectors & Sessions */}
+      {/* Left panel -- Connectors & Sessions */}
       <div className="w-80 border-r border-zinc-700/40 flex flex-col bg-zinc-900/30">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700/40">
           <div className="flex items-center gap-2">
             <Activity size={16} className="text-indigo-400" />
             <span className="text-sm font-semibold text-zinc-200">Activity Hub</span>
+            {activity.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-medium">
+                {activity.length}
+              </span>
+            )}
           </div>
           <button onClick={refresh} className="p-1.5 rounded-lg hover:bg-zinc-700/40 text-zinc-500 hover:text-zinc-300 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -192,44 +281,46 @@ export default function ActivityView() {
         {connectors && (
           <div className="px-4 py-2.5 border-b border-zinc-700/30 flex gap-3">
             <div className="flex items-center gap-1.5">
-              <Radio size={11} className="text-emerald-400" />
-              <span className="text-[11px] text-zinc-400">{connectors.channels.length} channels</span>
+              <Radio size={11} className={connectors.channels.length > 0 ? 'text-emerald-400 animate-pulse' : 'text-zinc-600'} />
+              <span className="text-[11px] text-zinc-400">{connectors.channels.length} channel{connectors.channels.length !== 1 ? 's' : ''}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Bot size={11} className="text-indigo-400" />
-              <span className="text-[11px] text-zinc-400">{connectors.agents.length} agents</span>
+              <span className="text-[11px] text-zinc-400">{connectors.agents.length} agent{connectors.agents.length !== 1 ? 's' : ''}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Monitor size={11} className="text-violet-400" />
-              <span className="text-[11px] text-zinc-400">{connectors.uis.length} UIs</span>
+              <span className="text-[11px] text-zinc-400">{connectors.uis.length} UI{connectors.uis.length !== 1 ? 's' : ''}</span>
             </div>
           </div>
         )}
 
         {/* Channel filter */}
-        <div className="px-3 py-2 border-b border-zinc-700/30">
-          <div className="flex items-center gap-2">
-            <Filter size={12} className="text-zinc-500" />
-            <select
-              value={channelFilter}
-              onChange={e => setChannelFilter(e.target.value)}
-              className="flex-1 bg-transparent text-xs text-zinc-300 border-none outline-none cursor-pointer"
-            >
-              <option value="">All channels</option>
-              {channels.map(ch => (
-                <option key={ch} value={ch}>{ch}</option>
-              ))}
-            </select>
+        {channels.length > 0 && (
+          <div className="px-3 py-2 border-b border-zinc-700/30">
+            <div className="flex items-center gap-2">
+              <Filter size={12} className="text-zinc-500" />
+              <select
+                value={channelFilter}
+                onChange={e => setChannelFilter(e.target.value)}
+                className="flex-1 bg-transparent text-xs text-zinc-300 border-none outline-none cursor-pointer"
+              >
+                <option value="">All channels</option>
+                {channels.map(ch => (
+                  <option key={ch} value={ch}>{ch}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Sessions list */}
         <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {filteredSessions.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-zinc-500 text-xs gap-2">
               <Globe size={20} className="text-zinc-600" />
-              <span>No sessions yet</span>
-              <span className="text-zinc-600">Connect a channel to start</span>
+              <span>{loading ? 'Loading...' : 'No sessions yet'}</span>
+              {!loading && <span className="text-zinc-600">Send a message to any connector</span>}
             </div>
           ) : (
             filteredSessions.map(s => {
@@ -241,7 +332,7 @@ export default function ActivityView() {
                 <button
                   key={s.id}
                   onClick={() => setSelectedSession(s.id)}
-                  className={`w-full text-left px-3 py-2.5 border-b border-zinc-800/50 transition-colors ${
+                  className={`w-full text-left px-3 py-2.5 border-b border-zinc-800/50 transition-all ${
                     isSelected ? 'bg-indigo-500/10 border-l-2 border-l-indigo-500' : 'hover:bg-zinc-800/40 border-l-2 border-l-transparent'
                   }`}
                 >
@@ -265,7 +356,7 @@ export default function ActivityView() {
         </div>
       </div>
 
-      {/* Center panel — Session chat or Activity feed */}
+      {/* Center panel -- Session chat or Activity feed */}
       <div className="flex-1 flex flex-col min-w-0">
         {selectedSession ? (
           <SessionChat
@@ -279,15 +370,21 @@ export default function ActivityView() {
               <Clock size={16} className="text-zinc-400" />
               <span className="text-sm font-semibold text-zinc-200">Live Activity Feed</span>
               <span className="text-xs text-zinc-500">{activity.length} events</span>
+              {activity.length > 0 && (
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-1" title="Live" />
+              )}
             </div>
 
             {/* Activity feed */}
             <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
               {activity.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 text-zinc-500 text-sm gap-2">
-                  <Activity size={24} className="text-zinc-600" />
-                  <span>No activity yet</span>
-                  <span className="text-xs text-zinc-600">Messages from all connectors will appear here</span>
+                <div className="flex flex-col items-center justify-center h-48 text-zinc-500 text-sm gap-3">
+                  <Activity size={28} className="text-zinc-600" />
+                  <span>{loading ? 'Loading activity...' : 'No activity yet'}</span>
+                  <span className="text-xs text-zinc-600">Messages from all connectors will appear here in real-time</span>
+                  {!loading && connectors && connectors.channels.length === 0 && (
+                    <span className="text-xs text-amber-500/70 mt-1">No connectors active -- connect one first</span>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -318,9 +415,11 @@ export default function ActivityView() {
 
                     return (
                       <button
-                        key={i}
+                        key={`${entry.ts}-${i}`}
                         onClick={() => setSelectedSession(entry.session_id)}
-                        className="w-full text-left flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-zinc-800/40 transition-colors group"
+                        className={`w-full text-left flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-zinc-800/40 transition-all group ${
+                          i === 0 ? 'bg-zinc-800/20' : ''
+                        }`}
                       >
                         <div className="mt-0.5">{icon}</div>
                         <div className="flex-1 min-w-0">

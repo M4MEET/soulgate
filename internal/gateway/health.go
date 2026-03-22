@@ -110,8 +110,8 @@ func (hm *healthMonitor) buildStatus() HealthStatus {
 		StartedAt: gw.startedAt.UTC(),
 		Clients:   clients,
 		Sessions:  sessions,
-		Provider:  gw.config.Provider,
-		Model:     gw.config.Model,
+		Provider:  gw.liveProvider(),
+		Model:     gw.liveModel(),
 		Memory:    mem,
 		Checks:    checks,
 	}

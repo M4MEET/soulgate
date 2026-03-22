@@ -301,14 +301,21 @@ export default function ConnectorsView() {
         channelMap.set(ch, existing);
       }
 
+      // Also check spawned processes (HTTP-based connectors)
+      const spawnedSet = new Set<string>();
+      for (const sc of data.spawned || []) {
+        if (sc.status === 'running') spawnedSet.add(sc.type);
+      }
+
       setConnectors(
         CONNECTOR_DEFS.map(def => {
           const liveClients = channelMap.get(def.id) || [];
           const sessionCount = data.sessions_by_channel?.[def.id] || 0;
+          const isConnected = liveClients.length > 0 || spawnedSet.has(def.id);
           return {
             ...def,
-            connected: liveClients.length > 0,
-            status: liveClients.length > 0 ? 'active' as const : undefined,
+            connected: isConnected,
+            status: isConnected ? 'active' as const : undefined,
             liveClients,
             sessionCount,
           };

@@ -26,6 +26,8 @@ var availableSlashCommands = []string{
 	"/new", "/reset", "/usage", "/abort", "/sessions", "/export", "/doctor",
 	// Conversation branching
 	"/fork", "/branches", "/switch", "/merge",
+	// Heartbeat
+	"/heartbeat",
 }
 
 // addMessage adds a message to the chat history and updates the display.

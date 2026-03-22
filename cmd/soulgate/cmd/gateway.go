@@ -18,6 +18,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/config"
 	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/gateway"
+	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/spf13/cobra"
 )
@@ -421,6 +422,10 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 // rich REST endpoints to the live orchestrator.  All callbacks are designed to
 // be safe for concurrent HTTP requests.
 func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadStore) *gateway.GatewayAPI {
+	// Initialize OpenRouter catalog for live provider/model discovery
+	catalogDir := filepath.Join(ws.ConfigDir, "cache")
+	orCatalog := model.NewOpenRouterCatalog(catalogDir)
+
 	return &gateway.GatewayAPI{
 
 		// GetConfig returns a sanitised configuration snapshot.
@@ -491,19 +496,28 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 			}
 		},
 
-		// SetConfig applies a single key=value update to the live provider/model.
-		// Only "provider" and "model" are currently supported; unknown keys return
-		// an error so callers receive a clear signal instead of a silent no-op.
+		// SetConfig applies a single key=value update to the live provider/model
+		// and persists the change to disk so it survives restarts.
 		SetConfig: func(key, value string) error {
+			var err error
 			switch key {
 			case "provider":
-				return orch.SetProvider(value, "")
+				err = orch.SetProvider(value, "")
 			case "model":
 				currentProvider, _ := orch.GetCurrentProvider()
-				return orch.SetProvider(currentProvider, value)
+				err = orch.SetProvider(currentProvider, value)
 			default:
 				return fmt.Errorf("unknown config key %q; supported keys: provider, model", key)
 			}
+			if err != nil {
+				return err
+			}
+			// Persist to disk
+			configPath := filepath.Join(ws.ConfigDir, "config.yml")
+			if saveErr := ws.Config.Save(configPath); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to persist config: %v\n", saveErr)
+			}
+			return nil
 		},
 
 		// GetTools returns the full tool catalog (name + description).
@@ -1077,6 +1091,17 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 			return orch.GetHeartbeat().RunNow()
 		},
 
+		// ToggleHeartbeat enables or disables the heartbeat.
+		ToggleHeartbeat: func(enabled bool) bool {
+			hb := orch.GetHeartbeat()
+			if enabled {
+				hb.Start()
+			} else {
+				hb.Stop()
+			}
+			return enabled
+		},
+
 		// GetThreads returns all persisted web UI chat threads.
 		GetThreads: func() ([]map[string]interface{}, error) {
 			return ts.Get()
@@ -1090,6 +1115,96 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 		// DeleteThread removes a chat thread by id.
 		DeleteThread: func(id string) error {
 			return ts.Delete(id)
+		},
+
+		// ListProviders returns all providers from the live OpenRouter catalog,
+		// merged with the local registry.
+		ListProviders: func() []string {
+			providers, err := orCatalog.GetProviders(context.Background())
+			if err != nil || len(providers) == 0 {
+				// Fallback to local registry
+				return model.AllProviderNames()
+			}
+			// Build a deduplicated list: OpenRouter providers + local-only ones
+			seen := make(map[string]bool)
+			var result []string
+			for _, p := range providers {
+				if !seen[p.ID] {
+					seen[p.ID] = true
+					result = append(result, p.ID)
+				}
+			}
+			// Add local-only providers (e.g. ollama, azure, custom)
+			for _, name := range model.AllProviderNames() {
+				if !seen[name] {
+					seen[name] = true
+					result = append(result, name)
+				}
+			}
+			return result
+		},
+
+		// ListModels returns models for a provider from the live catalog.
+		ListModels: func(provider string) []map[string]interface{} {
+			models, err := orCatalog.GetModels(context.Background(), provider)
+			if err != nil || len(models) == 0 {
+				// Fallback to local registry
+				regModels := model.ModelsFromRegistryPublic(provider)
+				out := make([]map[string]interface{}, 0, len(regModels))
+				for _, m := range regModels {
+					out = append(out, map[string]interface{}{
+						"id":          m.ID,
+						"name":        m.Name,
+						"description": m.Description,
+						"provider":    m.Provider,
+					})
+				}
+				return out
+			}
+			out := make([]map[string]interface{}, 0, len(models))
+			for _, m := range models {
+				entry := map[string]interface{}{
+					"id":       m.ID,
+					"name":     m.Name,
+					"provider": m.Provider,
+				}
+				if m.Description != "" {
+					entry["description"] = m.Description
+				}
+				if m.ContextLength > 0 {
+					entry["context_length"] = m.ContextLength
+				}
+				out = append(out, entry)
+			}
+			return out
+		},
+
+		// GetAPIKeyStatus returns which providers have API keys configured.
+		GetAPIKeyStatus: func() map[string]bool {
+			status := make(map[string]bool)
+			// Check all known providers
+			allProviders, _ := orCatalog.GetProviders(context.Background())
+			for _, p := range allProviders {
+				status[p.ID] = ws.Config.ResolveAPIKey(p.ID) != ""
+			}
+			// Also check local registry providers
+			for _, name := range model.AllProviderNames() {
+				if _, ok := status[name]; !ok {
+					status[name] = ws.Config.ResolveAPIKey(name) != ""
+				}
+			}
+			return status
+		},
+
+		// SetAPIKey saves an API key for a provider and persists to config.
+		SetAPIKey: func(provider, key string) error {
+			ws.Config.SetAPIKey(provider, key)
+			// Save config to disk
+			configPath := filepath.Join(ws.ConfigDir, "config.yml")
+			if err := ws.Config.Save(configPath); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+			return nil
 		},
 
 		// SpawnConnector starts a connector process in the background.
@@ -1110,10 +1225,13 @@ func spawnConnectorProcess(connectorType string, cfg map[string]string, port int
 		return "", fmt.Errorf("cannot find soulgate binary: %w", err)
 	}
 
-	gatewayWS := fmt.Sprintf("ws://localhost:%d/ws", port)
+	// Always pass the HTTP base URL. Each connector auto-detects and converts
+	// to ws:// if it needs WebSocket, or strips /ws if it needs HTTP.
+	// This means community-built connectors work without any changes here.
+	gatewayURL := fmt.Sprintf("http://localhost:%d", port)
 
 	// Build command args
-	args := []string{"connector", connectorType, "--gateway", gatewayWS}
+	args := []string{"connector", connectorType, "--gateway", gatewayURL}
 
 	// Build environment: inherit current env + add connector-specific vars
 	env := os.Environ()

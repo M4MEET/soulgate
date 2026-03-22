@@ -164,7 +164,7 @@ export default function App() {
 
         {/* View area */}
         <div className="flex flex-1 overflow-hidden">
-          {view === 'chat'       && <ChatView />}
+          {view === 'chat'       && <ChatView health={health} />}
           {view === 'dashboard'  && <DashboardView health={health} sessions={sessions} />}
           {view === 'agents'     && <AgentsView />}
           {view === 'tools'      && <ToolsView />}
@@ -179,7 +179,7 @@ export default function App() {
           {view === 'canvas'     && <CanvasView />}
           {view === 'files'      && <FileBrowserView />}
           {view === 'terminal'   && <TerminalView />}
-          {view === 'settings'   && <SettingsView health={health} />}
+          {view === 'settings'   && <SettingsView health={health} onConfigSaved={refresh} />}
           {view === 'users'      && <UsersView />}
           {view === 'teams'      && <TeamsView />}
           {view === 'policies'   && <PoliciesView />}

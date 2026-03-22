@@ -67,6 +67,14 @@ func New(config Config) (*Connector, error) {
 	if config.GatewayURL == "" {
 		config.GatewayURL = defaultGatewayURL
 	}
+	// Auto-detect: if given a ws:// URL, convert to HTTP for REST API calls.
+	config.GatewayURL = strings.TrimSuffix(config.GatewayURL, "/ws")
+	config.GatewayURL = strings.TrimSuffix(config.GatewayURL, "/")
+	if strings.HasPrefix(config.GatewayURL, "ws://") {
+		config.GatewayURL = "http://" + config.GatewayURL[5:]
+	} else if strings.HasPrefix(config.GatewayURL, "wss://") {
+		config.GatewayURL = "https://" + config.GatewayURL[6:]
+	}
 
 	s, err := discordgo.New("Bot " + config.BotToken)
 	if err != nil {

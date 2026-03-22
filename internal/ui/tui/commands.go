@@ -79,6 +79,55 @@ func (m *InteractiveChatModel) executeCommand(cmdName string, args []string) tea
 		m.addMessage(renderHelp())
 		return nil
 
+	case "/heartbeat":
+		hb := m.orch.GetHeartbeat()
+		if len(args) == 0 {
+			// Show status
+			status := hb.Status()
+			var sb strings.Builder
+			sb.WriteString(colorAccentBright("Heartbeat Status\n"))
+			if status.Enabled {
+				sb.WriteString(colorSuccess("  Status:  ") + colorSuccess("ON") + "\n")
+			} else {
+				sb.WriteString(colorMuted("  Status:  ") + colorMuted("OFF") + "\n")
+			}
+			sb.WriteString(colorMuted(fmt.Sprintf("  Interval: %s\n", status.Interval)))
+			sb.WriteString(colorMuted(fmt.Sprintf("  Runs:     %d\n", status.RunCount)))
+			if !status.LastRun.IsZero() {
+				sb.WriteString(colorMuted(fmt.Sprintf("  Last:     %s\n", status.LastRun.Format("15:04:05"))))
+			}
+			sb.WriteString(colorMuted("\n  /heartbeat on    Enable\n"))
+			sb.WriteString(colorMuted("  /heartbeat off   Disable\n"))
+			sb.WriteString(colorMuted("  /heartbeat run   Trigger now\n"))
+			m.addMessage(sb.String())
+			return nil
+		}
+		switch args[0] {
+		case "on":
+			hb.Start()
+			m.addMessage(colorSuccess("  ✓ Heartbeat enabled"))
+		case "off":
+			hb.Stop()
+			m.addMessage(colorMuted("  Heartbeat disabled"))
+		case "run":
+			m.addMessage(colorAccent("  Running heartbeat..."))
+			go func() {
+				result, err := hb.RunNow()
+				if err != nil {
+					if p := *m.teaProgram; p != nil {
+						p.Send(streamChunkMsg{chunk: colorError(fmt.Sprintf("\n  Heartbeat error: %v\n", err))})
+					}
+				} else {
+					if p := *m.teaProgram; p != nil {
+						p.Send(streamChunkMsg{chunk: colorSuccess(fmt.Sprintf("\n  💓 %s\n", result))})
+					}
+				}
+			}()
+		default:
+			m.addMessage(colorError("  Usage: /heartbeat [on|off|run]"))
+		}
+		return nil
+
 	case "/context":
 		m.addMessage(renderContext())
 		return nil

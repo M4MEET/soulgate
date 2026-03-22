@@ -7,7 +7,7 @@ import {
 } from 'react';
 import ChatMessage, { type Message } from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
-import { streamChatSSE, fetchThreads, saveThread, deleteThread as apiDeleteThread } from '../lib/api';
+import { streamChatSSE, fetchThreads, saveThread, deleteThread as apiDeleteThread, fetchProviderModels, type HealthData, type ModelInfo } from '../lib/api';
 import {
   MessageSquare,
   Sparkles,
@@ -44,13 +44,13 @@ const threadId = () => `thread_${Date.now()}_${Math.random().toString(36).slice(
 
 // ── Models ────────────────────────────────────────────────────────────────────
 
-const MODELS = [
-  'claude-opus-4-5',
-  'claude-sonnet-4-5',
-  'claude-haiku-3-5',
-  'gpt-4o',
-  'gpt-4o-mini',
-  'gpt-4-turbo',
+// Fallback models shown before the live catalog loads
+const FALLBACK_MODELS = [
+  'claude-opus-4-20250514',
+  'claude-sonnet-4-20250514',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'o3',
 ];
 
 // ── Thread data model ─────────────────────────────────────────────────────────
@@ -546,30 +546,77 @@ function ThreadSidebar({
 
 // ── Model selector ────────────────────────────────────────────────────────────
 
-function ModelSelector({ model, onChange }: { model: string; onChange: (m: string) => void }) {
+function ModelSelector({ model, provider, onChange }: { model: string; provider?: string; onChange: (m: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
+  const [loadedProvider, setLoadedProvider] = useState('');
+
+  // Fetch models from the live catalog when dropdown opens
+  useEffect(() => {
+    if (!open) return;
+    const prov = provider || 'anthropic';
+    if (prov === loadedProvider && liveModels.length > 0) return;
+    fetchProviderModels(prov).then(models => {
+      setLiveModels(models);
+      setLoadedProvider(prov);
+    });
+  }, [open, provider]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Build display list: live models + fallback + current model
+  const modelIds = liveModels.length > 0
+    ? liveModels.map(m => m.id)
+    : FALLBACK_MODELS;
+  const allModels = modelIds.includes(model) ? modelIds : [model, ...modelIds];
+
+  const filtered = search
+    ? allModels.filter(m => m.toLowerCase().includes(search.toLowerCase()))
+    : allModels;
+
+  // Get display name from live catalog
+  const getName = (id: string) => {
+    const info = liveModels.find(m => m.id === id);
+    return info?.name || id;
+  };
+
   return (
     <div className="relative">
       <button
         onClick={() => setOpen(s => !s)}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-400 hover:text-zinc-200 transition-all"
       >
-        <span className="font-mono">{model}</span>
+        <span className="font-mono truncate max-w-48">{getName(model)}</span>
         <ChevronDown size={12} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-1 left-0 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-48">
-          {MODELS.map(m => (
-            <button
-              key={m}
-              onClick={() => { onChange(m); setOpen(false); toast.success(`Model: ${m}`); }}
-              className={`block w-full px-3 py-2 text-left text-xs font-mono hover:bg-zinc-800 transition-colors ${
-                m === model ? 'text-indigo-400 bg-indigo-500/10' : 'text-zinc-400'
-              }`}
-            >
-              {m}
-            </button>
-          ))}
+        <div className="absolute bottom-full mb-1 left-0 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-64 max-h-72 flex flex-col">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
+            <Search size={11} className="text-zinc-500" />
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search models..."
+              className="flex-1 bg-transparent text-xs text-zinc-200 placeholder-zinc-600 outline-none"
+            />
+          </div>
+          <div className="overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+            {filtered.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-zinc-600 text-center">No matches</div>
+            ) : (
+              filtered.map(m => (
+                <button
+                  key={m}
+                  onClick={() => { onChange(m); setOpen(false); setSearch(''); toast.success(`Model: ${getName(m)}`); }}
+                  className={`block w-full px-3 py-2 text-left text-xs hover:bg-zinc-800 transition-colors ${
+                    m === model ? 'text-indigo-400 bg-indigo-500/10' : 'text-zinc-400'
+                  }`}
+                >
+                  <div className="font-mono truncate">{getName(m)}</div>
+                </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -905,7 +952,7 @@ function WelcomeScreen({ onSend }: { onSend: (t: string) => void }) {
 
 // ── Main ChatView ─────────────────────────────────────────────────────────────
 
-export default function ChatView() {
+export default function ChatView({ health }: { health: HealthData | null }) {
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
   const [activeId, setActiveId] = useState<string | null>(() => {
     const saved = loadThreads();
@@ -915,11 +962,22 @@ export default function ChatView() {
     return first?.id ?? null;
   });
   const [streaming, setStreaming] = useState(false);
-  const [model, setModel] = useState(MODELS[0]);
+  const [model, setModel] = useState(() => {
+    // Initialize from health data if available, otherwise first model
+    return FALLBACK_MODELS[0];
+  });
   const [showSidebar, setShowSidebar] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Sync model from backend health data when it changes (e.g. after settings update).
+  useEffect(() => {
+    if (!health?.model) return;
+    if (health.model !== model) {
+      setModel(health.model);
+    }
+  }, [health?.model]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist threads whenever they change (localStorage + server).
   useEffect(() => {
@@ -1236,6 +1294,7 @@ export default function ChatView() {
   const modelSelector = (
     <ModelSelector
       model={activeThread?.model ?? model}
+      provider={health?.provider}
       onChange={m => {
         setModel(m);
         if (activeId) updateThread(activeId, t => ({ ...t, model: m }));

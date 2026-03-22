@@ -388,9 +388,17 @@ func (m *InteractiveChatModel) renderProviderSelector() string {
 		sb.WriteString("      " + dim.Render(provider.description) + "\n")
 	}
 
+	// Count saved keys
+	savedCount := 0
+	for _, p := range providers {
+		if p.hasAPIKey {
+			savedCount++
+		}
+	}
+
 	sb.WriteString("\n")
+	sb.WriteString("  " + ok.Render(fmt.Sprintf("%d", savedCount)) + dim.Render(fmt.Sprintf("/%d providers with API keys saved", len(providers))) + "\n\n")
 	sb.WriteString("  " + dim.Render("press ") + cmd.Render("up/down") + dim.Render(" to navigate, ") + cmd.Render("enter") + dim.Render(" to select, ") + cmd.Render("esc") + dim.Render(" to cancel") + "\n")
-	sb.WriteString("  " + dim.Render("tip: ") + cmd.Render("export OPENAI_API_KEY=\"sk-...\"") + "\n")
 
 	return sb.String()
 }

@@ -82,7 +82,22 @@ func (c *Connector) Connect(ctx context.Context) error {
 		return fmt.Errorf("invalid gateway URL: %w", err)
 	}
 
-	fmt.Printf("🔌 Connecting to Gateway at %s...\n", c.gatewayURL)
+	// Auto-detect: if given an HTTP URL, convert to WebSocket.
+	// e.g. http://localhost:8080 → ws://localhost:8080/ws
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+		if u.Path == "" || u.Path == "/" {
+			u.Path = "/ws"
+		}
+	case "https":
+		u.Scheme = "wss"
+		if u.Path == "" || u.Path == "/" {
+			u.Path = "/ws"
+		}
+	}
+
+	fmt.Printf("🔌 Connecting to Gateway at %s...\n", u.String())
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
