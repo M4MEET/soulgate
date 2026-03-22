@@ -7,7 +7,20 @@ import {
 } from 'react';
 import ChatMessage, { type Message } from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
-import { streamChatSSE, fetchThreads, saveThread, deleteThread as apiDeleteThread, fetchProviderModels, type HealthData, type ModelInfo } from '../lib/api';
+import {
+  streamChatSSE,
+  fetchThreads,
+  saveThread,
+  deleteThread as apiDeleteThread,
+  fetchProviderModels,
+  fetchHealth,
+  fetchTools,
+  fetchAgents,
+  fetchMemory,
+  fetchCostSummary,
+  type HealthData,
+  type ModelInfo,
+} from '../lib/api';
 import {
   MessageSquare,
   Sparkles,
@@ -1289,6 +1302,286 @@ export default function ChatView({ health }: { health: HealthData | null }) {
     handleSend(userMsg.content, activeId);
   }, [activeId, threads, updateThread, handleSend]);
 
+  // ── Command handler ───────────────────────────────────────────────────────
+
+  const insertSystemMessage = useCallback((content: string) => {
+    let tid = activeId;
+    if (!tid || !threads.find(t => t.id === tid)) {
+      const t = createThread([], 'System');
+      tid = t.id;
+      setActiveId(tid);
+    }
+    const sysMsg: Message = {
+      id: uid(),
+      role: 'system',
+      content,
+      timestamp: new Date(),
+    };
+    appendMessages(tid, [sysMsg]);
+  }, [activeId, threads, createThread, appendMessages]);
+
+  // Show system messages that should be visible in the chat
+  const insertVisibleMessage = useCallback((content: string) => {
+    let tid = activeId;
+    if (!tid || !threads.find(t => t.id === tid)) {
+      const t = createThread([], 'Commands');
+      tid = t.id;
+      setActiveId(tid);
+    }
+    const msg: Message = {
+      id: uid(),
+      role: 'assistant',
+      content,
+      timestamp: new Date(),
+    };
+    appendMessages(tid, [msg]);
+  }, [activeId, threads, createThread, appendMessages]);
+
+  const handleCommand = useCallback(async (action: string) => {
+    switch (action) {
+      case 'clear':
+        if (activeId) {
+          updateThread(activeId, t => ({ ...t, messages: [], updatedAt: new Date().toISOString() }));
+        }
+        break;
+
+      case 'new':
+        handleNewChat();
+        break;
+
+      case 'fork':
+        if (activeId) handleForkThread(activeId);
+        break;
+
+      case 'export':
+        if (activeId) handleExportMD(activeId);
+        break;
+
+      case 'theme': {
+        const root = document.documentElement;
+        if (root.classList.contains('light')) {
+          root.classList.remove('light');
+          root.classList.add('dark');
+          insertVisibleMessage('Theme: Dark mode enabled.');
+        } else {
+          root.classList.remove('dark');
+          root.classList.add('light');
+          insertVisibleMessage('Theme: Light mode enabled.');
+        }
+        break;
+      }
+
+      case 'model': {
+        // Focus the model selector dropdown by scrolling to it / toasting
+        insertVisibleMessage('Use the model selector in the input bar to switch models.');
+        break;
+      }
+
+      case 'help': {
+        const lines = [
+          '**Available slash commands:**\n',
+          ...([
+            ['/clear',     'Clear chat history'],
+            ['/new',       'New conversation'],
+            ['/status',    'Show system status'],
+            ['/tools',     'List available tools'],
+            ['/model',     'Switch AI model'],
+            ['/export',    'Export conversation as Markdown'],
+            ['/heartbeat', 'Heartbeat status'],
+            ['/help',      'Show all commands'],
+            ['/usage',     'Token usage stats'],
+            ['/doctor',    'Run diagnostics'],
+            ['/agents',    'List agents'],
+            ['/memory',    'Search memory'],
+            ['/fork',      'Fork conversation'],
+            ['/theme',     'Toggle dark/light theme'],
+          ] as [string, string][]).map(([cmd, desc]) => `\`${cmd}\` — ${desc}`),
+        ];
+        insertVisibleMessage(lines.join('\n'));
+        break;
+      }
+
+      case 'status': {
+        try {
+          const h = await fetchHealth();
+          const lines = [
+            '**System Status**\n',
+            `- **Status:** ${h.status}`,
+            `- **Provider:** ${h.provider}`,
+            `- **Model:** ${h.model}`,
+            `- **Uptime:** ${h.uptime}`,
+            `- **Sessions:** ${h.sessions}`,
+            `- **Memory:** ${h.memory?.alloc_mb?.toFixed(1)} MB alloc / ${h.memory?.sys_mb?.toFixed(1)} MB sys`,
+            `- **Goroutines:** ${h.memory?.goroutines}`,
+          ];
+          if (h.checks?.length) {
+            lines.push('\n**Health Checks:**');
+            for (const c of h.checks) {
+              const icon = c.status === 'ok' ? '' : c.status === 'warn' ? '' : '';
+              lines.push(`- ${icon} **${c.name}:** ${c.status}${c.detail ? ` — ${c.detail}` : ''}`);
+            }
+          }
+          insertVisibleMessage(lines.join('\n'));
+        } catch {
+          insertVisibleMessage('Failed to fetch system status.');
+        }
+        break;
+      }
+
+      case 'heartbeat': {
+        try {
+          const h = await fetchHealth();
+          insertVisibleMessage(
+            `**Heartbeat:** ${h.status} — uptime ${h.uptime} — ${h.sessions} session(s) active`
+          );
+        } catch {
+          insertVisibleMessage('Heartbeat check failed — server may be unreachable.');
+        }
+        break;
+      }
+
+      case 'doctor': {
+        try {
+          const h = await fetchHealth();
+          const checks = h.checks ?? [];
+          const lines = ['**Diagnostics**\n'];
+          lines.push(`- Provider: **${h.provider}**`);
+          lines.push(`- Model: **${h.model}**`);
+          lines.push(`- Uptime: **${h.uptime}**`);
+          lines.push(`- Goroutines: **${h.memory?.goroutines}**`);
+          lines.push(`- GC cycles: **${h.memory?.num_gc}**`);
+          if (checks.length === 0) {
+            lines.push('\nNo health checks reported.');
+          } else {
+            lines.push('\n**Checks:**');
+            for (const c of checks) {
+              const icon = c.status === 'ok' ? '' : '';
+              lines.push(`- ${icon} ${c.name}: **${c.status}**${c.detail ? ` — ${c.detail}` : ''}`);
+            }
+          }
+          const failing = checks.filter(c => c.status !== 'ok');
+          lines.push(
+            failing.length === 0
+              ? '\nAll systems operational.'
+              : `\n${failing.length} check(s) need attention.`
+          );
+          insertVisibleMessage(lines.join('\n'));
+        } catch {
+          insertVisibleMessage('Diagnostics failed — unable to reach server.');
+        }
+        break;
+      }
+
+      case 'tools': {
+        try {
+          const tools = await fetchTools();
+          if (tools.length === 0) {
+            insertVisibleMessage('No tools registered.');
+          } else {
+            const grouped: Record<string, typeof tools> = {};
+            for (const t of tools) {
+              const cat = t.category || 'General';
+              (grouped[cat] ||= []).push(t);
+            }
+            const lines = [`**Available Tools (${tools.length})**\n`];
+            for (const [cat, items] of Object.entries(grouped)) {
+              lines.push(`**${cat}:**`);
+              for (const t of items) {
+                lines.push(`- \`${t.name}\` — ${t.description}`);
+              }
+              lines.push('');
+            }
+            insertVisibleMessage(lines.join('\n'));
+          }
+        } catch {
+          insertVisibleMessage('Failed to fetch tools.');
+        }
+        break;
+      }
+
+      case 'agents': {
+        try {
+          const agents = await fetchAgents();
+          if (agents.length === 0) {
+            insertVisibleMessage('No agents running.');
+          } else {
+            const lines = [`**Agents (${agents.length})**\n`];
+            for (const a of agents) {
+              const statusIcon = a.status === 'running' ? '' : a.status === 'error' ? '' : '';
+              lines.push(`- ${statusIcon} **${a.name}** (\`${a.id.slice(0, 8)}\`) — ${a.role} — ${a.status}`);
+              if (a.task) lines.push(`  Task: ${a.task.slice(0, 80)}${a.task.length > 80 ? '…' : ''}`);
+            }
+            insertVisibleMessage(lines.join('\n'));
+          }
+        } catch {
+          insertVisibleMessage('Failed to fetch agents.');
+        }
+        break;
+      }
+
+      case 'memory': {
+        try {
+          const entries = await fetchMemory();
+          if (entries.length === 0) {
+            insertVisibleMessage('Memory is empty.');
+          } else {
+            const lines = [`**Memory Entries (${entries.length})**\n`];
+            for (const e of entries) {
+              lines.push(`- **${e.key}** \`[${e.type}]\``);
+              const preview = String(e.value).slice(0, 100);
+              lines.push(`  ${preview}${String(e.value).length > 100 ? '…' : ''}`);
+            }
+            insertVisibleMessage(lines.join('\n'));
+          }
+        } catch {
+          insertVisibleMessage('Failed to fetch memory entries.');
+        }
+        break;
+      }
+
+      case 'usage': {
+        try {
+          const summary = await fetchCostSummary();
+          if (!summary) {
+            insertVisibleMessage('Cost tracking not available.');
+          } else {
+            const lines = [
+              '**Usage & Cost Summary**\n',
+              `- **Today:** $${summary.today_cost_usd.toFixed(4)}`,
+              `- **Session:** $${summary.session_cost_usd.toFixed(4)}`,
+              `- **Total:** $${summary.total_cost_usd.toFixed(4)}`,
+              `- **Total calls:** ${summary.total_calls}`,
+              `- **Session calls:** ${summary.session_calls}`,
+            ];
+            if (summary.by_provider && Object.keys(summary.by_provider).length > 0) {
+              lines.push('\n**By Provider:**');
+              for (const [prov, cost] of Object.entries(summary.by_provider)) {
+                lines.push(`- ${prov}: $${(cost as number).toFixed(4)}`);
+              }
+            }
+            if (summary.last_7_days?.length > 0) {
+              lines.push('\n**Last 7 Days:**');
+              for (const d of summary.last_7_days) {
+                lines.push(`- ${d.date}: $${d.cost_usd.toFixed(4)}${d.tokens ? ` (${d.tokens.toLocaleString()} tok)` : ''}`);
+              }
+            }
+            insertVisibleMessage(lines.join('\n'));
+          }
+        } catch {
+          insertVisibleMessage('Failed to fetch usage data.');
+        }
+        break;
+      }
+
+      default:
+        insertSystemMessage(`Unknown command: ${action}`);
+    }
+  }, [
+    activeId, threads, createThread, appendMessages, updateThread,
+    handleNewChat, handleForkThread, handleExportMD,
+    insertSystemMessage, insertVisibleMessage,
+  ]);
+
   // ── Model selector node (passed to ChatInput) ────────────────────────────
 
   const modelSelector = (
@@ -1382,6 +1675,7 @@ export default function ChatView({ health }: { health: HealthData | null }) {
           <ChatInput
             onSend={text => handleSend(text)}
             onCancel={handleCancel}
+            onCommand={handleCommand}
             disabled={streaming}
             streaming={streaming}
             modelSelector={modelSelector}

@@ -18,6 +18,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/config"
 	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/gateway"
+	"github.com/M4MEET/soulgate/internal/hub"
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/spf13/cobra"
@@ -1212,6 +1213,66 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 		SpawnConnector: func(connectorType string, cfg map[string]string) (string, error) {
 			return spawnConnectorProcess(connectorType, cfg, gatewayPort)
 		},
+
+		// Hub integration — wire up search, install, uninstall using the hub package.
+		HubSearch: func(query string) ([]map[string]interface{}, error) {
+			hubClient := hub.NewHubClient("", filepath.Join(ws.ConfigDir, ".cache"))
+			plugins, err := hubClient.SearchPlugins(context.Background(), query)
+			if err != nil {
+				return nil, err
+			}
+			results := make([]map[string]interface{}, 0, len(plugins))
+			for _, p := range plugins {
+				results = append(results, map[string]interface{}{
+					"name":        p.Name,
+					"description": p.Description,
+					"version":     p.Version,
+					"author":      p.Author,
+					"category":    p.Category,
+					"tags":        p.Tags,
+					"rating":      p.Rating,
+					"downloads":   p.Downloads,
+				})
+			}
+			return results, nil
+		},
+
+		HubInstall: func(name string) error {
+			hubClient := hub.NewHubClient("", filepath.Join(ws.ConfigDir, ".cache"))
+			registry, err := hub.NewRegistry(filepath.Join(ws.ConfigDir, "hub_registry.json"))
+			if err != nil {
+				return fmt.Errorf("hub registry: %w", err)
+			}
+			installer := hub.NewInstaller(hubClient, registry, ws.ConfigDir)
+			return installer.InstallPlugin(context.Background(), name, hub.InstallOptions{})
+		},
+
+		HubUninstall: func(name string) error {
+			registry, err := hub.NewRegistry(filepath.Join(ws.ConfigDir, "hub_registry.json"))
+			if err != nil {
+				return fmt.Errorf("hub registry: %w", err)
+			}
+			installer := hub.NewInstaller(nil, registry, ws.ConfigDir)
+			return installer.Uninstall("plugin", name)
+		},
+
+		HubInstalled: func() []map[string]interface{} {
+			registry, err := hub.NewRegistry(filepath.Join(ws.ConfigDir, "hub_registry.json"))
+			if err != nil {
+				return nil
+			}
+			items := registry.List()
+			results := make([]map[string]interface{}, 0, len(items))
+			for _, item := range items {
+				results = append(results, map[string]interface{}{
+					"type":         item.Type,
+					"name":         item.Name,
+					"version":      item.Version,
+					"installed_at": item.InstalledAt,
+				})
+			}
+			return results
+		},
 	}
 }
 
@@ -1225,10 +1286,11 @@ func spawnConnectorProcess(connectorType string, cfg map[string]string, port int
 		return "", fmt.Errorf("cannot find soulgate binary: %w", err)
 	}
 
-	// Always pass the HTTP base URL. Each connector auto-detects and converts
-	// to ws:// if it needs WebSocket, or strips /ws if it needs HTTP.
-	// This means community-built connectors work without any changes here.
+	// Telegram uses WebSocket, all other connectors use HTTP.
 	gatewayURL := fmt.Sprintf("http://localhost:%d", port)
+	if connectorType == "telegram" {
+		gatewayURL = fmt.Sprintf("ws://localhost:%d/ws", port)
+	}
 
 	// Build command args
 	args := []string{"connector", connectorType, "--gateway", gatewayURL}

@@ -229,6 +229,18 @@ type GatewayAPI struct {
 	// config is a map of credentials (e.g. {"token": "bot123..."}).
 	// Returns a status message or error.
 	SpawnConnector func(connectorType string, config map[string]string) (string, error)
+
+	// HubSearch searches the SoulGate Hub for plugins/tools.
+	HubSearch func(query string) ([]map[string]interface{}, error)
+
+	// HubInstall installs a plugin from the Hub by name.
+	HubInstall func(name string) error
+
+	// HubUninstall removes an installed plugin by name.
+	HubUninstall func(name string) error
+
+	// HubInstalled returns the list of installed Hub items.
+	HubInstalled func() []map[string]interface{}
 }
 
 // Config holds Gateway configuration
@@ -506,6 +518,9 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/sessions", apiHandler(g.handleAPISessions))
 	mux.Handle("/api/sessions/", apiHandler(g.handleAPISessionDetail))
 	mux.Handle("/api/connectors", apiHandler(g.handleAPIConnectors))
+	mux.Handle("/api/connectors/", apiHandler(g.handleAPIConnectorAction))
+	mux.Handle("/api/hub", apiHandler(g.handleAPIHub))
+	mux.Handle("/api/hub/", apiHandler(g.handleAPIHub))
 	mux.Handle("/api/activity", apiHandler(g.handleAPIActivity))
 
 	// Rich web-UI endpoints — always registered; handlers degrade gracefully
@@ -521,8 +536,8 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/memory", apiHandler(g.handleAPIMemory))
 	mux.Handle("/api/costs", apiHandler(g.handleAPICosts))
 	mux.Handle("/api/audit", apiHandler(g.handleAPIAudit))
-	// mux.Handle("/api/notifications", apiHandler(g.handleAPINotifications)) // TODO
-	// mux.Handle("/api/notifications/", apiHandler(g.handleAPINotificationDetail)) // TODO
+	mux.Handle("/api/notifications", apiHandler(g.handleAPINotifications))
+	mux.Handle("/api/notifications/", apiHandler(g.handleAPINotificationDetail))
 	mux.Handle("/api/files", apiHandler(g.handleAPIFiles))
 	mux.Handle("/api/file", apiHandler(g.handleAPIFile))
 	mux.Handle("/api/exec", apiHandler(g.handleAPIExec))
@@ -1093,15 +1108,159 @@ func (g *Gateway) handleAPIConnectorsPost(w http.ResponseWriter, r *http.Request
 	}
 
 	// Extract PID from message (format: "... (pid 12345)") and track it.
-	var pid int
-	if _, scanErr := fmt.Sscanf(msg, "%*[^(](pid %d)", &pid); scanErr == nil && pid > 0 {
-		g.TrackConnector(body.Type, pid)
+	if pidIdx := strings.Index(msg, "(pid "); pidIdx >= 0 {
+		var pid int
+		if _, scanErr := fmt.Sscanf(msg[pidIdx:], "(pid %d)", &pid); scanErr == nil && pid > 0 {
+			g.TrackConnector(body.Type, pid)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "spawned",
 		"message": msg,
+	}) //nolint:errcheck
+}
+
+// handleAPIHub handles Hub operations: search, install, uninstall, list installed.
+//   GET    /api/hub?q=...         → search hub
+//   GET    /api/hub/installed     → list installed
+//   POST   /api/hub/install       → install plugin
+//   POST   /api/hub/uninstall     → uninstall plugin
+func (g *Gateway) handleAPIHub(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/hub")
+	path = strings.TrimPrefix(path, "/")
+
+	switch {
+	case r.Method == http.MethodGet && (path == "" || path == "/"):
+		// Search
+		query := r.URL.Query().Get("q")
+		if g.config.API == nil || g.config.API.HubSearch == nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": []interface{}{}, "error": "hub not configured"}) //nolint:errcheck
+			return
+		}
+		results, err := g.config.API.HubSearch(query)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": []interface{}{}, "error": err.Error()}) //nolint:errcheck
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"results": results}) //nolint:errcheck
+
+	case r.Method == http.MethodGet && path == "installed":
+		if g.config.API == nil || g.config.API.HubInstalled == nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"installed": []interface{}{}}) //nolint:errcheck
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"installed": g.config.API.HubInstalled()}) //nolint:errcheck
+
+	case r.Method == http.MethodPost && path == "install":
+		if g.config.API == nil || g.config.API.HubInstall == nil {
+			http.Error(w, `{"error":"hub install not available"}`, http.StatusNotImplemented)
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+			http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+			return
+		}
+		if err := g.config.API.HubInstall(body.Name); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "installed", "name": body.Name}) //nolint:errcheck
+
+	case r.Method == http.MethodPost && path == "uninstall":
+		if g.config.API == nil || g.config.API.HubUninstall == nil {
+			http.Error(w, `{"error":"hub uninstall not available"}`, http.StatusNotImplemented)
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+			http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+			return
+		}
+		if err := g.config.API.HubUninstall(body.Name); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "uninstalled", "name": body.Name}) //nolint:errcheck
+
+	default:
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	}
+}
+
+// handleAPIConnectorAction handles per-connector actions.
+// DELETE /api/connectors/{type} → stop/disconnect a connector
+func (g *Gateway) handleAPIConnectorAction(w http.ResponseWriter, r *http.Request) {
+	connectorType := strings.TrimPrefix(r.URL.Path, "/api/connectors/")
+	connectorType = strings.TrimSuffix(connectorType, "/")
+	if connectorType == "" {
+		http.Error(w, `{"error":"connector type required"}`, http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		g.handleDisconnectConnector(w, connectorType)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleDisconnectConnector kills a spawned connector process and removes
+// any matching WebSocket clients.
+func (g *Gateway) handleDisconnectConnector(w http.ResponseWriter, connectorType string) {
+	killed := 0
+
+	// Kill spawned process if tracked
+	g.spawnedConnectorsMu.Lock()
+	if sc, ok := g.spawnedConnectors[connectorType]; ok && sc.Status == "running" {
+		if proc, err := os.FindProcess(sc.PID); err == nil {
+			_ = proc.Signal(syscall.SIGTERM)
+			killed++
+		}
+		delete(g.spawnedConnectors, connectorType)
+	}
+	g.spawnedConnectorsMu.Unlock()
+
+	// Disconnect any WebSocket channel clients for this connector type
+	g.roleMux.RLock()
+	var toDisconnect []*Client
+	for _, c := range g.channels {
+		ch, _ := c.metadata["channel"].(string)
+		if strings.EqualFold(ch, connectorType) {
+			toDisconnect = append(toDisconnect, c)
+		}
+	}
+	g.roleMux.RUnlock()
+
+	for _, c := range toDisconnect {
+		_ = c.Close()
+		g.Unregister(c)
+		killed++
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "disconnected",
+		"type":         connectorType,
+		"killed_count": killed,
 	}) //nolint:errcheck
 }
 
@@ -1578,8 +1737,12 @@ func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Message string `json:"message"`
-		UserID  string `json:"user_id,omitempty"`
+		Message        string `json:"message"`
+		UserID         string `json:"user_id,omitempty"`
+		Channel        string `json:"channel,omitempty"`
+		ConversationID string `json:"conversation_id,omitempty"`
+		SenderID       string `json:"sender_id,omitempty"`
+		SenderName     string `json:"sender_name,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -1602,6 +1765,46 @@ func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 		"user_id": req.UserID,
 	})
 
+	// If the request has connector metadata (channel, conversation_id),
+	// log the incoming message and response to the session system so they
+	// appear in the Activity Hub.
+	var sess *Session
+	if req.Channel != "" && req.ConversationID != "" {
+		sess = g.GetOrCreateSession(req.ConversationID, req.Channel)
+
+		// Log incoming message
+		inMsg := &protocol.EventMessageFrame{
+			Type:           protocol.FrameEventMessage,
+			Channel:        req.Channel,
+			ConversationID: req.ConversationID,
+			Text:           req.Message,
+			SessionID:      sess.ID,
+			Sender: protocol.Sender{
+				ID:       req.SenderID,
+				Name:     req.SenderName,
+				Username: req.SenderName,
+			},
+			Timestamp: time.Now().Unix(),
+		}
+		if g.sessionStorage != nil {
+			_ = g.sessionStorage.LogFrame(sess.ID, inMsg)
+		}
+		sess.AddMessage(inMsg)
+		g.broadcastToUIs(inMsg)
+
+		// Push notification
+		senderName := req.SenderName
+		if senderName == "" {
+			senderName = req.SenderID
+		}
+		preview := req.Message
+		if len(preview) > 80 {
+			preview = preview[:80] + "..."
+		}
+		g.PushNotification("activity", fmt.Sprintf("Message from %s", senderName),
+			fmt.Sprintf("[%s] %s", req.Channel, preview))
+	}
+
 	// Check if client wants SSE streaming (Accept: text/event-stream or ?stream=true)
 	wantsStream := r.Header.Get("Accept") == "text/event-stream" ||
 		r.URL.Query().Get("stream") == "true"
@@ -1622,6 +1825,23 @@ func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("AI error: %v", err)})
 		return
+	}
+
+	// Log the AI response to the session
+	if sess != nil {
+		replyFrame := &protocol.CmdChannelSendFrame{
+			Type:           protocol.FrameCmdChannelSend,
+			Channel:        req.Channel,
+			ConversationID: req.ConversationID,
+			Text:           response,
+			SessionID:      sess.ID,
+			Timestamp:      time.Now().Unix(),
+		}
+		if g.sessionStorage != nil {
+			_ = g.sessionStorage.LogFrame(sess.ID, replyFrame)
+		}
+		sess.AddMessage(replyFrame)
+		g.broadcastToUIs(replyFrame)
 	}
 
 	fmt.Printf("✅ Response: %d chars\n", len(response))
@@ -1814,6 +2034,8 @@ func (g *Gateway) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		// Push notification for config changes
+		g.PushNotification("agent", fmt.Sprintf("Config: %s changed", req.Key), fmt.Sprintf("Set to: %s", req.Value))
 		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 
 	default:

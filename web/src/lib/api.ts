@@ -348,6 +348,20 @@ export interface ConnectorsData {
   spawned?: SpawnedConnector[];
 }
 
+export async function disconnectConnector(
+  type: string,
+): Promise<{ status: string; type: string; killed_count: number; error?: string }> {
+  const res = await fetch(`${BASE}/api/connectors/${encodeURIComponent(type)}`, {
+    method: 'DELETE',
+  });
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { status: 'error', type, killed_count: 0, error: text || `HTTP ${res.status}` };
+  }
+}
+
 export async function fetchConnectors(): Promise<ConnectorsData> {
   return safeFetch<ConnectorsData>(`${BASE}/api/connectors`, {
     channels: [],
@@ -466,6 +480,56 @@ export async function fetchTools(): Promise<ToolData[]> {
   const data = await safeFetch<{ tools?: ToolData[] } | ToolData[]>(`${BASE}/api/tools`, []);
   if (Array.isArray(data)) return data;
   return (data as { tools?: ToolData[] }).tools || [];
+}
+
+// ── Hub endpoints ─────────────────────────────────────────────────────────────
+
+export interface HubItem {
+  name: string;
+  description: string;
+  version?: string;
+  author?: string;
+  category?: string;
+  tags?: string[];
+  rating?: number;
+  downloads?: number;
+}
+
+export interface InstalledHubItem {
+  type: string;
+  name: string;
+  version: string;
+  installed_at: string;
+}
+
+export async function hubSearch(query: string): Promise<HubItem[]> {
+  const data = await safeFetch<{ results?: HubItem[]; error?: string }>(
+    `${BASE}/api/hub?q=${encodeURIComponent(query)}`, {}
+  );
+  return data.results || [];
+}
+
+export async function hubInstall(name: string): Promise<{ status: string; error?: string }> {
+  const res = await fetch(`${BASE}/api/hub/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return res.json();
+}
+
+export async function hubUninstall(name: string): Promise<{ status: string; error?: string }> {
+  const res = await fetch(`${BASE}/api/hub/uninstall`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return res.json();
+}
+
+export async function hubInstalled(): Promise<InstalledHubItem[]> {
+  const data = await safeFetch<{ installed?: InstalledHubItem[] }>(`${BASE}/api/hub/installed`, {});
+  return data.installed || [];
 }
 
 export async function fetchAgents(): Promise<AgentData[]> {

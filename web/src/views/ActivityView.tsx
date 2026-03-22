@@ -5,8 +5,8 @@ import {
   Globe, Filter
 } from 'lucide-react';
 import {
-  fetchSessions, fetchConnectors, fetchActivity, fetchSessionDetail, replyToSession,
-  type SessionData, type ConnectorsData, type ActivityEntry, type SessionMessage,
+  fetchSessions, fetchConnectors, fetchActivity, fetchSessionDetail, replyToSession, fetchAgents,
+  type SessionData, type ConnectorsData, type ActivityEntry, type SessionMessage, type AgentData,
 } from '../lib/api';
 import toast from 'react-hot-toast';
 
@@ -216,17 +216,20 @@ export default function ActivityView() {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [agents, setAgents] = useState<AgentData[]>([]);
   const prevActivityLen = useRef(0);
 
   const refresh = useCallback(async () => {
-    const [s, c, a] = await Promise.all([
+    const [s, c, a, ag] = await Promise.all([
       fetchSessions(),
       fetchConnectors(),
       fetchActivity(100, channelFilter || undefined),
+      fetchAgents(),
     ]);
     setSessions(s);
     setConnectors(c);
     setActivity(a);
+    setAgents(ag);
     setLoading(false);
 
     // Flash indicator when new activity arrives
@@ -258,9 +261,9 @@ export default function ActivityView() {
   ).sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-hidden">
       {/* Left panel -- Connectors & Sessions */}
-      <div className="w-80 border-r border-zinc-700/40 flex flex-col bg-zinc-900/30">
+      <div className="w-80 flex-shrink-0 border-r border-zinc-700/40 flex flex-col bg-zinc-900/30 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700/40">
           <div className="flex items-center gap-2">
@@ -292,12 +295,17 @@ export default function ActivityView() {
                   <Radio size={11} className={channelCount > 0 ? 'text-emerald-400 animate-pulse' : 'text-zinc-600'} />
                   <span className="text-[11px] text-zinc-400">{channelCount} channel{channelCount !== 1 ? 's' : ''} connected</span>
                 </div>
-                {connectors.agents.length > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <Bot size={11} className="text-indigo-400" />
-                    <span className="text-[11px] text-zinc-400">{connectors.agents.length} agent{connectors.agents.length !== 1 ? 's' : ''}</span>
-                  </div>
-                )}
+                {agents.length > 0 && (() => {
+                  const running = agents.filter(a => a.status === 'running').length;
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <Bot size={11} className={running > 0 ? 'text-indigo-400 animate-pulse' : 'text-indigo-400'} />
+                      <span className="text-[11px] text-zinc-400">
+                        {running > 0 ? `${running} running` : `${agents.length} agent${agents.length !== 1 ? 's' : ''}`}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
               {/* Show active connectors inline */}
               {channelCount > 0 && (
@@ -390,7 +398,7 @@ export default function ActivityView() {
       </div>
 
       {/* Center panel -- Session chat or Activity feed */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {selectedSession ? (
           <SessionChat
             sessionId={selectedSession}
