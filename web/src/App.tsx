@@ -26,6 +26,7 @@ import UsersView from './views/UsersView';
 import TeamsView from './views/TeamsView';
 import PoliciesView from './views/PoliciesView';
 import ActivityView from './views/ActivityView';
+import A2AView from './views/A2AView';
 
 // ── Theme persistence ─────────────────────────────────────────────────────────
 
@@ -188,6 +189,7 @@ export default function App() {
           {view === 'users'      && <UsersView />}
           {view === 'teams'      && <TeamsView />}
           {view === 'policies'   && <PoliciesView />}
+          {view === 'a2a'        && <A2AView />}
         </div>
       </div>
 

@@ -4,7 +4,7 @@ import {
   MessageSquare, LayoutDashboard, Settings, Bot, Wrench,
   Brain, BookOpen, Shield, Plug, ChevronLeft, ChevronRight,
   Hexagon, Webhook, DollarSign, Clock, Palette, Sun, Moon,
-  FolderOpen, Terminal, Users, Building2, Activity,
+  FolderOpen, Terminal, Users, Building2, Activity, Radio,
 } from 'lucide-react';
 import NotificationCenter, { type Notification } from './NotificationCenter';
 
@@ -27,7 +27,8 @@ export type ViewId =
   | 'settings'
   | 'users'
   | 'teams'
-  | 'policies';
+  | 'policies'
+  | 'a2a';
 
 const NAV_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
   { id: 'chat',       icon: MessageSquare,   label: 'Chat' },
@@ -38,6 +39,7 @@ const NAV_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
   { id: 'memory',     icon: Brain,           label: 'Memory' },
   { id: 'sessions',   icon: BookOpen,        label: 'Sessions' },
   { id: 'audit',      icon: Shield,          label: 'Audit' },
+  { id: 'a2a',        icon: Radio,            label: 'A2A Protocol' },
   { id: 'connectors', icon: Plug,            label: 'Connectors' },
   { id: 'webhooks',   icon: Webhook,         label: 'Webhooks' },
   { id: 'costs',      icon: DollarSign,      label: 'Costs' },
