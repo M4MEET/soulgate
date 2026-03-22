@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,10 +68,55 @@ func NewHeartbeat(orch *Orchestrator, cfg config.HeartbeatConfig) *Heartbeat {
 	if cfg.PromptFile == "" {
 		cfg.PromptFile = ".soulgate/HEARTBEAT.md"
 	}
-	return &Heartbeat{
+	hb := &Heartbeat{
 		config: cfg,
 		orch:   orch,
 		stopCh: make(chan struct{}),
+	}
+	hb.loadState()
+	return hb
+}
+
+type heartbeatState struct {
+	LastRun    time.Time `json:"last_run"`
+	LastResult string    `json:"last_result"`
+	RunCount   int       `json:"run_count"`
+}
+
+func (h *Heartbeat) statePath() string {
+	if h.orch == nil || h.orch.workspace == nil {
+		return ""
+	}
+	return filepath.Join(h.orch.workspace.ConfigDir, "heartbeat_state.json")
+}
+
+func (h *Heartbeat) saveState() {
+	path := h.statePath()
+	if path == "" {
+		return
+	}
+	data, _ := json.Marshal(heartbeatState{
+		LastRun:    h.lastRun,
+		LastResult: h.lastResult,
+		RunCount:   h.runCount,
+	})
+	os.WriteFile(path, data, 0600)
+}
+
+func (h *Heartbeat) loadState() {
+	path := h.statePath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var s heartbeatState
+	if json.Unmarshal(data, &s) == nil {
+		h.lastRun = s.LastRun
+		h.lastResult = s.LastResult
+		h.runCount = s.RunCount
 	}
 }
 
@@ -189,6 +235,7 @@ func (h *Heartbeat) run() (string, error) {
 		h.lastResult = result
 	}
 	cb := h.callback
+	h.saveState()
 	h.mu.Unlock()
 
 	// Log to audit regardless of outcome.

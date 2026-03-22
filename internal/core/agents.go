@@ -336,17 +336,25 @@ func NewAgentManager(configDir string) *AgentManager {
 
 // agentState is the JSON-serializable snapshot of an agent for persistence.
 type agentState struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Task        string     `json:"task"`
-	Role        AgentRole  `json:"role"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Task        string      `json:"task"`
+	Role        AgentRole   `json:"role"`
 	Status      AgentStatus `json:"status"`
-	Result      string     `json:"result,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	ParentID    string     `json:"parent_id,omitempty"`
+	Result      string      `json:"result,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	CreatedAt   time.Time   `json:"created_at"`
+	CompletedAt *time.Time  `json:"completed_at,omitempty"`
+	ParentID    string      `json:"parent_id,omitempty"`
 	Config      AgentConfig `json:"config"`
+	// Persisted metrics
+	TokensUsed     int64          `json:"tokens_used"`
+	CostMicros     int64          `json:"cost_micros"`
+	ToolCallCount  int64          `json:"tool_call_count"`
+	ModelCallCount int64          `json:"model_call_count"`
+	ErrorCount     int64          `json:"error_count"`
+	// Persisted activity log
+	ActivityLog    []AgentLogEntry `json:"activity_log,omitempty"`
 }
 
 func (am *AgentManager) statePath() string {
@@ -365,17 +373,23 @@ func (am *AgentManager) saveState() {
 	var states []agentState
 	for _, a := range am.agents {
 		states = append(states, agentState{
-			ID:          a.ID,
-			Name:        a.Name,
-			Task:        a.Task,
-			Role:        a.Role,
-			Status:      a.Status,
-			Result:      a.Result,
-			Error:       a.Error,
-			CreatedAt:   a.CreatedAt,
-			CompletedAt: a.CompletedAt,
-			ParentID:    a.ParentID,
-			Config:      a.GetConfig(),
+			ID:             a.ID,
+			Name:           a.Name,
+			Task:           a.Task,
+			Role:           a.Role,
+			Status:         a.Status,
+			Result:         a.Result,
+			Error:          a.Error,
+			CreatedAt:      a.CreatedAt,
+			CompletedAt:    a.CompletedAt,
+			ParentID:       a.ParentID,
+			Config:         a.GetConfig(),
+			TokensUsed:     atomic.LoadInt64(&a.tokensUsed),
+			CostMicros:     atomic.LoadInt64(&a.costUSDMicros),
+			ToolCallCount:  atomic.LoadInt64(&a.toolCallCount),
+			ModelCallCount: atomic.LoadInt64(&a.modelCallCount),
+			ErrorCount:     atomic.LoadInt64(&a.errorCount),
+			ActivityLog:    a.GetFullLog(),
 		})
 	}
 
@@ -416,6 +430,18 @@ func (am *AgentManager) loadState() {
 			ParentID:    s.ParentID,
 		}
 		agent.SetConfig(s.Config)
+		// Restore metrics
+		atomic.StoreInt64(&agent.tokensUsed, s.TokensUsed)
+		atomic.StoreInt64(&agent.costUSDMicros, s.CostMicros)
+		atomic.StoreInt64(&agent.toolCallCount, s.ToolCallCount)
+		atomic.StoreInt64(&agent.modelCallCount, s.ModelCallCount)
+		atomic.StoreInt64(&agent.errorCount, s.ErrorCount)
+		// Restore activity log
+		if len(s.ActivityLog) > 0 {
+			agent.logMu.Lock()
+			agent.activityLog = s.ActivityLog
+			agent.logMu.Unlock()
+		}
 
 		// Running agents that were interrupted are marked as stopped
 		if agent.Status == AgentRunning {
