@@ -96,7 +96,7 @@ function ConnectorCard({ connector }: { connector: Connector }) {
     setConnecting(true);
     await new Promise(r => setTimeout(r, 1200));
     setConnecting(false);
-    toast.success(`${connector.name} connected (demo)`);
+    toast(`${connector.name}: run the setup command in your terminal to connect.`, { icon: 'i' });
     setExpanded(false);
   };
 

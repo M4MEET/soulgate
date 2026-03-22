@@ -252,35 +252,20 @@ export async function createAgent(payload: { name: string; task: string; role: s
   return res.json();
 }
 
-// ── Agent detail endpoints (404-safe with demo fallback) ───────────────────
+// ── Agent detail endpoints (404-safe) ─────────────────────────────────────
 
-function makeDemoMetrics(agent: AgentData): AgentMetrics {
-  const now = Date.now();
+function makeEmptyMetrics(): AgentMetrics {
   return {
-    tokens_used: Math.floor(Math.random() * 12000) + 500,
-    cost_usd: Math.random() * 0.08,
-    tool_call_count: Math.floor(Math.random() * 30),
-    model_call_count: Math.floor(Math.random() * 20) + 1,
-    error_count: Math.floor(Math.random() * 3),
-    avg_response_ms: Math.floor(Math.random() * 2000) + 400,
-    duration: agent.status === 'running' ? 'ongoing' : '3m 42s',
-    token_history: Array.from({ length: 10 }, (_, i) => ({
-      time: new Date(now - (9 - i) * 30000).toISOString(),
-      tokens: Math.floor(Math.random() * 1200) + 100,
-      cost: Math.random() * 0.008,
-    })),
-    tool_calls: [
-      { name: 'read_file', count: Math.floor(Math.random() * 10) + 1 },
-      { name: 'write_file', count: Math.floor(Math.random() * 5) },
-      { name: 'exec', count: Math.floor(Math.random() * 8) },
-      { name: 'search', count: Math.floor(Math.random() * 6) },
-    ].filter(t => t.count > 0),
-    response_times: [
-      { bucket: '0-500ms', count: Math.floor(Math.random() * 8) },
-      { bucket: '500ms-1s', count: Math.floor(Math.random() * 6) },
-      { bucket: '1s-2s', count: Math.floor(Math.random() * 4) },
-      { bucket: '2s+', count: Math.floor(Math.random() * 2) },
-    ],
+    tokens_used: 0,
+    cost_usd: 0,
+    tool_call_count: 0,
+    model_call_count: 0,
+    error_count: 0,
+    avg_response_ms: 0,
+    duration: '',
+    token_history: [],
+    tool_calls: [],
+    response_times: [],
   };
 }
 
@@ -316,7 +301,7 @@ export async function fetchAgentDetail(id: string): Promise<AgentDetailData> {
   return {
     ...stub,
     config: makeDemoConfig(),
-    metrics: makeDemoMetrics(stub),
+    metrics: makeEmptyMetrics(),
   };
 }
 
@@ -328,25 +313,7 @@ export async function fetchAgentLog(id: string, limit = 50): Promise<AgentLogEnt
   if (Array.isArray(data)) return data;
   const cast = data as { entries?: AgentLogEntry[] };
   if (cast.entries) return cast.entries;
-  // Demo entries
-  const types = ['model_call', 'tool_start', 'tool_done', 'status', 'message_received', 'error'];
-  const msgs: Record<string, string[]> = {
-    model_call: ['Sending prompt to model', 'Model responded with tool call', 'Streaming response'],
-    tool_start: ['Starting read_file: example.txt', 'Starting exec: ls -la', 'Starting search: query'],
-    tool_done: ['read_file completed (1.2 KB)', 'exec completed (exit 0)', 'search returned 5 results'],
-    status: ['Agent started', 'Waiting for tool result', 'Resuming after approval'],
-    message_received: ['User: Continue with the task', 'System: timeout warning'],
-    error: ['Tool exec failed: permission denied', 'Model rate limited, retrying'],
-  };
-  return Array.from({ length: Math.min(limit, 12) }, (_, i) => {
-    const type = types[i % types.length];
-    const options = msgs[type];
-    return {
-      timestamp: new Date(Date.now() - (11 - i) * 15000).toISOString(),
-      type,
-      message: options[Math.floor(Math.random() * options.length)],
-    };
-  });
+  return [];
 }
 
 export async function fetchAgentMessages(id: string): Promise<AgentMessage[]> {

@@ -4,11 +4,6 @@ import { fetchMemory, setMemoryEntry, deleteMemoryEntry, type MemoryEntry } from
 import { formatRelativeTime } from '../lib/utils';
 import toast from 'react-hot-toast';
 
-const FALLBACK: MemoryEntry[] = [
-  { key: 'user.name',        value: 'Dmitri', type: 'string', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), tags: ['user'] },
-  { key: 'project.summary',  value: 'SoulGate is an AI gateway…', type: 'string', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), tags: ['project'] },
-  { key: 'preferences',      value: JSON.stringify({ theme: 'dark', language: 'en' }), type: 'json', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), tags: ['user'] },
-];
 
 function EntryRow({
   entry,
@@ -87,7 +82,7 @@ export default function MemoryView() {
     setLoading(true);
     try {
       const data = await fetchMemory();
-      setEntries(data.length > 0 ? data : FALLBACK);
+      setEntries(data);
     } finally {
       setLoading(false);
     }
@@ -135,12 +130,11 @@ export default function MemoryView() {
 
   const handleSemanticSearch = () => {
     if (!semanticQuery.trim()) return;
-    // Mock semantic search results
+    // Keyword filter over current entries (vector store not available)
     const results = entries
       .filter(e => e.value.toLowerCase().includes(semanticQuery.toLowerCase()) || e.key.toLowerCase().includes(semanticQuery.toLowerCase()))
       .map(e => `${e.key}: ${e.value.slice(0, 80)}`);
-    setSemanticResults(results.length > 0 ? results : ['No similar entries found']);
-    toast.success('Semantic search complete');
+    setSemanticResults(results.length > 0 ? results : ['No matching entries found']);
   };
 
   const filtered = entries.filter(e =>
@@ -237,7 +231,7 @@ export default function MemoryView() {
         <div className="flex items-center gap-2 mb-3">
           <Brain size={16} className="text-violet-400" />
           <h3 className="text-sm font-semibold text-zinc-300">Semantic Search</h3>
-          <span className="text-xs text-zinc-600 bg-zinc-800 px-2 py-0.5 rounded-full">Vector memory</span>
+          <span className="text-xs text-zinc-600 bg-zinc-800 px-2 py-0.5 rounded-full">Keyword search</span>
         </div>
         <div className="flex gap-2 mb-3">
           <input

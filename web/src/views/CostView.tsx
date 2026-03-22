@@ -1,23 +1,21 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import {
   DollarSign, TrendingUp, Calendar, AlertTriangle,
   RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react';
-import { fetchCosts, type CostData } from '../lib/api';
+import { fetchCostSummary, type CostSummary } from '../lib/api';
 import StatCard from '../components/StatCard';
 import toast from 'react-hot-toast';
 
-// ── Extended types ────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ExtendedCostData extends CostData {
-  provider?: string;
-  model?: string;
-  input_tokens?: number;
-  output_tokens?: number;
+interface DayRow {
+  date: string;
+  cost: number;
 }
 
 interface ProviderCost {
@@ -25,42 +23,12 @@ interface ProviderCost {
   value: number;
 }
 
-interface ModelCost {
-  model: string;
-  cost: number;
-}
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#38bdf8', '#a78bfa'];
 
-const PROVIDERS = ['Anthropic', 'OpenAI', 'Groq', 'Cohere'];
-const MODELS = [
-  'claude-opus-4-5', 'claude-sonnet-4-5', 'gpt-4o',
-  'gpt-4o-mini', 'gpt-3.5-turbo', 'llama-3.3-70b',
-];
-
-// ── Mock data generator ───────────────────────────────────────────────────────
-
-function generateMockData(): ExtendedCostData[] {
-  return Array.from({ length: 30 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (29 - i));
-    const provider = PROVIDERS[Math.floor(Math.random() * PROVIDERS.length)];
-    const model = MODELS[Math.floor(Math.random() * MODELS.length)];
-    const inputTokens = Math.floor(Math.random() * 40000 + 5000);
-    const outputTokens = Math.floor(Math.random() * 15000 + 2000);
-    return {
-      date: d.toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-      cost: Math.random() * 1.2 + 0.05,
-      tokens: inputTokens + outputTokens,
-      provider,
-      model,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-    };
-  });
-}
+type SortDir = 'asc' | 'desc' | null;
+type SortKey = 'date' | 'cost';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -80,19 +48,27 @@ const TOOLTIP_STYLE = {
   labelStyle: { color: '#a1a1aa' },
 };
 
-type SortDir = 'asc' | 'desc' | null;
-type SortKey = 'date' | 'provider' | 'model' | 'tokens' | 'cost';
-
 function SortIcon({ dir }: { dir: SortDir }) {
   if (dir === 'asc') return <ChevronUp size={12} />;
   if (dir === 'desc') return <ChevronDown size={12} />;
   return <ChevronsUpDown size={12} className="opacity-30" />;
 }
 
+function EmptyChart({ height = 180 }: { height?: number }) {
+  return (
+    <div
+      className="flex items-center justify-center text-zinc-600 text-sm"
+      style={{ height }}
+    >
+      No cost data yet
+    </div>
+  );
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 export default function CostView() {
-  const [data, setData] = useState<ExtendedCostData[]>([]);
+  const [summary, setSummary] = useState<CostSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [dailyBudget, setDailyBudget] = useState<number>(5.0);
   const [budgetInput, setBudgetInput] = useState('5.00');
@@ -102,15 +78,11 @@ export default function CostView() {
   const load = async () => {
     setLoading(true);
     try {
-      const raw = await fetchCosts();
-      if (raw && raw.length > 0) {
-        setData(raw as ExtendedCostData[]);
-      } else {
-        setData(generateMockData());
-      }
+      const data = await fetchCostSummary();
+      setSummary(data);
     } catch {
       toast.error('Failed to load cost data');
-      setData(generateMockData());
+      setSummary(null);
     } finally {
       setLoading(false);
     }
@@ -118,57 +90,39 @@ export default function CostView() {
 
   useEffect(() => { load(); }, []);
 
-  // ── Derived stats ──────────────────────────────────────────────────────────
+  // ── Derived stats from real API data ───────────────────────────────────────
 
-  const totalSpend = useMemo(() => data.reduce((s, d) => s + d.cost, 0), [data]);
-  const todaySpend = useMemo(() => data[data.length - 1]?.cost ?? 0, [data]);
-  const avgPerDay = useMemo(() => (data.length > 0 ? totalSpend / data.length : 0), [data, totalSpend]);
-  const projectedMonthly = useMemo(() => avgPerDay * 30, [avgPerDay]);
+  const days = useMemo<DayRow[]>(() => {
+    if (!summary?.last_7_days) return [];
+    return summary.last_7_days.map(d => ({ date: d.date, cost: d.cost_usd }));
+  }, [summary]);
+
+  const totalSpend = summary?.total_cost_usd ?? 0;
+  const todaySpend = summary?.today_cost_usd ?? 0;
+  const avgPerDay = days.length > 0 ? days.reduce((s, d) => s + d.cost, 0) / days.length : 0;
+  const projectedMonthly = avgPerDay * 30;
 
   const providerBreakdown = useMemo<ProviderCost[]>(() => {
-    const map: Record<string, number> = {};
-    for (const d of data) {
-      const p = d.provider || 'Unknown';
-      map[p] = (map[p] || 0) + d.cost;
-    }
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [data]);
-
-  const modelBreakdown = useMemo<ModelCost[]>(() => {
-    const map: Record<string, number> = {};
-    for (const d of data) {
-      const m = d.model || 'Unknown';
-      map[m] = (map[m] || 0) + d.cost;
-    }
-    return Object.entries(map)
-      .map(([model, cost]) => ({ model, cost }))
-      .sort((a, b) => b.cost - a.cost)
-      .slice(0, 8);
-  }, [data]);
-
-  const tokenData = useMemo(() => data.map(d => ({
-    date: d.date,
-    input: d.input_tokens ?? Math.floor(d.tokens * 0.68),
-    output: d.output_tokens ?? Math.floor(d.tokens * 0.32),
-  })), [data]);
+    if (!summary?.by_provider) return [];
+    return Object.entries(summary.by_provider).map(([name, value]) => ({ name, value }));
+  }, [summary]);
 
   const budgetExceeded = todaySpend > dailyBudget;
+  const hasData = days.length > 0 || totalSpend > 0;
 
   // ── Sorted table ───────────────────────────────────────────────────────────
 
-  const sortedData = useMemo(() => {
-    const copy = [...data];
+  const sortedDays = useMemo(() => {
+    const copy = [...days];
     if (!sortDir || !sortKey) return copy.reverse();
     return copy.sort((a, b) => {
-      let av: string | number = a[sortKey as keyof ExtendedCostData] as string | number ?? '';
-      let bv: string | number = b[sortKey as keyof ExtendedCostData] as string | number ?? '';
-      if (typeof av === 'string') av = av.toLowerCase();
-      if (typeof bv === 'string') bv = bv.toLowerCase();
+      const av = a[sortKey];
+      const bv = b[sortKey];
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [data, sortKey, sortDir]);
+  }, [days, sortKey, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -195,6 +149,30 @@ export default function CostView() {
     );
   }
 
+  if (!hasData) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6 bg-zinc-950" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-bold text-zinc-100">Cost Analytics</h2>
+            <p className="text-sm text-zinc-500">No cost data yet</p>
+          </div>
+          <button
+            onClick={load}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-700 text-sm text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+        </div>
+        <div className="flex flex-col items-center justify-center py-24 text-zinc-600">
+          <DollarSign size={40} className="mb-3 opacity-30" />
+          <p className="text-sm">No cost data yet. Run some agents to start tracking costs.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex-1 overflow-y-auto p-6 bg-zinc-950"
@@ -204,7 +182,10 @@ export default function CostView() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-bold text-zinc-100">Cost Analytics</h2>
-          <p className="text-sm text-zinc-500">Last {data.length} days of usage</p>
+          <p className="text-sm text-zinc-500">
+            {summary?.total_calls ?? 0} total calls
+            {summary?.session_calls ? ` · ${summary.session_calls} this session` : ''}
+          </p>
         </div>
         <button
           onClick={load}
@@ -265,144 +246,77 @@ export default function CostView() {
         </div>
       </Panel>
 
-      {/* Cost over time */}
+      {/* Cost over time + provider breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <Panel title="Cost over time (30d)" className="md:col-span-2">
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={data}>
-              <XAxis
-                dataKey="date"
-                tick={{ fill: '#71717a', fontSize: 11 }}
-                axisLine={false}
-                tickLine={false}
-                interval={Math.floor(data.length / 6)}
-              />
-              <YAxis
-                tick={{ fill: '#71717a', fontSize: 11 }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={v => `$${(v as number).toFixed(2)}`}
-              />
-              <Tooltip
-                {...TOOLTIP_STYLE}
-                itemStyle={{ color: '#818cf8' }}
-                formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']}
-              />
-              <Line type="monotone" dataKey="cost" stroke="#6366f1" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
+        <Panel title="Cost over time (last 7 days)" className="md:col-span-2">
+          {days.length > 0 ? (
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={days}>
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={v => `$${(v as number).toFixed(2)}`}
+                />
+                <Tooltip
+                  {...TOOLTIP_STYLE}
+                  itemStyle={{ color: '#818cf8' }}
+                  formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']}
+                />
+                <Line type="monotone" dataKey="cost" stroke="#6366f1" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyChart height={180} />
+          )}
         </Panel>
 
         <Panel title="Cost by provider">
-          <ResponsiveContainer width="100%" height={180}>
-            <PieChart>
-              <Pie
-                data={providerBreakdown}
-                cx="50%"
-                cy="50%"
-                innerRadius={45}
-                outerRadius={68}
-                dataKey="value"
-                paddingAngle={3}
-              >
-                {providerBreakdown.map((_, i) => (
-                  <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                {...TOOLTIP_STYLE}
-                formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']}
-              />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </Panel>
-      </div>
-
-      {/* Cost by model + token area chart */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <Panel title="Cost by model (top 8)">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={modelBreakdown} layout="vertical" margin={{ left: 8 }}>
-              <XAxis
-                type="number"
-                tick={{ fill: '#71717a', fontSize: 11 }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={v => `$${(v as number).toFixed(2)}`}
-              />
-              <YAxis
-                type="category"
-                dataKey="model"
-                tick={{ fill: '#a1a1aa', fontSize: 10 }}
-                axisLine={false}
-                tickLine={false}
-                width={120}
-              />
-              <Tooltip
-                {...TOOLTIP_STYLE}
-                itemStyle={{ color: '#f59e0b' }}
-                formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']}
-              />
-              <Bar dataKey="cost" fill="#f59e0b" radius={[0, 3, 3, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Panel>
-
-        <Panel title="Token usage over time (input vs output)">
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={tokenData}>
-              <defs>
-                <linearGradient id="colorInput" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis
-                dataKey="date"
-                tick={{ fill: '#71717a', fontSize: 11 }}
-                axisLine={false}
-                tickLine={false}
-                interval={Math.floor(tokenData.length / 5)}
-              />
-              <YAxis
-                tick={{ fill: '#71717a', fontSize: 11 }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={v => `${((v as number) / 1000).toFixed(0)}k`}
-              />
-              <Tooltip
-                {...TOOLTIP_STYLE}
-                formatter={(v: unknown, name: unknown) => [
-                  `${((v as number) / 1000).toFixed(1)}k`,
-                  String(name) === 'input' ? 'Input tokens' : 'Output tokens',
-                ]}
-              />
-              <Area type="monotone" dataKey="input" stroke="#6366f1" strokeWidth={1.5} fill="url(#colorInput)" />
-              <Area type="monotone" dataKey="output" stroke="#22c55e" strokeWidth={1.5} fill="url(#colorOutput)" />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
-            </AreaChart>
-          </ResponsiveContainer>
+          {providerBreakdown.length > 0 ? (
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie
+                  data={providerBreakdown}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={45}
+                  outerRadius={68}
+                  dataKey="value"
+                  paddingAngle={3}
+                >
+                  {providerBreakdown.map((_, i) => (
+                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  {...TOOLTIP_STYLE}
+                  formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']}
+                />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyChart height={180} />
+          )}
         </Panel>
       </div>
 
       {/* Detailed cost table */}
-      <Panel title="Detailed cost breakdown">
+      <Panel title="Daily cost breakdown (last 7 days)">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-700/50">
                 {(
                   [
-                    { key: 'date',     label: 'Date' },
-                    { key: 'provider', label: 'Provider' },
-                    { key: 'model',    label: 'Model' },
-                    { key: 'tokens',   label: 'Tokens' },
-                    { key: 'cost',     label: 'Cost' },
+                    { key: 'date', label: 'Date' },
+                    { key: 'cost', label: 'Cost' },
                   ] as { key: SortKey; label: string }[]
                 ).map(col => (
                   <th
@@ -419,35 +333,31 @@ export default function CostView() {
               </tr>
             </thead>
             <tbody>
-              {sortedData.map((row, i) => (
-                <tr key={i} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
-                  <td className="px-3 py-2.5 text-xs text-zinc-400 font-mono">{row.date}</td>
-                  <td className="px-3 py-2.5">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400">
-                      {row.provider || 'Unknown'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-zinc-300 font-mono">{row.model || '—'}</td>
-                  <td className="px-3 py-2.5 text-xs text-zinc-400">
-                    {row.tokens.toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs font-semibold text-emerald-400">
-                    ${row.cost.toFixed(4)}
+              {sortedDays.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="text-center text-zinc-600 text-sm py-8">No cost data yet</td>
+                </tr>
+              ) : (
+                sortedDays.map((row, i) => (
+                  <tr key={i} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
+                    <td className="px-3 py-2.5 text-xs text-zinc-400 font-mono">{row.date}</td>
+                    <td className="px-3 py-2.5 text-xs font-semibold text-emerald-400">
+                      ${row.cost.toFixed(4)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            {sortedDays.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-zinc-700/60 bg-zinc-800/30">
+                  <td className="px-3 py-2.5 text-xs text-zinc-500 font-medium">Total (all time)</td>
+                  <td className="px-3 py-2.5 text-xs font-bold text-emerald-400">
+                    ${totalSpend.toFixed(4)}
                   </td>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t border-zinc-700/60 bg-zinc-800/30">
-                <td colSpan={3} className="px-3 py-2.5 text-xs text-zinc-500 font-medium">Total</td>
-                <td className="px-3 py-2.5 text-xs text-zinc-300 font-medium">
-                  {data.reduce((s, d) => s + d.tokens, 0).toLocaleString()}
-                </td>
-                <td className="px-3 py-2.5 text-xs font-bold text-emerald-400">
-                  ${totalSpend.toFixed(4)}
-                </td>
-              </tr>
-            </tfoot>
+              </tfoot>
+            )}
           </table>
         </div>
       </Panel>
