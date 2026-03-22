@@ -128,6 +128,7 @@ export interface CostSummary {
   total_calls: number;
   session_calls: number;
   by_provider: Record<string, number>;
+  by_model: Record<string, number>;
   last_7_days: { date: string; cost_usd: number }[];
 }
 

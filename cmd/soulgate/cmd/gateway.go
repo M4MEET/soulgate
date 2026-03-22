@@ -411,6 +411,7 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 				"today_cost_usd":   s.TodayCost,
 				"total_cost_usd":   s.TotalCost,
 				"by_provider":      s.ByProvider,
+				"by_model":         s.ByModel,
 				"last_7_days":      s.Last7Days,
 				"session_calls":    s.SessionCalls,
 				"total_calls":      s.TotalCalls,

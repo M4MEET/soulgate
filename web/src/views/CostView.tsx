@@ -107,6 +107,13 @@ export default function CostView() {
     return Object.entries(summary.by_provider).map(([name, value]) => ({ name, value }));
   }, [summary]);
 
+  const modelBreakdown = useMemo<ProviderCost[]>(() => {
+    if (!summary?.by_model) return [];
+    return Object.entries(summary.by_model)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [summary]);
+
   const budgetExceeded = todaySpend > dailyBudget;
   const hasData = days.length > 0 || totalSpend > 0;
 
@@ -298,6 +305,24 @@ export default function CostView() {
                   {...TOOLTIP_STYLE}
                   formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']}
                 />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyChart height={180} />
+          )}
+        </Panel>
+
+        <Panel title="Cost by model">
+          {modelBreakdown.length > 0 ? (
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie data={modelBreakdown} cx="50%" cy="50%" innerRadius={45} outerRadius={68} dataKey="value" paddingAngle={3}>
+                  {modelBreakdown.map((_, i) => (
+                    <Cell key={i} fill={PIE_COLORS[(i + 2) % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip {...TOOLTIP_STYLE} formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Cost']} />
                 <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
               </PieChart>
             </ResponsiveContainer>

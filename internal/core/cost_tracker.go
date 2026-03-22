@@ -68,6 +68,7 @@ type CostSummary struct {
 	TodayCost     float64            `json:"today_cost_usd"`
 	TotalCost     float64            `json:"total_cost_usd"`
 	ByProvider    map[string]float64 `json:"by_provider"`
+	ByModel       map[string]float64 `json:"by_model"`
 	Last7Days     []DayCost          `json:"last_7_days"`
 	SessionCalls  int                `json:"session_calls"`
 	TotalCalls    int                `json:"total_calls"`
@@ -272,6 +273,21 @@ func (ct *CostTracker) CostByProvider() map[string]float64 {
 	return m
 }
 
+// CostByModel returns a map from model name to cumulative spend.
+func (ct *CostTracker) CostByModel() map[string]float64 {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+	m := make(map[string]float64)
+	for _, e := range ct.entries {
+		model := e.Model
+		if model == "" {
+			model = "unknown"
+		}
+		m[model] += e.Cost
+	}
+	return m
+}
+
 // CostByDay returns the last N calendar days (UTC) with their totals,
 // oldest first. Days with zero spend are omitted.
 func (ct *CostTracker) CostByDay(days int) []DayCost {
@@ -317,6 +333,7 @@ func (ct *CostTracker) Summary() CostSummary {
 		TodayCost:    ct.TodayCost(),
 		TotalCost:    totalUSD,
 		ByProvider:   ct.CostByProvider(),
+		ByModel:      ct.CostByModel(),
 		Last7Days:    ct.CostByDay(7),
 		SessionCalls: sessionCalls,
 		TotalCalls:   totalCalls,
