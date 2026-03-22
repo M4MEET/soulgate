@@ -263,6 +263,9 @@ func isCasualChat(msg string) bool {
 			"list", "show me", "open", "edit", "update", "fetch",
 			"download", "upload", "send", "start", "stop", "kill",
 			"file", "code", "script", "command", "project",
+			"play", "pause", "check", "show", "get", "set", "turn",
+			"connect", "switch", "launch", "restart", "status",
+			"git", "docker", "npm", "pip", "brew", "curl", "wget",
 		}
 		for _, w := range actionWords {
 			if strings.Contains(lower, w) {
