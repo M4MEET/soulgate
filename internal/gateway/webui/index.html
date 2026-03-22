@@ -3,139 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SoulGate Dashboard</title>
+  <title>SoulGate</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="app">
+<div id="root">
 
-  <!-- ─── Header ─────────────────────────────────────────────── -->
-  <header class="header">
-    <div class="header-logo">
-      <span class="logo-mark">SG</span>
-      SoulGate
-    </div>
-    <div class="header-spacer"></div>
-    <div class="header-status">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusLabel">Connecting…</span>
-    </div>
-    <div class="header-uptime">
-      uptime: <span id="uptimeDisplay">--</span>
-    </div>
-    <div class="refresh-pulse" id="refreshPulse"></div>
-  </header>
-
-  <!-- ─── Sidebar ─────────────────────────────────────────────── -->
-  <aside class="sidebar">
-
-    <!-- Stats -->
-    <div class="sidebar-section">
-      <div class="section-label">Gateway Status</div>
-      <div class="status-grid">
-        <div class="stat-card">
-          <div class="stat-value accent-blue" id="statClients">--</div>
-          <div class="stat-label">Clients</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value accent-green" id="statSessions">--</div>
-          <div class="stat-label">Sessions</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value accent-purple" id="statAgents">--</div>
-          <div class="stat-label">Agents</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value accent-yellow" id="statChannels">--</div>
-          <div class="stat-label">Channels</div>
-        </div>
+  <!-- ── Top Navigation ─────────────────────────────────────────── -->
+  <nav class="nav" role="navigation">
+    <div class="nav-brand">
+      <div class="nav-logo" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M10 2L17 6V14L10 18L3 14V6L10 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="10" cy="10" r="2.5" fill="currentColor"/>
+        </svg>
       </div>
+      <span class="nav-wordmark">SoulGate</span>
     </div>
 
-    <!-- Provider info -->
-    <div class="sidebar-section">
-      <div class="section-label">Configuration</div>
-      <div class="provider-row">
-        <span class="provider-key">Provider</span>
-        <span class="provider-val highlight" id="providerName">--</span>
-      </div>
-      <div class="provider-row">
-        <span class="provider-key">Model</span>
-        <span class="provider-val" id="providerModel">--</span>
-      </div>
-      <div class="provider-row">
-        <span class="provider-key">Port</span>
-        <span class="provider-val" id="providerPort">--</span>
-      </div>
+    <div class="nav-tabs" role="tablist">
+      <button class="nav-tab active" data-view="chat" role="tab" aria-selected="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 2h12v9H9l-3 3V11H2V2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        Chat
+      </button>
+      <button class="nav-tab" data-view="dashboard" role="tab" aria-selected="false">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/></svg>
+        Dashboard
+      </button>
+      <button class="nav-tab" data-view="connectors" role="tab" aria-selected="false">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="4" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 8h2m2-4H7.5M8 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M9.5 5.5L8 7M9.5 10.5L8 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Connectors
+      </button>
+      <button class="nav-tab" data-view="settings" role="tab" aria-selected="false">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Settings
+      </button>
     </div>
 
-    <!-- Connected clients -->
-    <div class="sidebar-section">
-      <div class="section-label">Connected Clients</div>
-      <div class="client-list" id="clientList">
-        <div class="empty-state">Loading…</div>
-      </div>
+    <div class="nav-status">
+      <span class="status-dot" id="statusDot" title="Offline"></span>
+      <span class="status-label" id="statusLabel">Connecting</span>
     </div>
+  </nav>
 
-  </aside>
-
-  <!-- ─── Main: Chat ───────────────────────────────────────────── -->
-  <main class="main">
-    <div class="chat-container">
-
-      <div class="chat-header">
-        <span class="chat-title">Live Chat</span>
-        <span class="chat-subtitle">— POST /api/chat</span>
-      </div>
-
-      <div class="chat-messages" id="chatMessages">
-        <!-- Messages injected by JS -->
-        <div class="typing-indicator" id="typingIndicator">
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-        </div>
-      </div>
-
-      <div class="chat-input-area">
-        <textarea
-          class="chat-input"
-          id="chatInput"
-          rows="1"
-          placeholder="Send a message… (Enter to send, Shift+Enter for newline)"
-        ></textarea>
-        <button class="send-btn" id="sendBtn" title="Send (Enter)">&#9658;</button>
-      </div>
-
-    </div>
-  </main>
-
-  <!-- ─── Aside: Activity + Sessions ──────────────────────────── -->
-  <aside class="aside">
-
-    <!-- Recent Activity -->
-    <div class="aside-panel">
-      <div class="aside-panel-header">
-        <span class="aside-panel-title">Recent Activity</span>
-        <span class="badge" id="activityBadge">0</span>
-      </div>
-      <div class="activity-list" id="activityList">
-        <div class="empty-state">Loading…</div>
-      </div>
-    </div>
-
-    <!-- Sessions -->
-    <div class="aside-panel">
-      <div class="aside-panel-header">
-        <span class="aside-panel-title">Sessions</span>
-        <span class="badge" id="sessionBadge">0</span>
-      </div>
-      <div class="session-list" id="sessionList">
-        <div class="empty-state">Loading…</div>
-      </div>
-    </div>
-
-  </aside>
+  <!-- ── View Container ─────────────────────────────────────────── -->
+  <div id="app" role="main"></div>
 
 </div>
 <script src="app.js"></script>
