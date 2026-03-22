@@ -232,13 +232,15 @@ func (h *Hub) Install(typeAndName string) error {
 	}
 
 	// Record in installed manifest.
-	return h.recordInstalled(InstalledPackage{
+	err = h.recordInstalled(InstalledPackage{
 		Name:        name,
 		Type:        pkgType,
 		Version:     version,
 		InstalledAt: time.Now(),
 		UpdatedAt:   time.Now(),
 	})
+	h.logActivity("install", name, pkgType, version, err)
+	return err
 }
 
 // Uninstall removes a package identified by "type:name" or "type/name".
@@ -263,7 +265,9 @@ func (h *Hub) Uninstall(typeAndName string) error {
 		return fmt.Errorf("hub: remove directory %s: %w", destDir, err)
 	}
 
-	return h.removeInstalled(pkgType, name)
+	err = h.removeInstalled(pkgType, name)
+	h.logActivity("uninstall", name, pkgType, "", err)
+	return err
 }
 
 // List returns all packages recorded in the installed manifest.
@@ -662,4 +666,75 @@ func containsTag(tags []string, q string) bool {
 		}
 	}
 	return false
+}
+
+// --------------------------------------------------------------------------
+// Activity Log (durable JSONL journal of install/uninstall/update actions)
+// --------------------------------------------------------------------------
+
+const activityLogFile = "hub/activity.jsonl"
+
+// ActivityEntry records a hub action for auditing.
+type ActivityEntry struct {
+	Action    string    `json:"action"` // install, uninstall, update
+	Package   string    `json:"package"`
+	Type      string    `json:"type"`
+	Version   string    `json:"version,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Error     string    `json:"error,omitempty"`
+}
+
+// logActivity appends a single hub action to the activity JSONL file.
+func (h *Hub) logActivity(action, name string, pkgType PackageType, version string, err error) {
+	path := filepath.Join(h.workDir, ".soulgate", activityLogFile)
+	_ = os.MkdirAll(filepath.Dir(path), 0700)
+
+	entry := ActivityEntry{
+		Action:    action,
+		Package:   name,
+		Type:      string(pkgType),
+		Version:   version,
+		Timestamp: time.Now(),
+	}
+	if err != nil {
+		entry.Error = err.Error()
+	}
+
+	data, marshalErr := json.Marshal(entry)
+	if marshalErr != nil {
+		return
+	}
+	data = append(data, '\n')
+
+	f, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if openErr != nil {
+		return
+	}
+	f.Write(data)
+	f.Close()
+}
+
+// ActivityLog returns the last n hub activity entries.
+func (h *Hub) ActivityLog(limit int) []ActivityEntry {
+	path := filepath.Join(h.workDir, ".soulgate", activityLogFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var entries []ActivityEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var e ActivityEntry
+		if json.Unmarshal([]byte(line), &e) == nil {
+			entries = append(entries, e)
+		}
+	}
+
+	if limit > 0 && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries
 }
