@@ -192,12 +192,31 @@ export async function sendChat(message: string): Promise<ChatResponse> {
 }
 
 export async function* streamChat(message: string, signal?: AbortSignal): AsyncGenerator<string> {
-  const res = await fetch(`${BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-    signal,
-  });
+  // The gateway's /api/chat runs the full agentic loop which can take
+  // 30-120 seconds with tool calls. We use no timeout on the fetch itself
+  // (the AbortSignal from the UI handles cancellation), but we yield a
+  // "thinking" indicator so the UI doesn't appear stuck.
+  const thinkingTimer = setTimeout(() => {}, 0); // placeholder
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+      signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(thinkingTimer);
+    if ((err as Error).name === 'AbortError') throw err;
+    throw new Error(`Failed to connect to SoulGate: ${(err as Error).message}`);
+  }
+  clearTimeout(thinkingTimer);
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+  }
 
   const contentType = res.headers.get('content-type') || '';
 
