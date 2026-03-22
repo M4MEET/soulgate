@@ -128,25 +128,111 @@ export default function ChatMessage({
 
         {/* Thinking Log */}
         {!isUser && message.thinkingLog && message.thinkingLog.length > 0 && (
-          <details className="mb-2 rounded-xl bg-zinc-900/60 border border-zinc-700/40 overflow-hidden" open={message.streaming}>
-            <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 transition-colors select-none">
-              <span className={`w-1.5 h-1.5 rounded-full ${message.streaming ? 'bg-amber-400 animate-pulse' : 'bg-zinc-600'}`} />
-              <span>{message.streaming ? 'Thinking...' : `Thought process (${message.thinkingLog.length} steps)`}</span>
-            </summary>
-            <div className="px-3 py-2 border-t border-zinc-800/60 max-h-48 overflow-y-auto font-mono text-xs space-y-0.5" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
-              {message.thinkingLog.map((line, i) => {
-                let color = 'text-zinc-500';
-                if (line.startsWith('──')) color = 'text-zinc-600';
-                else if (line.startsWith('⟶')) color = 'text-violet-400';
-                else if (line.startsWith('⟵')) color = 'text-emerald-400';
-                else if (line.startsWith('⚡')) color = 'text-amber-400';
-                else if (line.startsWith('  ↳')) color = 'text-emerald-400/70';
-                else if (line.startsWith('🤖')) color = 'text-zinc-200 italic';
-                return <div key={i} className={`${color} ${line.startsWith('🤖') ? 'pl-2 border-l-2 border-indigo-500/30 ml-1' : ''}`}>{line}</div>;
-              })}
-              {message.streaming && (
-                <div className="text-amber-400 animate-pulse">thinking...</div>
+          <details
+            className="mb-2.5 rounded-2xl overflow-hidden transition-all duration-300"
+            open={message.streaming}
+            style={{
+              background: message.streaming
+                ? 'linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.04) 50%, rgba(59,130,246,0.06) 100%)'
+                : 'rgba(24,24,27,0.4)',
+              border: `1px solid ${message.streaming ? 'rgba(99,102,241,0.15)' : 'rgba(63,63,70,0.3)'}`,
+            }}
+          >
+            <summary className="flex items-center gap-2.5 px-4 py-2.5 cursor-pointer select-none group transition-colors hover:bg-white/[0.02]">
+              {message.streaming ? (
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-50" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500" />
+                </span>
+              ) : (
+                <span className="w-2.5 h-2.5 rounded-full bg-zinc-600 group-hover:bg-zinc-500 transition-colors" />
               )}
+              <span className={`text-xs font-medium transition-colors ${message.streaming ? 'text-indigo-300' : 'text-zinc-500 group-hover:text-zinc-300'}`}>
+                {message.streaming ? 'Thinking...' : `Thought process · ${message.thinkingLog.length} steps`}
+              </span>
+              {message.streaming && (
+                <span className="ml-auto flex gap-0.5">
+                  {[0, 1, 2].map(i => (
+                    <span
+                      key={i}
+                      className="w-1 h-1 rounded-full bg-indigo-400"
+                      style={{ animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite` }}
+                    />
+                  ))}
+                </span>
+              )}
+            </summary>
+
+            <div
+              className="border-t border-white/[0.04] max-h-64 overflow-y-auto px-1 py-1.5"
+              style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
+            >
+              {message.thinkingLog.map((line, i) => {
+                const isLast = i === message.thinkingLog!.length - 1;
+                const isAIText = line.startsWith('🤖');
+                const isIteration = line.startsWith('──');
+                const isModelCall = line.startsWith('⟶');
+                const isModelDone = line.startsWith('⟵');
+                const isTool = line.startsWith('⚡');
+                const isResult = line.startsWith('  ↳');
+                const isStatus = !isAIText && !isIteration && !isModelCall && !isModelDone && !isTool && !isResult;
+
+                if (isIteration) {
+                  return (
+                    <div key={i} className="flex items-center gap-2 px-3 py-1.5 my-0.5">
+                      <span className="flex-1 h-px bg-gradient-to-r from-transparent via-zinc-700/50 to-transparent" />
+                      <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-medium">{line.replace(/──/g, '').trim()}</span>
+                      <span className="flex-1 h-px bg-gradient-to-r from-transparent via-zinc-700/50 to-transparent" />
+                    </div>
+                  );
+                }
+
+                if (isAIText) {
+                  return (
+                    <div
+                      key={i}
+                      className={`mx-2 my-1 px-3 py-2 rounded-xl text-xs leading-relaxed transition-all duration-300 ${
+                        isLast && message.streaming
+                          ? 'bg-indigo-500/[0.07] border border-indigo-500/10 text-zinc-200'
+                          : 'bg-zinc-800/30 border border-zinc-700/20 text-zinc-300'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span className="text-indigo-400 mt-0.5 flex-shrink-0">✦</span>
+                        <span className="italic">{line.replace('🤖 ', '')}</span>
+                        {isLast && message.streaming && (
+                          <span className="inline-block w-0.5 h-3.5 bg-indigo-400 ml-0.5 flex-shrink-0 animate-pulse" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                let icon = '';
+                let color = 'text-zinc-500';
+                let bg = '';
+
+                if (isModelCall) { icon = '⟶'; color = 'text-violet-400'; bg = 'bg-violet-500/[0.04]'; }
+                else if (isModelDone) { icon = '✓'; color = 'text-emerald-400'; bg = 'bg-emerald-500/[0.04]'; }
+                else if (isTool) { icon = '⚡'; color = 'text-amber-400'; bg = 'bg-amber-500/[0.04]'; }
+                else if (isResult) { icon = '↳'; color = 'text-emerald-400/60'; }
+                else if (isStatus) { icon = '•'; color = 'text-zinc-600'; }
+
+                const text = line.replace(/^[⟶⟵⚡]\s*/, '').replace(/^\s*↳\s*/, '').replace(/^\s*/, '');
+
+                return (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-2 px-3 py-1 mx-1 rounded-lg text-xs font-mono transition-all duration-200 ${bg} ${
+                      isLast && message.streaming ? 'opacity-100' : 'opacity-80'
+                    }`}
+                    style={{ animation: isLast && message.streaming ? 'none' : `fadeSlideIn 0.3s ease ${Math.min(i * 0.05, 0.5)}s both` }}
+                  >
+                    <span className={`${color} flex-shrink-0 mt-px w-3 text-center`}>{icon}</span>
+                    <span className={`${color} break-all`}>{text}</span>
+                  </div>
+                );
+              })}
             </div>
           </details>
         )}

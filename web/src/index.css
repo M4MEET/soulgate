@@ -1,5 +1,34 @@
 @import "tailwindcss";
 
+/* ── Thinking panel animations ──────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes gradientPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+/* Smooth details open/close */
+details[open] > summary ~ * {
+  animation: fadeSlideIn 0.25s ease;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary::marker {
+  content: '';
+}
+
 /* ── Light mode overrides ─────────────────────────────────────────────────────
    Applied when data-theme="light" is set on <html> or a root element.
    We override the most-used zinc dark tokens to produce a neutral light theme.
