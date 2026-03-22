@@ -18,23 +18,25 @@ export interface SlashCommand {
   command: string;
   description: string;
   action: string;
+  hint?: string;
+  emoji: string;
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
-  { command: '/clear',     description: 'Clear chat history',        action: 'clear' },
-  { command: '/new',       description: 'New conversation',          action: 'new' },
-  { command: '/status',    description: 'Show system status',        action: 'status' },
-  { command: '/tools',     description: 'List available tools',      action: 'tools' },
-  { command: '/model',     description: 'Switch AI model',           action: 'model' },
-  { command: '/export',    description: 'Export conversation',       action: 'export' },
-  { command: '/heartbeat', description: 'Heartbeat status',          action: 'heartbeat' },
-  { command: '/help',      description: 'Show all commands',         action: 'help' },
-  { command: '/usage',     description: 'Token usage stats',         action: 'usage' },
-  { command: '/doctor',    description: 'Run diagnostics',           action: 'doctor' },
-  { command: '/agents',    description: 'List agents',               action: 'agents' },
-  { command: '/memory',    description: 'Search memory',             action: 'memory' },
-  { command: '/fork',      description: 'Fork conversation',         action: 'fork' },
-  { command: '/theme',     description: 'Toggle dark/light theme',   action: 'theme' },
+  { command: '/clear',     description: 'Clear chat history',        action: 'clear',     emoji: '🧹', hint: 'Removes all messages from current thread' },
+  { command: '/new',       description: 'New conversation',          action: 'new',       emoji: '✨', hint: 'Start a fresh chat thread' },
+  { command: '/status',    description: 'System status',             action: 'status',    emoji: '📊', hint: 'Provider, model, memory, health checks' },
+  { command: '/tools',     description: 'Available tools',           action: 'tools',     emoji: '🛠️', hint: 'List all tools the AI can use' },
+  { command: '/model',     description: 'Switch AI model',           action: 'model',     emoji: '🔄' },
+  { command: '/export',    description: 'Export conversation',       action: 'export',    emoji: '📥', hint: 'Download as Markdown file' },
+  { command: '/heartbeat', description: 'Heartbeat status',          action: 'heartbeat', emoji: '💓', hint: 'Proactive health check status' },
+  { command: '/help',      description: 'All commands',              action: 'help',      emoji: '❓', hint: 'Show this command list' },
+  { command: '/usage',     description: 'Cost & token usage',        action: 'usage',     emoji: '💰', hint: 'Today, total, per-provider breakdown' },
+  { command: '/doctor',    description: 'Run diagnostics',           action: 'doctor',    emoji: '🩺', hint: 'Health checks, memory, goroutines' },
+  { command: '/agents',    description: 'List agents',               action: 'agents',    emoji: '🤖', hint: 'All background agents + status' },
+  { command: '/memory',    description: 'Memory entries',            action: 'memory',    emoji: '🧠', hint: 'Key-value pairs in persistent memory' },
+  { command: '/fork',      description: 'Fork conversation',         action: 'fork',      emoji: '🔀', hint: 'Create a branch from current thread' },
+  { command: '/theme',     description: 'Toggle theme',              action: 'theme',     emoji: '🌓', hint: 'Switch between dark and light mode' },
 ];
 
 // ── Attached file ─────────────────────────────────────────────────────────────
@@ -398,32 +400,40 @@ export default function ChatInput({ onSend, onCancel, onCommand, disabled, strea
       {slashOpen && filteredCommands.length > 0 && (
         <div
           ref={slashRef}
-          className="rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/40 overflow-hidden"
+          className="rounded-xl border border-zinc-700/60 bg-zinc-900/95 backdrop-blur-sm shadow-2xl shadow-black/50 overflow-hidden"
         >
-          <div className="px-3 pt-2 pb-1 text-[10px] text-zinc-600 uppercase tracking-wider font-medium border-b border-zinc-800">
-            Commands
+          <div className="px-3 pt-2 pb-1.5 text-[10px] text-zinc-500 uppercase tracking-wider font-medium border-b border-zinc-800/60 flex items-center justify-between">
+            <span>⌘ Commands</span>
+            <span className="text-zinc-700 normal-case tracking-normal">↑↓ navigate · ↵ select · esc close</span>
           </div>
-          <div className="max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
+          <div className="max-h-72 overflow-y-auto py-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
             {filteredCommands.map((cmd, i) => (
               <button
                 key={cmd.command}
                 onMouseDown={e => {
-                  e.preventDefault(); // Prevent textarea blur
+                  e.preventDefault();
                   executeSlashCommand(cmd);
                 }}
-                className={`flex items-center gap-3 w-full px-3 py-2 text-left text-xs transition-colors ${
+                className={`flex items-center gap-2.5 w-full px-3 py-2 text-left transition-all ${
                   i === slashIndex
-                    ? 'bg-indigo-500/15 text-zinc-100'
-                    : 'text-zinc-300 hover:bg-zinc-800'
+                    ? 'bg-indigo-500/10 border-l-2 border-indigo-500'
+                    : 'border-l-2 border-transparent text-zinc-300 hover:bg-zinc-800/60'
                 }`}
               >
-                <span className="font-mono text-indigo-400 w-24 flex-shrink-0">{cmd.command}</span>
-                <span className="text-zinc-500 truncate">{cmd.description}</span>
+                <span className="text-base w-6 text-center flex-shrink-0">{cmd.emoji}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-mono text-xs font-medium ${i === slashIndex ? 'text-indigo-300' : 'text-zinc-300'}`}>
+                      {cmd.command}
+                    </span>
+                    <span className="text-xs text-zinc-500">{cmd.description}</span>
+                  </div>
+                  {cmd.hint && i === slashIndex && (
+                    <div className="text-[10px] text-zinc-600 mt-0.5">{cmd.hint}</div>
+                  )}
+                </div>
               </button>
             ))}
-          </div>
-          <div className="px-3 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-700">
-            Arrow keys to navigate, Enter or Tab to select, Esc to dismiss
           </div>
         </div>
       )}

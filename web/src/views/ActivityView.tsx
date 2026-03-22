@@ -313,20 +313,27 @@ export default function ActivityView() {
                   {connectors.channels.map(c => {
                     const ch = c.channel || c.metadata?.channel || 'unknown';
                     const style = getChannelStyle(ch);
-                    const name = c.metadata?.bot_username ? `@${c.metadata.bot_username}` : ch;
+                    const label = ch.charAt(0).toUpperCase() + ch.slice(1);
+                    const botName = c.metadata?.bot_username ? `@${c.metadata.bot_username}` : '';
                     return (
-                      <span key={c.client_id} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${style.bg} ${style.text} border ${style.border}`}>
+                      <span key={c.client_id} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] ${style.bg} ${style.text} border ${style.border}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${style.dot} animate-pulse`} />
-                        {name}
+                        <span className="font-semibold">{label}</span>
+                        {botName && <span className="opacity-70">{botName}</span>}
                       </span>
                     );
                   })}
                   {(connectors.spawned || []).filter(s => s.status === 'running' && !wsTypes.has(s.type)).map(s => {
                     const style = getChannelStyle(s.type);
+                    const label = s.type.charAt(0).toUpperCase() + s.type.slice(1);
+                    // Try to find a bot name from sessions for this channel type
+                    const channelSession = sessions.find(sess => sess.channel === s.type);
+                    const botHint = channelSession ? 'connected' : 'active';
                     return (
-                      <span key={`spawned-${s.type}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${style.bg} ${style.text} border ${style.border}`}>
+                      <span key={`spawned-${s.type}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] ${style.bg} ${style.text} border ${style.border}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${style.dot} animate-pulse`} />
-                        {s.type}
+                        <span className="font-semibold">{label}</span>
+                        <span className="opacity-70">{botHint}</span>
                       </span>
                     );
                   })}

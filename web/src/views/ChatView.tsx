@@ -18,6 +18,7 @@ import {
   fetchAgents,
   fetchMemory,
   fetchCostSummary,
+  fetchHeartbeatStatus,
   type HealthData,
   type ModelInfo,
 } from '../lib/api';
@@ -1404,38 +1405,54 @@ export default function ChatView({ health }: { health: HealthData | null }) {
       case 'status': {
         try {
           const h = await fetchHealth();
+          const statusEmoji = h.status === 'healthy' ? '🟢' : h.status === 'degraded' ? '🟡' : '🔴';
           const lines = [
-            '**System Status**\n',
-            `- **Status:** ${h.status}`,
-            `- **Provider:** ${h.provider}`,
-            `- **Model:** ${h.model}`,
-            `- **Uptime:** ${h.uptime}`,
-            `- **Sessions:** ${h.sessions}`,
-            `- **Memory:** ${h.memory?.alloc_mb?.toFixed(1)} MB alloc / ${h.memory?.sys_mb?.toFixed(1)} MB sys`,
-            `- **Goroutines:** ${h.memory?.goroutines}`,
+            `## ${statusEmoji} System Status\n`,
+            `| | |`,
+            `|---|---|`,
+            `| **Status** | ${statusEmoji} ${h.status} |`,
+            `| **Provider** | \`${h.provider || '—'}\` |`,
+            `| **Model** | \`${h.model || '—'}\` |`,
+            `| **Uptime** | ${h.uptime || '—'} |`,
+            `| **Sessions** | ${h.sessions} |`,
+            `| **Memory** | ${h.memory?.alloc_mb} MB / ${h.memory?.sys_mb} MB |`,
+            `| **Goroutines** | ${h.memory?.goroutines} |`,
           ];
           if (h.checks?.length) {
-            lines.push('\n**Health Checks:**');
+            lines.push('\n### 🩺 Health Checks\n');
+            lines.push('| Check | Status | Detail |');
+            lines.push('|---|---|---|');
             for (const c of h.checks) {
-              const icon = c.status === 'ok' ? '' : c.status === 'warn' ? '' : '';
-              lines.push(`- ${icon} **${c.name}:** ${c.status}${c.detail ? ` — ${c.detail}` : ''}`);
+              const icon = c.status === 'pass' ? '✅' : c.status === 'warn' ? '⚠️' : '❌';
+              lines.push(`| ${c.name.replace(/_/g, ' ')} | ${icon} ${c.status} | ${c.detail || '—'} |`);
             }
           }
           insertVisibleMessage(lines.join('\n'));
         } catch {
-          insertVisibleMessage('Failed to fetch system status.');
+          insertVisibleMessage('❌ Failed to fetch system status.');
         }
         break;
       }
 
       case 'heartbeat': {
         try {
+          const hb = await fetchHeartbeatStatus();
           const h = await fetchHealth();
-          insertVisibleMessage(
-            `**Heartbeat:** ${h.status} — uptime ${h.uptime} — ${h.sessions} session(s) active`
-          );
+          const statusEmoji = hb?.enabled ? '💓' : '💤';
+          insertVisibleMessage([
+            `## ${statusEmoji} Heartbeat\n`,
+            `| | |`,
+            `|---|---|`,
+            `| **Status** | ${hb?.enabled ? '🟢 Enabled' : '⚪ Disabled'} |`,
+            `| **Interval** | ${hb?.interval || '30m'} |`,
+            `| **Run Count** | ${hb?.run_count ?? 0} |`,
+            `| **Last Run** | ${hb?.last_run ? new Date(hb.last_run).toLocaleString() : 'Never'} |`,
+            `| **Gateway** | ${h.status} — uptime ${h.uptime} |`,
+            `| **Sessions** | ${h.sessions} active |`,
+            hb?.last_result ? `\n> 💬 Last result: *${hb.last_result.slice(0, 100)}${hb.last_result.length > 100 ? '...' : ''}*` : '',
+          ].filter(Boolean).join('\n'));
         } catch {
-          insertVisibleMessage('Heartbeat check failed — server may be unreachable.');
+          insertVisibleMessage('❌ Heartbeat check failed — server may be unreachable.');
         }
         break;
       }
@@ -1444,30 +1461,33 @@ export default function ChatView({ health }: { health: HealthData | null }) {
         try {
           const h = await fetchHealth();
           const checks = h.checks ?? [];
-          const lines = ['**Diagnostics**\n'];
-          lines.push(`- Provider: **${h.provider}**`);
-          lines.push(`- Model: **${h.model}**`);
-          lines.push(`- Uptime: **${h.uptime}**`);
-          lines.push(`- Goroutines: **${h.memory?.goroutines}**`);
-          lines.push(`- GC cycles: **${h.memory?.num_gc}**`);
-          if (checks.length === 0) {
-            lines.push('\nNo health checks reported.');
-          } else {
-            lines.push('\n**Checks:**');
+          const pass = checks.filter(c => c.status === 'pass').length;
+          const warn = checks.filter(c => c.status === 'warn').length;
+          const fail = checks.filter(c => c.status !== 'pass' && c.status !== 'warn').length;
+          const lines = [
+            `## 🩺 Diagnostics\n`,
+            `| | |`,
+            `|---|---|`,
+            `| **Provider** | \`${h.provider}\` |`,
+            `| **Model** | \`${h.model}\` |`,
+            `| **Uptime** | ${h.uptime} |`,
+            `| **Memory** | ${h.memory?.alloc_mb} MB / ${h.memory?.sys_mb} MB |`,
+            `| **Goroutines** | ${h.memory?.goroutines} |`,
+            `| **GC Cycles** | ${h.memory?.num_gc} |`,
+          ];
+          if (checks.length > 0) {
+            lines.push(`\n### Health Checks — ✅ ${pass} passed${warn ? ` · ⚠️ ${warn} warnings` : ''}${fail ? ` · ❌ ${fail} failed` : ''}\n`);
+            lines.push('| Check | Status | Detail |');
+            lines.push('|---|---|---|');
             for (const c of checks) {
-              const icon = c.status === 'ok' ? '' : '';
-              lines.push(`- ${icon} ${c.name}: **${c.status}**${c.detail ? ` — ${c.detail}` : ''}`);
+              const icon = c.status === 'pass' ? '✅' : c.status === 'warn' ? '⚠️' : '❌';
+              lines.push(`| ${c.name.replace(/_/g, ' ')} | ${icon} | ${c.detail || '—'} |`);
             }
           }
-          const failing = checks.filter(c => c.status !== 'ok');
-          lines.push(
-            failing.length === 0
-              ? '\nAll systems operational.'
-              : `\n${failing.length} check(s) need attention.`
-          );
+          lines.push(fail === 0 && warn === 0 ? '\n> ✅ All systems operational.' : `\n> ⚠️ ${warn + fail} check(s) need attention.`);
           insertVisibleMessage(lines.join('\n'));
         } catch {
-          insertVisibleMessage('Diagnostics failed — unable to reach server.');
+          insertVisibleMessage('❌ Diagnostics failed — unable to reach server.');
         }
         break;
       }
@@ -1476,25 +1496,20 @@ export default function ChatView({ health }: { health: HealthData | null }) {
         try {
           const tools = await fetchTools();
           if (tools.length === 0) {
-            insertVisibleMessage('No tools registered.');
+            insertVisibleMessage('📭 No tools registered.');
           } else {
-            const grouped: Record<string, typeof tools> = {};
+            const lines = [
+              `## 🛠️ Available Tools (${tools.length})\n`,
+              '| Tool | Description |',
+              '|---|---|',
+            ];
             for (const t of tools) {
-              const cat = t.category || 'General';
-              (grouped[cat] ||= []).push(t);
-            }
-            const lines = [`**Available Tools (${tools.length})**\n`];
-            for (const [cat, items] of Object.entries(grouped)) {
-              lines.push(`**${cat}:**`);
-              for (const t of items) {
-                lines.push(`- \`${t.name}\` — ${t.description}`);
-              }
-              lines.push('');
+              lines.push(`| \`${t.name}\` | ${t.description?.slice(0, 60) || '—'}${(t.description?.length ?? 0) > 60 ? '...' : ''} |`);
             }
             insertVisibleMessage(lines.join('\n'));
           }
         } catch {
-          insertVisibleMessage('Failed to fetch tools.');
+          insertVisibleMessage('❌ Failed to fetch tools.');
         }
         break;
       }
@@ -1503,18 +1518,21 @@ export default function ChatView({ health }: { health: HealthData | null }) {
         try {
           const agents = await fetchAgents();
           if (agents.length === 0) {
-            insertVisibleMessage('No agents running.');
+            insertVisibleMessage('🤖 No agents running. Create one from the Agents page or use `/new`.');
           } else {
-            const lines = [`**Agents (${agents.length})**\n`];
+            const lines = [
+              `## 🤖 Agents (${agents.length})\n`,
+              '| Name | Role | Status | Task |',
+              '|---|---|---|---|',
+            ];
             for (const a of agents) {
-              const statusIcon = a.status === 'running' ? '' : a.status === 'error' ? '' : '';
-              lines.push(`- ${statusIcon} **${a.name}** (\`${a.id.slice(0, 8)}\`) — ${a.role} — ${a.status}`);
-              if (a.task) lines.push(`  Task: ${a.task.slice(0, 80)}${a.task.length > 80 ? '…' : ''}`);
+              const icon = a.status === 'running' ? '🟢' : a.status === 'completed' ? '✅' : a.status === 'error' ? '❌' : '⚪';
+              lines.push(`| **${a.name}** | ${a.role} | ${icon} ${a.status} | ${a.task?.slice(0, 40) || '—'}${(a.task?.length ?? 0) > 40 ? '...' : ''} |`);
             }
             insertVisibleMessage(lines.join('\n'));
           }
         } catch {
-          insertVisibleMessage('Failed to fetch agents.');
+          insertVisibleMessage('❌ Failed to fetch agents.');
         }
         break;
       }
@@ -1523,18 +1541,21 @@ export default function ChatView({ health }: { health: HealthData | null }) {
         try {
           const entries = await fetchMemory();
           if (entries.length === 0) {
-            insertVisibleMessage('Memory is empty.');
+            insertVisibleMessage('🧠 Memory is empty. Use `memory_write` to store information.');
           } else {
-            const lines = [`**Memory Entries (${entries.length})**\n`];
+            const lines = [
+              `## 🧠 Memory (${entries.length} entries)\n`,
+              '| Key | Value |',
+              '|---|---|',
+            ];
             for (const e of entries) {
-              lines.push(`- **${e.key}** \`[${e.type}]\``);
-              const preview = String(e.value).slice(0, 100);
-              lines.push(`  ${preview}${String(e.value).length > 100 ? '…' : ''}`);
+              const preview = String(e.value).slice(0, 60);
+              lines.push(`| \`${e.key}\` | ${preview}${String(e.value).length > 60 ? '...' : ''} |`);
             }
             insertVisibleMessage(lines.join('\n'));
           }
         } catch {
-          insertVisibleMessage('Failed to fetch memory entries.');
+          insertVisibleMessage('❌ Failed to fetch memory entries.');
         }
         break;
       }
@@ -1543,32 +1564,45 @@ export default function ChatView({ health }: { health: HealthData | null }) {
         try {
           const summary = await fetchCostSummary();
           if (!summary) {
-            insertVisibleMessage('Cost tracking not available.');
+            insertVisibleMessage('💰 Cost tracking not available.');
           } else {
             const lines = [
-              '**Usage & Cost Summary**\n',
-              `- **Today:** $${summary.today_cost_usd.toFixed(4)}`,
-              `- **Session:** $${summary.session_cost_usd.toFixed(4)}`,
-              `- **Total:** $${summary.total_cost_usd.toFixed(4)}`,
-              `- **Total calls:** ${summary.total_calls}`,
-              `- **Session calls:** ${summary.session_calls}`,
+              `## 💰 Usage & Cost\n`,
+              `| | |`,
+              `|---|---|`,
+              `| **Today** | $${summary.today_cost_usd.toFixed(4)} |`,
+              `| **Session** | $${summary.session_cost_usd.toFixed(4)} |`,
+              `| **Total** | $${summary.total_cost_usd.toFixed(4)} |`,
+              `| **API Calls** | ${summary.total_calls} total / ${summary.session_calls} this session |`,
             ];
             if (summary.by_provider && Object.keys(summary.by_provider).length > 0) {
-              lines.push('\n**By Provider:**');
+              lines.push('\n### By Provider\n');
+              lines.push('| Provider | Cost |');
+              lines.push('|---|---|');
               for (const [prov, cost] of Object.entries(summary.by_provider)) {
-                lines.push(`- ${prov}: $${(cost as number).toFixed(4)}`);
+                lines.push(`| \`${prov}\` | $${(cost as number).toFixed(4)} |`);
+              }
+            }
+            if (summary.by_model && Object.keys(summary.by_model).length > 0) {
+              lines.push('\n### By Model\n');
+              lines.push('| Model | Cost |');
+              lines.push('|---|---|');
+              for (const [mod, cost] of Object.entries(summary.by_model)) {
+                lines.push(`| \`${mod}\` | $${(cost as number).toFixed(4)} |`);
               }
             }
             if (summary.last_7_days?.length > 0) {
-              lines.push('\n**Last 7 Days:**');
+              lines.push('\n### Last 7 Days\n');
+              lines.push('| Date | Cost |');
+              lines.push('|---|---|');
               for (const d of summary.last_7_days) {
-                lines.push(`- ${d.date}: $${d.cost_usd.toFixed(4)}${d.tokens ? ` (${d.tokens.toLocaleString()} tok)` : ''}`);
+                lines.push(`| ${d.date} | $${d.cost_usd.toFixed(4)} |`);
               }
             }
             insertVisibleMessage(lines.join('\n'));
           }
         } catch {
-          insertVisibleMessage('Failed to fetch usage data.');
+          insertVisibleMessage('❌ Failed to fetch usage data.');
         }
         break;
       }
