@@ -242,7 +242,10 @@ func (b *Broker) decide(requestID, decidedBy string, approved bool) error {
 // The sweep interval is min(timeout/2, 15s) so tests with short timeouts
 // do not have to wait 15 seconds for expiry.
 func (b *Broker) expirySweeper() {
-	interval := b.timeout / 2
+	b.mu.Lock()
+	timeout := b.timeout
+	b.mu.Unlock()
+	interval := timeout / 2
 	if interval < time.Second {
 		interval = time.Second // never faster than 1s to avoid hot loops
 	}
