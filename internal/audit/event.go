@@ -3,6 +3,8 @@ package audit
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // EventType represents the type of audit event
@@ -174,7 +176,5 @@ func (e *Event) ToJSON() ([]byte, error) {
 
 // generateID generates a unique event ID
 func generateID() string {
-	// Simple timestamp-based ID for now
-	// In production, use UUID or similar
-	return time.Now().Format("20060102150405.000000")
+	return uuid.NewString()
 }
