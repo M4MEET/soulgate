@@ -284,14 +284,15 @@ func countTrailingCycle(h []toolCallRecord, period int) int {
 }
 
 // cycleMatch returns true if a and b have the same length and contain the
-// same tool names (args are intentionally ignored for cycle detection so
-// that e.g. a search-with-different-query loop is still caught).
+// same tool names AND arguments. Different args means different intent —
+// e.g. exec_command("open Chrome") followed by exec_command("Cmd+Shift+N")
+// is not a loop.
 func cycleMatch(a, b []toolCallRecord) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i].ToolName != b[i].ToolName {
+		if a[i].ToolName != b[i].ToolName || a[i].ArgsHash != b[i].ArgsHash {
 			return false
 		}
 	}
