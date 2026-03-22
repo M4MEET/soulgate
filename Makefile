@@ -321,3 +321,10 @@ docker:
 # Run diagnostics
 doctor:
 	./bin/soulgate doctor
+
+# Build React web UI (requires Node.js)
+webui:
+	cd web && npm install && npm run build
+
+# Build everything (Go binary + web UI)
+all: webui build
