@@ -46,6 +46,11 @@ func (o *Orchestrator) SetThinkingCallback(cb func(ThinkingEvent)) {
 	o.thinkingCallback = cb
 }
 
+// GetThinkingCallback returns the current thinking callback (may be nil).
+func (o *Orchestrator) GetThinkingCallback() func(ThinkingEvent) {
+	return o.thinkingCallback
+}
+
 // emitThinking sends a thinking event if a callback is registered
 func (o *Orchestrator) emitThinking(event ThinkingEvent) {
 	if o.thinkingCallback != nil {

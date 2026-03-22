@@ -228,6 +228,52 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 
 			return response, nil
 		},
+		OnStreamChat: func(ctx context.Context, message string, events chan<- gateway.ThinkingEvent) (string, error) {
+			// Set up temporary thinking callback that pipes to SSE events
+			origThinking := orch.GetThinkingCallback()
+			origStream := orch.IsStreaming()
+
+			orch.SetThinkingCallback(func(evt core.ThinkingEvent) {
+				// Also call original (for console output)
+				if origThinking != nil {
+					origThinking(evt)
+				}
+				// Map to gateway ThinkingEvent for SSE
+				switch evt.Kind {
+				case core.ThinkingIteration:
+					events <- gateway.ThinkingEvent{Kind: "iteration", Message: evt.Message}
+				case core.ThinkingModelCall:
+					events <- gateway.ThinkingEvent{Kind: "model_call", Message: evt.Message, Data: evt.Provider}
+				case core.ThinkingModelDone:
+					events <- gateway.ThinkingEvent{Kind: "model_done", Message: evt.Message, Data: evt.Model, Tokens: evt.TokensUsed}
+				case core.ThinkingToolStart:
+					events <- gateway.ThinkingEvent{Kind: "tool_start", Message: evt.ToolName, Data: evt.ToolArgs}
+				case core.ThinkingToolDone:
+					events <- gateway.ThinkingEvent{Kind: "tool_done", Message: evt.ToolName, Data: evt.ToolResult}
+				case core.ThinkingStatus:
+					events <- gateway.ThinkingEvent{Kind: "status", Message: evt.Message}
+				}
+			})
+
+			// Enable streaming and pipe chunks as SSE events
+			orch.SetStreaming(true, func(chunk string) {
+				events <- gateway.ThinkingEvent{Kind: "stream", Message: chunk}
+			})
+
+			result, err := orch.Run(ctx, message)
+
+			// Restore original callbacks
+			orch.SetThinkingCallback(origThinking)
+			orch.SetStreaming(origStream, nil)
+
+			if err != nil {
+				return "", err
+			}
+			if result == nil {
+				return "", nil
+			}
+			return result.Response, nil
+		},
 		API: buildGatewayAPI(orch, workspace),
 	}
 

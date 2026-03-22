@@ -14,6 +14,7 @@ export interface Message {
   cost?: number;
   toolCalls?: ToolCall[];
   streaming?: boolean;
+  thinkingLog?: string[];
 }
 
 export interface ToolCall {
@@ -124,6 +125,30 @@ export default function ChatMessage({
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
+
+        {/* Thinking Log */}
+        {!isUser && message.thinkingLog && message.thinkingLog.length > 0 && (
+          <details className="mb-2 rounded-xl bg-zinc-900/60 border border-zinc-700/40 overflow-hidden" open={message.streaming}>
+            <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 transition-colors select-none">
+              <span className={`w-1.5 h-1.5 rounded-full ${message.streaming ? 'bg-amber-400 animate-pulse' : 'bg-zinc-600'}`} />
+              <span>{message.streaming ? 'Thinking...' : `Thought process (${message.thinkingLog.length} steps)`}</span>
+            </summary>
+            <div className="px-3 py-2 border-t border-zinc-800/60 max-h-48 overflow-y-auto font-mono text-xs space-y-0.5" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
+              {message.thinkingLog.map((line, i) => {
+                let color = 'text-zinc-500';
+                if (line.startsWith('──')) color = 'text-zinc-600';
+                else if (line.startsWith('⟶')) color = 'text-violet-400';
+                else if (line.startsWith('⟵')) color = 'text-emerald-400';
+                else if (line.startsWith('⚡')) color = 'text-amber-400';
+                else if (line.startsWith('  ↳')) color = 'text-emerald-400/70';
+                return <div key={i} className={color}>{line}</div>;
+              })}
+              {message.streaming && (
+                <div className="text-amber-400 animate-pulse">thinking...</div>
+              )}
+            </div>
+          </details>
+        )}
 
         {/* Bubble */}
         <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${

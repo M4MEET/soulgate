@@ -7,7 +7,7 @@ import {
 } from 'react';
 import ChatMessage, { type Message } from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
-import { streamChat } from '../lib/api';
+import { streamChatSSE } from '../lib/api';
 import {
   MessageSquare,
   Sparkles,
@@ -1059,9 +1059,45 @@ export default function ChatView() {
     const capturedTid = tid;
     try {
       let fullText = '';
-      for await (const chunk of streamChat(text, abortRef.current.signal)) {
-        fullText += chunk;
-        updateMessage(capturedTid, aiId, m => ({ ...m, content: fullText }));
+      const thinkingLog: string[] = [];
+      for await (const evt of streamChatSSE(text, abortRef.current.signal)) {
+        switch (evt.kind) {
+          case 'iteration':
+            thinkingLog.push(`── ${evt.message} ──`);
+            updateMessage(capturedTid, aiId, m => ({ ...m, thinkingLog: [...thinkingLog] }));
+            break;
+          case 'model_call':
+            thinkingLog.push(`⟶ ${evt.message}`);
+            updateMessage(capturedTid, aiId, m => ({ ...m, thinkingLog: [...thinkingLog] }));
+            break;
+          case 'model_done':
+            thinkingLog.push(`⟵ ${evt.message}${evt.tokens ? ` (${evt.tokens} tok)` : ''}`);
+            updateMessage(capturedTid, aiId, m => ({ ...m, thinkingLog: [...thinkingLog] }));
+            break;
+          case 'tool_start':
+            thinkingLog.push(`⚡ ${evt.message} ${evt.data || ''}`);
+            updateMessage(capturedTid, aiId, m => ({ ...m, thinkingLog: [...thinkingLog] }));
+            break;
+          case 'tool_done':
+            thinkingLog.push(`  ↳ ${evt.data?.slice(0, 100) || 'done'}`);
+            updateMessage(capturedTid, aiId, m => ({ ...m, thinkingLog: [...thinkingLog] }));
+            break;
+          case 'status':
+            thinkingLog.push(`  ${evt.message}`);
+            updateMessage(capturedTid, aiId, m => ({ ...m, thinkingLog: [...thinkingLog] }));
+            break;
+          case 'stream':
+            fullText += evt.message;
+            updateMessage(capturedTid, aiId, m => ({ ...m, content: fullText }));
+            break;
+          case 'done':
+            if (evt.message && !fullText) fullText = evt.message;
+            updateMessage(capturedTid, aiId, m => ({ ...m, content: fullText || evt.message, streaming: false }));
+            break;
+          case 'error':
+            updateMessage(capturedTid, aiId, m => ({ ...m, content: `Error: ${evt.message}`, streaming: false }));
+            break;
+        }
       }
       updateMessage(capturedTid, aiId, m => ({ ...m, streaming: false }));
     } catch (err: unknown) {

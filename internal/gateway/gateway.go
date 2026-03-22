@@ -75,9 +75,20 @@ type Gateway struct {
 }
 
 // ChatHandler processes a chat message and returns a response.
-// This allows the gateway to serve an HTTP /api/chat endpoint without
-// importing the core package directly.
 type ChatHandler func(ctx context.Context, message string) (string, error)
+
+// ThinkingEvent is a real-time event from the agentic loop, sent to the
+// web UI via Server-Sent Events so users can watch the AI think.
+type ThinkingEvent struct {
+	Kind    string `json:"kind"`    // iteration, model_call, model_done, tool_start, tool_done, stream, status, done
+	Message string `json:"message"` // human-readable description
+	Data    string `json:"data,omitempty"`    // tool name, model name, etc.
+	Tokens  int    `json:"tokens,omitempty"`
+}
+
+// StreamingChatHandler processes a chat message and streams thinking events.
+// If nil, the gateway falls back to OnChat (non-streaming).
+type StreamingChatHandler func(ctx context.Context, message string, events chan<- ThinkingEvent) (string, error)
 
 // GatewayAPI holds optional callback functions that the gateway uses to serve
 // the rich REST API consumed by the web UI. All fields are optional; when nil
@@ -177,7 +188,8 @@ type Config struct {
 	Port        int
 	SessionsDir string      // Directory for session JSONL files
 	AuthEnabled bool        // Enable authentication (default: false for backward compatibility)
-	OnChat      ChatHandler // If set, gateway serves POST /api/chat
+	OnChat       ChatHandler         // If set, gateway serves POST /api/chat
+	OnStreamChat StreamingChatHandler // If set, streams thinking events via SSE
 
 	// Metadata surfaced on the /api/status endpoint and the web UI.
 	Provider string // e.g., "anthropic", "openai"
@@ -1001,6 +1013,15 @@ func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 		"user_id": req.UserID,
 	})
 
+	// Check if client wants SSE streaming (Accept: text/event-stream or ?stream=true)
+	wantsStream := r.Header.Get("Accept") == "text/event-stream" ||
+		r.URL.Query().Get("stream") == "true"
+
+	if wantsStream && g.config.OnStreamChat != nil {
+		g.handleStreamingChat(w, r, req.Message)
+		return
+	}
+
 	response, err := g.config.OnChat(r.Context(), req.Message)
 	if err != nil {
 		fmt.Printf("❌ Chat error: %v\n", err)
@@ -1022,6 +1043,41 @@ func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"response": response})
+}
+
+// handleStreamingChat sends thinking events as Server-Sent Events (SSE)
+// so the web UI can show real-time AI thinking with animations.
+func (g *Gateway) handleStreamingChat(w http.ResponseWriter, r *http.Request, message string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// Fallback to non-streaming
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	events := make(chan ThinkingEvent, 100)
+
+	go func() {
+		response, err := g.config.OnStreamChat(r.Context(), message, events)
+		if err != nil {
+			events <- ThinkingEvent{Kind: "error", Message: err.Error()}
+		} else {
+			events <- ThinkingEvent{Kind: "done", Message: response}
+		}
+		close(events)
+	}()
+
+	for evt := range events {
+		data, _ := json.Marshal(evt)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
 }
 
 // corsMiddleware adds CORS headers for cross-origin API access

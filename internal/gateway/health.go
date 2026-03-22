@@ -237,6 +237,15 @@ func (hm *healthMonitor) probeProvider() (status, detail string) {
 
 	targetURL := model.ResolveBaseURL(def, "")
 	if targetURL == "" {
+		// Fallback for providers whose adapters use hardcoded base URLs.
+		switch def.Protocol {
+		case "anthropic":
+			targetURL = "https://api.anthropic.com"
+		case "openai":
+			targetURL = "https://api.openai.com"
+		}
+	}
+	if targetURL == "" {
 		return "warn", fmt.Sprintf("no base URL for provider %q; skipping probe", provider)
 	}
 
@@ -255,7 +264,7 @@ func (hm *healthMonitor) probeProvider() (status, detail string) {
 	resp.Body.Close() //nolint:errcheck
 
 	// Any HTTP response means the network path is open.
-	return "pass", fmt.Sprintf("provider %s responded with %d", provider, resp.StatusCode)
+	return "pass", fmt.Sprintf("provider %s reachable", provider)
 }
 
 // checkMemory warns at 500 MB allocated, fails at 1 GB.

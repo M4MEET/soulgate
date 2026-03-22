@@ -193,27 +193,21 @@ export async function sendChat(message: string): Promise<ChatResponse> {
   return res.json();
 }
 
-export async function* streamChat(message: string, signal?: AbortSignal): AsyncGenerator<string> {
-  // The gateway's /api/chat runs the full agentic loop which can take
-  // 30-120 seconds with tool calls. We use no timeout on the fetch itself
-  // (the AbortSignal from the UI handles cancellation), but we yield a
-  // "thinking" indicator so the UI doesn't appear stuck.
-  const thinkingTimer = setTimeout(() => {}, 0); // placeholder
+export interface StreamEvent {
+  kind: 'iteration' | 'model_call' | 'model_done' | 'tool_start' | 'tool_done' | 'stream' | 'status' | 'done' | 'error';
+  message: string;
+  data?: string;
+  tokens?: number;
+}
 
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-      signal,
-    });
-  } catch (err: unknown) {
-    clearTimeout(thinkingTimer);
-    if ((err as Error).name === 'AbortError') throw err;
-    throw new Error(`Failed to connect to SoulGate: ${(err as Error).message}`);
-  }
-  clearTimeout(thinkingTimer);
+// streamChatSSE streams thinking events via SSE — yields structured events
+export async function* streamChatSSE(message: string, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+  const res = await fetch(`${BASE}/api/chat?stream=true`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+    body: JSON.stringify({ message }),
+    signal,
+  });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -222,7 +216,7 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
 
   const contentType = res.headers.get('content-type') || '';
 
-  if (contentType.includes('text/event-stream') || contentType.includes('application/x-ndjson')) {
+  if (contentType.includes('text/event-stream')) {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -234,19 +228,41 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
       for (const line of lines) {
-        if (line.trim()) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
           try {
-            const data = JSON.parse(line.startsWith('data: ') ? line.slice(6) : line);
-            if (data.response) yield data.response;
-            if (data.delta) yield data.delta;
-          } catch { yield line; }
+            const evt: StreamEvent = JSON.parse(trimmed.slice(6));
+            yield evt;
+          } catch { /* skip malformed */ }
         }
       }
     }
   } else {
+    // Fallback: non-streaming JSON response
     const data: ChatResponse = await res.json();
     if (data.error) throw new Error(data.error);
-    if (data.response) yield data.response;
+    if (data.response) {
+      yield { kind: 'stream', message: data.response };
+      yield { kind: 'done', message: data.response };
+    }
+  }
+}
+
+// streamChat — backward-compatible string-only generator (used by ChatView)
+export async function* streamChat(message: string, signal?: AbortSignal): AsyncGenerator<string> {
+  let fullText = '';
+  for await (const evt of streamChatSSE(message, signal)) {
+    if (evt.kind === 'stream') {
+      fullText += evt.message;
+      yield fullText; // yield accumulated text
+    } else if (evt.kind === 'done') {
+      if (evt.message && evt.message !== fullText) {
+        yield evt.message; // yield final response
+      }
+    } else if (evt.kind === 'error') {
+      throw new Error(evt.message);
+    }
+    // thinking events are ignored in string mode
   }
 }
 
