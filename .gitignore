@@ -10,11 +10,16 @@ credentials/
 .soulgate/config.yml
 .soulgate/agents.yaml
 .soulgate/policy.yml
-.soulgate/audit.db
-.soulgate/audit.db-*
+.soulgate/audit.jsonl
+.soulgate/audit-*.jsonl
 .soulgate/memory.json
+.soulgate/costs.jsonl
+.soulgate/session_state.json
+.soulgate/branches.json
+.soulgate/vectors/
 .soulgate/*.key
 .soulgate/secrets/
+~/.soulgate/config.yml
 *.db
 *.db-shm
 *.db-wal
@@ -79,6 +84,27 @@ scratch/
 run*.sh
 test-*.sh
 check-secrets.sh
+start_telegram.sh
+setup-telegram-bot.sh
+configure-soulgate.sh
+test_api.sh
+viral-automation.sh
+viral-marketing-bot.py
+VIRAL_STRATEGY.md
+
+# Go module cache (if present in repo)
+go/
+
+# Sessions data
+sessions/
+
+# Project builds
+projects/*/
+
+# Onboarding state
+.soulgate/.onboarding_complete
+.soulgate/cron_jobs.json
+.soulgate/canvas/
 
 # Internal docs (dev-only)
 ARCHITECTURE.md

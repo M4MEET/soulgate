@@ -1,0 +1,15 @@
+services:
+  soulgate:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - soulgate-data:/root/.soulgate
+      - ./sessions:/sessions
+    restart: unless-stopped
+
+volumes:
+  soulgate-data:

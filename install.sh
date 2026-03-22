@@ -1,135 +1,102 @@
 #!/bin/bash
-# SoulGate One-Command Installer
-# Usage: curl -fsSL https://soulgate.io/install.sh | bash
-
+# SoulGate Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/M4MEET/soulgate/main/install.sh | bash
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+REPO="M4MEET/soulgate"
+BINARY="soulgate"
 
-# Detect OS and architecture
-OS="$(uname -s)"
+# Colors
+C='\033[36m' G='\033[32m' Y='\033[33m' R='\033[31m' D='\033[2m' B='\033[1m' N='\033[0m'
+
+echo -e "${C}${B}SoulGate${N} — Your AI, everywhere."
+echo ""
+
+# Detect OS/arch
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
-
-echo -e "${BLUE}"
-echo "╔═══════════════════════════════════════════════════════╗"
-echo "║          SoulGate Installation                        ║"
-echo "╚═══════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-
-# Function to print colored messages
-print_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}❌ $1${NC}"
-}
-
-# Detect platform
-print_info "Detecting platform..."
+case "$ARCH" in
+    x86_64|amd64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *) echo -e "${R}Unsupported architecture: $ARCH${N}"; exit 1 ;;
+esac
 case "$OS" in
-    Linux*)
-        case "$ARCH" in
-            x86_64) PLATFORM="linux-amd64" ;;
-            aarch64|arm64) PLATFORM="linux-arm64" ;;
-            *) print_error "Unsupported architecture: $ARCH"; exit 1 ;;
-        esac
-        ;;
-    Darwin*)
-        case "$ARCH" in
-            x86_64) PLATFORM="darwin-amd64" ;;
-            arm64) PLATFORM="darwin-arm64" ;;
-            *) print_error "Unsupported architecture: $ARCH"; exit 1 ;;
-        esac
-        ;;
-    MINGW*|MSYS*|CYGWIN*)
-        PLATFORM="windows-amd64"
-        print_warning "Windows detected. Please use WSL or download from releases page."
-        exit 1
-        ;;
-    *)
-        print_error "Unsupported OS: $OS"
-        exit 1
-        ;;
+    linux|darwin) ;;
+    mingw*|msys*|cygwin*) OS="windows" ;;
+    *) echo -e "${R}Unsupported OS: $OS${N}"; exit 1 ;;
 esac
 
-print_success "Platform detected: $PLATFORM"
+echo -e "${D}Platform: ${OS}/${ARCH}${N}"
 
-# Set installation directory
+# Get latest version
+echo -e "${D}Fetching latest release...${N}"
+if command -v curl >/dev/null 2>&1; then
+    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
+elif command -v wget >/dev/null 2>&1; then
+    VERSION=$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
+else
+    echo -e "${R}Neither curl nor wget found${N}"; exit 1
+fi
+
+if [ -z "$VERSION" ]; then
+    VERSION="v1.0.0"
+    echo -e "${Y}Could not detect latest version, using ${VERSION}${N}"
+fi
+echo -e "${D}Version: ${VERSION}${N}"
+
+# Build download URL (goreleaser format)
+ARCHIVE="soulgate_${OS}_${ARCH}.tar.gz"
+if [ "$OS" = "windows" ]; then
+    ARCHIVE="soulgate_${OS}_${ARCH}.zip"
+fi
+URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
+
+# Download
+TMPDIR=$(mktemp -d)
+trap "rm -rf $TMPDIR" EXIT
+
+echo -e "${D}Downloading ${URL}...${N}"
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$URL" -o "$TMPDIR/$ARCHIVE"
+else
+    wget -q "$URL" -O "$TMPDIR/$ARCHIVE"
+fi
+
+# Extract
+cd "$TMPDIR"
+if [ "$OS" = "windows" ]; then
+    unzip -q "$ARCHIVE"
+else
+    tar -xzf "$ARCHIVE"
+fi
+
+# Install
 INSTALL_DIR="/usr/local/bin"
 if [ ! -w "$INSTALL_DIR" ]; then
     INSTALL_DIR="$HOME/.local/bin"
     mkdir -p "$INSTALL_DIR"
-
-    # Add to PATH if not already there
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-        print_warning "Adding $INSTALL_DIR to PATH"
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc" 2>/dev/null || true
+        for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+            [ -f "$rc" ] && echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc"
+        done
+        export PATH="$INSTALL_DIR:$PATH"
     fi
 fi
 
-# Download SoulGate
-VERSION="v0.1.0"
-DOWNLOAD_URL="https://github.com/M4MEET/soulgate/releases/download/${VERSION}/soulgate-${VERSION}-${PLATFORM}"
-BINARY_PATH="$INSTALL_DIR/soulgate"
+cp "$BINARY" "$INSTALL_DIR/$BINARY"
+chmod +x "$INSTALL_DIR/$BINARY"
 
-print_info "Downloading SoulGate ${VERSION}..."
+echo ""
+echo -e "${G}✓ Installed to ${INSTALL_DIR}/${BINARY}${N}"
 
-# Try curl first, fallback to wget
-if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"
-elif command -v wget >/dev/null 2>&1; then
-    wget -q "$DOWNLOAD_URL" -O "$BINARY_PATH"
-else
-    print_error "Neither curl nor wget found. Please install one of them."
-    exit 1
-fi
-
-# Make executable
-chmod +x "$BINARY_PATH"
-
-print_success "SoulGate installed to $BINARY_PATH"
-
-# Verify installation
+# Verify
 if command -v soulgate >/dev/null 2>&1; then
-    print_success "Installation verified!"
-    echo ""
-    soulgate --version
-else
-    print_warning "soulgate not found in PATH. You may need to restart your terminal."
-    print_info "Or manually add to PATH: export PATH=\"$INSTALL_DIR:\$PATH\""
+    echo -e "${G}✓ $(soulgate --version 2>/dev/null || echo 'soulgate ready')${N}"
 fi
 
 echo ""
-echo -e "${GREEN}╔═══════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║          Installation Complete! 🎉                    ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════════════════════════╝${NC}"
-echo ""
-echo -e "${BLUE}🚀 Quick Start:${NC}"
-echo ""
-echo "   1. Start the interactive terminal:"
-echo -e "      ${GREEN}soulgate${NC}"
-echo ""
-echo "   2. Or run setup wizard:"
-echo -e "      ${GREEN}soulgate setup${NC}"
-echo ""
-echo "   3. Get help:"
-echo -e "      ${GREEN}soulgate --help${NC}"
-echo ""
-echo -e "${YELLOW}📝 Note: You'll need an OpenAI or Anthropic API key.${NC}"
-echo "   The interactive terminal will help you set it up!"
+echo -e "  Get started:"
+echo -e "    ${C}soulgate tui${N}              Interactive terminal"
+echo -e "    ${C}soulgate gateway start${N}    Start gateway + web UI"
+echo -e "    ${C}soulgate doctor${N}           Check installation"
 echo ""

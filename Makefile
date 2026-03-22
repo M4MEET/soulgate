@@ -2,7 +2,7 @@
         test-audit test-policy test-config test-broker test-plugin test-model test-core test-cli \
         bench bench-audit bench-policy bench-broker \
         clean install run demo lint check dev build-plugin build-release \
-        build-cli build-all dist install-cli quickstart
+        build-cli build-all dist install-cli quickstart docker doctor
 
 # Build the soulgate binary
 build:
@@ -313,3 +313,11 @@ help:
 	@echo "See docs/AGENTS.md for agent responsibilities and coordination."
 
 .DEFAULT_GOAL := build
+
+# Build and run Docker container
+docker:
+	docker compose up --build
+
+# Run diagnostics
+doctor:
+	./bin/soulgate doctor

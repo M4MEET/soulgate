@@ -1,0 +1,22 @@
+name: example-echo
+version: 1.0.0
+description: Example plugin that echoes input back — demonstrates the script plugin system
+author: soulgate
+runtime: script
+
+tools:
+  - name: echo
+    description: Echoes the input message back. Useful for testing the plugin system.
+    command: python3 echo.py
+    input_schema:
+      type: object
+      properties:
+        message:
+          type: string
+          description: The message to echo back
+      required:
+        - message
+
+requires:
+  bins:
+    - python3

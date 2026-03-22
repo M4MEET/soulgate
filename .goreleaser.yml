@@ -1,0 +1,42 @@
+version: 2
+builds:
+  - main: ./cmd/soulgate
+    binary: soulgate
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "soulgate_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+brews:
+  - repository:
+      owner: M4MEET
+      name: homebrew-tap
+    homepage: https://github.com/M4MEET/soulgate
+    description: "Your AI, everywhere. 13 platforms. 13 providers. Full system access."
+    install: |
+      bin.install "soulgate"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

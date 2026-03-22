@@ -1,200 +1,169 @@
 # SoulGate
 
-A security-focused AI gateway for the terminal. SoulGate sits between LLM agents and your system, enforcing policies and auditing every operation.
+**Your AI, everywhere.** One binary. 13 platforms. 13 model providers. Full system access.
 
-## Install
+SoulGate is a personal AI gateway that connects any LLM to any messaging platform with full tool access — files, shell, browser, voice, code execution, and more. Deploy once, talk to your AI from Telegram, Discord, Slack, WhatsApp, Signal, Teams, Matrix, iMessage, IRC, Twitch, or the web.
+
+```
+soulgate gateway start
+```
+
+That's it. Your AI is now reachable from every platform you connect.
+
+## Why SoulGate?
+
+- **One command** — `soulgate gateway start` runs everything: HTTP API, WebSocket, Web UI
+- **13 connectors** — Telegram, Discord, Slack, WhatsApp, Signal, Teams, Matrix, iMessage, IRC, Twitch, Nostr, Mattermost, Feishu
+- **13 providers** — OpenAI, Anthropic, Groq, Gemini, Mistral, DeepSeek, Ollama, and more
+- **45+ tools** — files, shell, browser automation, voice, image generation, code execution, semantic memory
+- **Multi-agent** — delegate tasks to specialized sub-agents with roles and messaging
+- **Security-first** — policy engine, audit logging, permission prompts, workspace boundaries
+- **Self-contained** — single 43MB Go binary, no runtime dependencies
+
+## Quick Start
 
 ```bash
+# Install
 git clone https://github.com/M4MEET/soulgate.git
-cd soulgate
-make build
-```
+cd soulgate && make build
 
-The binary is built to `bin/soulgate`. Optionally move it to your PATH:
+# Configure (interactive — picks provider, enters API key)
+./bin/soulgate tui
 
-```bash
-cp bin/soulgate /usr/local/bin/
-```
-
-## Setup
-
-### 1. Initialize a workspace
-
-```bash
-cd your-project
-soulgate init
-```
-
-This creates a `.soulgate/` directory with default config and policies.
-
-### 2. Set your API key
-
-SoulGate supports multiple providers. Set the key for your preferred one:
-
-```bash
-# OpenAI
-export OPENAI_API_KEY="sk-..."
-
-# Anthropic
+# Or set key and go
 export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Groq (fast inference)
-export GROQ_API_KEY="gsk_..."
-
-# Google (Gemini)
-export GOOGLE_API_KEY="..."
-
-# Ollama (local, no key needed)
-# Just have ollama running locally
+./bin/soulgate gateway start
 ```
 
-### 3. Start chatting
+Open http://localhost:8080 for the web dashboard. Or connect a messaging platform:
 
 ```bash
-# Interactive TUI (recommended)
-soulgate tui
+# Telegram
+export TELEGRAM_BOT_TOKEN="..."
+soulgate connector telegram
 
-# Single prompt
-soulgate run "Read example.txt and summarize it"
+# Discord
+export DISCORD_BOT_TOKEN="..."
+soulgate connector discord
+
+# Slack (Socket Mode)
+export SLACK_BOT_TOKEN="xoxb-..."
+export SLACK_APP_TOKEN="xapp-..."
+soulgate connector slack
+
+# WhatsApp (scans QR code in terminal)
+soulgate connector whatsapp
+
+# Signal (requires signal-cli)
+soulgate connector signal --phone +1234567890
+
+# And 8 more: teams, matrix, imessage, irc, twitch, nostr, mattermost, feishu
 ```
 
-First launch opens an onboarding wizard that walks you through model selection, API key setup, and basic configuration.
-
-## Usage
-
-### Interactive mode
+## Docker
 
 ```bash
-soulgate tui
+export ANTHROPIC_API_KEY="sk-ant-..."
+docker compose up
 ```
 
-Inside the TUI:
+## Architecture
 
-| Command | Description |
-|---|---|
-| `/help` | Show all commands and shortcuts |
-| `/model` | Switch AI model or provider |
-| `/status` | Show current configuration |
-| `/tools` | List available tools |
-| `/skills` | List loaded skills |
-| `/memory` | Show conversation memory |
-| `/setup` | Integration setup wizard |
-| `/clear` | Clear screen |
-| `!command` | Run a shell command |
-
-Keyboard shortcuts: `Tab` autocomplete, `Up/Down` history, `PgUp/PgDn` scroll, `Ctrl+C` exit.
-
-### Single prompt mode
-
-```bash
-soulgate run "What files are in this directory?"
-soulgate run "Read main.go and explain what it does"
+```
+User ──→ Connector ──→ Gateway ──→ Orchestrator ──→ Model Provider
+              ↑           ↑            ↓
+         Telegram     Web UI      Tool Execution
+         Discord    WebSocket    ├── Files, Shell
+         Slack       HTTP API    ├── Browser (Chrome)
+         WhatsApp                ├── Voice (TTS/STT)
+         Signal                  ├── Code Sandbox
+         Teams                   ├── Image Gen (DALL-E)
+         Matrix                  ├── Web Search
+         iMessage                ├── Semantic Memory
+         IRC/Twitch              └── Canvas/Artifacts
+         Nostr
+         Mattermost
+         Feishu
 ```
 
-### Policy management
+## Tools
 
-```bash
-soulgate policy show       # View active policies
-```
+| Category | Tools |
+|----------|-------|
+| **Files** | read, write, list, delete, apply_patch |
+| **Shell** | exec_command, process management (start/list/poll/log/write/kill) |
+| **Web** | web_search, web_fetch, net_request |
+| **Browser** | open, screenshot, click, type, eval, html (via Chrome DevTools) |
+| **Voice** | speak (TTS), transcribe (STT) via OpenAI |
+| **Images** | generate (DALL-E 3 / FAL.ai), edit |
+| **Canvas** | create, update, list, preview (HTML/React/SVG/Mermaid artifacts) |
+| **Memory** | key-value (write/get/search) + vector embeddings (index/recall/forget) |
+| **Agents** | create, list, stop, delegate, message |
+| **Code** | code_run (Python/Node/Go/Bash/Ruby), code_install |
+| **Other** | pdf_read, cron scheduling, LLM task, model switching, introspect, configure |
 
-Policies control what the AI agent can access. Edit `.soulgate/policy.yml`:
+## Model Providers
 
-```yaml
-version: "1"
-policies:
-  - name: "allow-workspace-reads"
-    action: "files.read"
-    resource: "./**"
-    decision: allow
-    priority: 10
-
-  - name: "deny-parent-access"
-    action: "files.*"
-    resource: "../**"
-    decision: deny
-    priority: 20
-```
-
-Higher priority rules are evaluated first. Default is deny (no matching rule = denied).
-
-### Audit logs
-
-```bash
-soulgate audit tail           # Recent events
-soulgate audit tail --last 20 # Last 20 events
-```
-
-Every file read, write, tool call, and policy decision is recorded to `.soulgate/audit.db`.
-
-### Plugins
-
-```bash
-soulgate plugin list    # List installed plugins
-```
-
-Plugins run in a WASM sandbox and cannot access the OS directly. They declare required permissions in a `manifest.yml`.
-
-## Configuration
-
-Workspace config lives in `.soulgate/config.yml`. Example templates are provided:
-
-- `.soulgate/config.example.yml` - Full configuration reference
-- `.soulgate/policy.example.yml` - Policy rules reference
-- `.soulgate/agents.example.yaml` - Agent configuration reference
-
-### Supported providers
-
-| Provider | Models | Key variable |
-|---|---|---|
-| OpenAI | GPT-4o, GPT-4o-mini, GPT-4-Turbo | `OPENAI_API_KEY` |
-| Anthropic | Claude Opus 4, Sonnet 4, Haiku 4 | `ANTHROPIC_API_KEY` |
-| Groq | Llama 3.3, Mixtral, Gemma 2 | `GROQ_API_KEY` |
-| Google | Gemini 2.0 Flash, 1.5 Pro/Flash | `GOOGLE_API_KEY` |
-| Mistral | Large, Medium, Small | `MISTRAL_API_KEY` |
-| DeepSeek | V3, Coder | `DEEPSEEK_API_KEY` |
-| xAI | Grok 4.1, Grok 3 | `XAI_API_KEY` |
+| Provider | Models | Env Variable |
+|----------|--------|-------------|
+| OpenAI | GPT-4.1, o3 | `OPENAI_API_KEY` |
+| Anthropic | Claude Opus 4, Sonnet 4 | `ANTHROPIC_API_KEY` |
+| Groq | Llama 3.3 70B | `GROQ_API_KEY` |
+| Google | Gemini 2.5 Flash | `GOOGLE_API_KEY` |
+| Mistral | Mistral Large | `MISTRAL_API_KEY` |
+| DeepSeek | DeepSeek Chat | `DEEPSEEK_API_KEY` |
+| xAI | Grok | `XAI_API_KEY` |
+| Ollama | Any local model | (no key needed) |
 | OpenRouter | 100+ models | `OPENROUTER_API_KEY` |
-| Together | Llama 3.1 405B, Qwen 2.5 | `TOGETHER_API_KEY` |
-| Perplexity | Sonar, Sonar Pro | `PERPLEXITY_API_KEY` |
-| Cohere | Command R+, Command R | `COHERE_API_KEY` |
-| Ollama | Any local model | (none, runs locally) |
+| Together | Llama, Mixtral | `TOGETHER_API_KEY` |
+| Perplexity | Sonar | `PERPLEXITY_API_KEY` |
+| Cohere | Command R+ | `COHERE_API_KEY` |
+| Azure | GPT-4.1 | `AZURE_OPENAI_API_KEY` |
 
-Switch models at any time with `/model` in the TUI.
+## CLI Reference
 
-## Security model
+```
+soulgate tui                    # Interactive terminal UI
+soulgate gateway start          # Start gateway (HTTP + WebSocket + Web UI)
+soulgate connector <platform>   # Connect a messaging platform
+soulgate doctor                 # Diagnose configuration
+soulgate reset --scope sessions # Clear conversation history
+soulgate backup                 # Backup config and data
+soulgate daemon start           # Run as background service
+soulgate config show            # View current config
+soulgate sessions export <id>   # Export session to JSON/Markdown/HTML
+soulgate sessions search <q>    # Search across sessions
+soulgate webhook add <name>     # Add inbound webhook
+soulgate skills list            # List available skills
+```
 
-- **Default deny** - operations are denied unless explicitly allowed by policy
-- **Workspace boundaries** - agents cannot access files outside the workspace
-- **Path validation** - traversal attacks (`../../etc/passwd`) are blocked
-- **WASM sandbox** - plugins run in isolation, no direct OS access
-- **Audit trail** - every operation is logged to SQLite
+## Webhooks
+
+Receive events from GitHub, GitLab, or any service:
+
+```bash
+# Add a webhook
+soulgate webhook add github-push --format github --secret my-secret
+
+# GitHub sends to: POST http://your-server:8080/webhook/github-push
+# SoulGate processes the event and can respond via any connected channel
+```
+
+## Security
+
+- **Policy engine** — allow/deny/require-approval rules for every tool
+- **Audit logging** — every operation logged to date-rotated JSONL files
+- **Permission prompts** — interactive approve/deny/learn in the TUI
+- **Workspace boundaries** — file operations scoped to workspace by default
+- **Trust mode** — temporary bypass with auto-expiry (30 min)
 
 ## Development
 
 ```bash
 make build          # Build binary
-make test           # Run all tests
+make test           # Run tests
 make lint           # Format and vet
-make check          # Lint + tests
-make test-coverage  # Coverage report
-```
-
-## Project structure
-
-```
-cmd/soulgate/       CLI entry point and commands
-internal/
-  core/             Orchestrator and session management
-  model/            LLM provider adapters
-  policy/           Policy engine
-  audit/            Audit logging (SQLite)
-  brokers/          Resource brokers (files, net, exec)
-  plugins/          WASM plugin system
-  ui/               Terminal UI (Bubble Tea)
-  skills/           Skills system
-  config/           Configuration management
-plugins/            Plugin manifests
-demo/               Demo workspace
+soulgate doctor     # Check installation
 ```
 
 ## License
