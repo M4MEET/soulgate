@@ -240,8 +240,8 @@ export default function ChatMessage({
         {/* Bubble */}
         <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
           isUser
-            ? 'bg-blue-600 text-white rounded-br-md'
-            : 'bg-zinc-800/80 border border-zinc-700/50 text-zinc-100 rounded-bl-md'
+            ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-br-md shadow-lg shadow-blue-900/20'
+            : 'bg-zinc-800/60 border border-zinc-700/40 text-zinc-100 rounded-bl-md backdrop-blur-sm'
         }`}>
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
@@ -255,11 +255,18 @@ export default function ChatMessage({
                     const code = String(children).replace(/\n$/, '');
                     if (match) {
                       return (
-                        <div className="rounded-lg overflow-hidden my-2 border border-zinc-700/50">
-                          <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800/80">
-                            <span className="font-mono text-xs uppercase tracking-widest text-zinc-500">
-                              {match[1]}
-                            </span>
+                        <div className="rounded-xl overflow-hidden my-3 border border-zinc-700/30 shadow-lg shadow-black/20">
+                          <div className="flex items-center justify-between px-4 py-2 bg-zinc-800/90 border-b border-zinc-700/30">
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-zinc-600/60" />
+                                <span className="w-2.5 h-2.5 rounded-full bg-zinc-600/60" />
+                                <span className="w-2.5 h-2.5 rounded-full bg-zinc-600/60" />
+                              </div>
+                              <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-medium ml-1">
+                                {match[1]}
+                              </span>
+                            </div>
                             <CopyButton text={code} />
                           </div>
                           <SyntaxHighlighter
@@ -267,11 +274,14 @@ export default function ChatMessage({
                             language={match[1]}
                             customStyle={{
                               margin: 0,
-                              borderRadius: '0 0 8px 8px',
-                              fontSize: '12px',
-                              background: '#0d0d18',
-                              padding: '12px',
+                              borderRadius: '0 0 12px 12px',
+                              fontSize: '12.5px',
+                              lineHeight: '1.6',
+                              background: '#0c0c14',
+                              padding: '16px',
                             }}
+                            showLineNumbers={code.split('\n').length > 3}
+                            lineNumberStyle={{ color: '#3f3f46', fontSize: '11px', paddingRight: '12px', minWidth: '2em', userSelect: 'none' }}
                           >
                             {code}
                           </SyntaxHighlighter>
@@ -280,7 +290,7 @@ export default function ChatMessage({
                     }
                     return (
                       <code
-                        className="bg-zinc-900/60 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono"
+                        className="bg-zinc-900/80 text-indigo-300 px-1.5 py-0.5 rounded-md text-[12.5px] font-mono border border-zinc-700/30"
                         {...props}
                       >
                         {children}
