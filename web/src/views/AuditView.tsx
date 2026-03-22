@@ -4,16 +4,29 @@ import { fetchAuditEvents, type AuditEvent } from '../lib/api';
 import { formatRelativeTime, truncate } from '../lib/utils';
 import toast from 'react-hot-toast';
 
+// The API returns event types with dots (e.g. "session.start", "file.read").
+// Map them to display-friendly colors.
 const TYPE_COLORS: Record<string, string> = {
-  file_read:       'text-sky-400 bg-sky-500/10',
-  file_write:      'text-amber-400 bg-amber-500/10',
-  tool_call:       'text-violet-400 bg-violet-500/10',
-  policy_decision: 'text-orange-400 bg-orange-500/10',
-  session_start:   'text-emerald-400 bg-emerald-500/10',
-  session_end:     'text-zinc-400 bg-zinc-700/40',
-  error:           'text-red-400 bg-red-500/10',
-  auth:            'text-pink-400 bg-pink-500/10',
-  default:         'text-zinc-400 bg-zinc-700/40',
+  'session.start':   'text-emerald-400 bg-emerald-500/10',
+  'session.end':     'text-zinc-400 bg-zinc-700/40',
+  'run.start':       'text-blue-400 bg-blue-500/10',
+  'run.complete':    'text-blue-400 bg-blue-500/10',
+  'run.error':       'text-red-400 bg-red-500/10',
+  'model.call':      'text-violet-400 bg-violet-500/10',
+  'model.response':  'text-violet-400 bg-violet-500/10',
+  'model.error':     'text-red-400 bg-red-500/10',
+  'tool.execute':    'text-amber-400 bg-amber-500/10',
+  'tool.success':    'text-emerald-400 bg-emerald-500/10',
+  'tool.error':      'text-red-400 bg-red-500/10',
+  'policy.evaluate': 'text-orange-400 bg-orange-500/10',
+  'policy.allow':    'text-emerald-400 bg-emerald-500/10',
+  'policy.deny':     'text-red-400 bg-red-500/10',
+  'file.read':       'text-sky-400 bg-sky-500/10',
+  'file.write':      'text-amber-400 bg-amber-500/10',
+  'file.list':       'text-sky-400 bg-sky-500/10',
+  'file.delete':     'text-red-400 bg-red-500/10',
+  'exec.command':    'text-amber-400 bg-amber-500/10',
+  'net.request':     'text-cyan-400 bg-cyan-500/10',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -21,22 +34,32 @@ const STATUS_COLORS: Record<string, string> = {
   denied:  'text-red-400',
   error:   'text-red-400',
   pending: 'text-amber-400',
-  default: 'text-zinc-500',
 };
 
-const DEMO_EVENTS: AuditEvent[] = [
-  { id: '1', type: 'session_start',   category: 'session', status: 'success', metadata: { channel: 'web' },           created_at: new Date(Date.now() - 10000).toISOString() },
-  { id: '2', type: 'file_read',       category: 'file',    status: 'success', metadata: { path: './README.md' },      created_at: new Date(Date.now() - 9000).toISOString() },
-  { id: '3', type: 'policy_decision', category: 'policy',  status: 'success', metadata: { action: 'files.read', decision: 'allow' }, created_at: new Date(Date.now() - 8000).toISOString() },
-  { id: '4', type: 'tool_call',       category: 'tool',    status: 'success', metadata: { tool: 'files.list', duration: '12ms' },     created_at: new Date(Date.now() - 6000).toISOString() },
-  { id: '5', type: 'file_write',      category: 'file',    status: 'denied',  metadata: { path: '../etc/passwd' },    created_at: new Date(Date.now() - 4000).toISOString(), session_id: 'abc123' },
-  { id: '6', type: 'policy_decision', category: 'policy',  status: 'denied',  metadata: { action: 'files.write', decision: 'deny', reason: 'path traversal' }, created_at: new Date(Date.now() - 3900).toISOString() },
-  { id: '7', type: 'error',           category: 'system',  status: 'error',   metadata: { message: 'context deadline exceeded' }, created_at: new Date(Date.now() - 1000).toISOString() },
-];
+function getTypeColor(type: string): string {
+  return TYPE_COLORS[type] || 'text-zinc-400 bg-zinc-700/40';
+}
 
-const EVENT_TYPES = ['all', 'file_read', 'file_write', 'tool_call', 'policy_decision', 'session_start', 'session_end', 'error', 'auth'];
-const CATEGORIES = ['all', 'session', 'file', 'policy', 'tool', 'system', 'auth'];
-const STATUSES = ['all', 'success', 'denied', 'error', 'pending'];
+function getStatusColor(status: string): string {
+  return STATUS_COLORS[status] || 'text-zinc-500';
+}
+
+// Format metadata into a readable string
+function formatMetadata(meta: Record<string, unknown> | null | undefined): string {
+  if (!meta || typeof meta !== 'object') return '';
+  const entries = Object.entries(meta);
+  if (entries.length === 0) return '';
+  // Show key=value pairs, truncated
+  return entries
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .join(' ')
+    .slice(0, 120);
+}
+
+// Get the timestamp from an audit event — API may use "timestamp" or "created_at"
+function getEventTime(event: AuditEvent): string {
+  return (event as unknown as Record<string, string>).timestamp || event.created_at || '';
+}
 
 export default function AuditView() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -52,9 +75,10 @@ export default function AuditView() {
   const load = async () => {
     try {
       const data = await fetchAuditEvents(limit);
-      setEvents(data.length > 0 ? data : DEMO_EVENTS);
+      setEvents(data);
     } catch {
       toast.error('Failed to load audit events');
+      setEvents([]);
     } finally {
       setLoading(false);
     }
@@ -71,6 +95,10 @@ export default function AuditView() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [autoRefresh, limit]);
 
+  // Collect unique types from actual data for filter buttons
+  const uniqueTypes = ['all', ...Array.from(new Set(events.map(e => e.type).filter(Boolean)))];
+  const uniqueCategories = ['all', ...Array.from(new Set(events.map(e => e.category).filter(Boolean)))];
+
   const filtered = events.filter(e => {
     if (typeFilter !== 'all' && e.type !== typeFilter) return false;
     if (catFilter !== 'all' && e.category !== catFilter) return false;
@@ -78,14 +106,22 @@ export default function AuditView() {
     if (query) {
       const q = query.toLowerCase();
       return (
-        e.type.includes(q) ||
-        e.category.includes(q) ||
-        (e.session_id || '').includes(q) ||
-        JSON.stringify(e.metadata).toLowerCase().includes(q)
+        (e.type || '').toLowerCase().includes(q) ||
+        (e.category || '').toLowerCase().includes(q) ||
+        (e.session_id || '').toLowerCase().includes(q) ||
+        (e.run_id || '').toLowerCase().includes(q) ||
+        formatMetadata(e.metadata).toLowerCase().includes(q)
       );
     }
     return true;
   });
+
+  const toggleAutoRefresh = () => {
+    setAutoRefresh(prev => {
+      toast.success(!prev ? 'Auto-refresh enabled' : 'Auto-refresh disabled');
+      return !prev;
+    });
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-6 bg-zinc-950" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
@@ -97,7 +133,7 @@ export default function AuditView() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => { setAutoRefresh(a => !a); toast(autoRefresh ? 'Auto-refresh off' : 'Auto-refresh on', 'info' as never); }}
+            onClick={toggleAutoRefresh}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
               autoRefresh
                 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
@@ -124,7 +160,7 @@ export default function AuditView() {
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search events…"
+            placeholder="Search events..."
             className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-zinc-800/60 border border-zinc-700/50 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60"
           />
         </div>
@@ -133,7 +169,7 @@ export default function AuditView() {
           <div className="flex items-center gap-2">
             <span className="text-xs text-zinc-600">Type:</span>
             <div className="flex gap-1 flex-wrap">
-              {EVENT_TYPES.map(t => (
+              {uniqueTypes.slice(0, 12).map(t => (
                 <button
                   key={t}
                   onClick={() => setTypeFilter(t)}
@@ -141,7 +177,7 @@ export default function AuditView() {
                     typeFilter === t ? 'bg-indigo-500/15 text-indigo-400' : 'text-zinc-600 hover:text-zinc-400'
                   }`}
                 >
-                  {t}
+                  {t === 'all' ? 'all' : t.replace(/\./g, ' ')}
                 </button>
               ))}
             </div>
@@ -156,7 +192,7 @@ export default function AuditView() {
               onChange={e => setCatFilter(e.target.value)}
               className="px-2 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/60"
             >
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -166,7 +202,7 @@ export default function AuditView() {
               onChange={e => setStatusFilter(e.target.value)}
               className="px-2 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/60"
             >
-              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              {['all', 'success', 'denied', 'error'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -185,48 +221,56 @@ export default function AuditView() {
       {/* Events table */}
       <div className="rounded-xl border border-zinc-700/40 overflow-hidden">
         {loading ? (
-          <div className="flex items-center gap-2 text-zinc-500 p-6"><Activity size={16} className="animate-spin" />Loading…</div>
+          <div className="flex items-center gap-2 text-zinc-500 p-6"><Activity size={16} className="animate-spin" /> Loading...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center text-zinc-500 text-sm py-12">
+            {events.length === 0 ? 'No audit events yet. Events appear as you use SoulGate.' : 'No events match filters.'}
+          </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-700/50 bg-zinc-800/60">
-                <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Time</th>
-                <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Type</th>
-                <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Category</th>
-                <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Session</th>
-                <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={6} className="text-center text-zinc-500 text-sm py-8">No events match filters</td></tr>
-              ) : (
-                filtered.map(event => {
-                  const typeColor = TYPE_COLORS[event.type] || TYPE_COLORS.default;
-                  const statusColor = STATUS_COLORS[event.status] || STATUS_COLORS.default;
-                  return (
-                    <tr key={event.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
-                      <td className="px-4 py-2.5 text-xs text-zinc-600 whitespace-nowrap">{formatRelativeTime(event.created_at)}</td>
-                      <td className="px-4 py-2.5">
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${typeColor}`}>{event.type}</span>
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-zinc-500">{event.category}</td>
-                      <td className={`px-4 py-2.5 text-xs font-medium ${statusColor}`}>{event.status}</td>
-                      <td className="px-4 py-2.5">
-                        {event.session_id && (
-                          <span className="font-mono text-xs text-zinc-600">{event.session_id.slice(0, 8)}…</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-zinc-500 font-mono max-w-xs truncate">
-                        {truncate(JSON.stringify(event.metadata), 80)}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-700/50 bg-zinc-800/60">
+                  <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide w-24">Time</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Type</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide w-20">Category</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide w-20">Status</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide w-24">Session</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-zinc-500 font-medium uppercase tracking-wide">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((event, idx) => (
+                  <tr key={event.id || idx} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
+                    <td className="px-4 py-2.5 text-xs text-zinc-600 whitespace-nowrap">
+                      {getEventTime(event) ? formatRelativeTime(getEventTime(event)) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${getTypeColor(event.type)}`}>
+                        {(event.type || '').replace(/\./g, ' ')}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-zinc-500">{event.category || '—'}</td>
+                    <td className={`px-4 py-2.5 text-xs font-medium ${getStatusColor(event.status)}`}>
+                      {event.status || '—'}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {event.session_id ? (
+                        <span className="font-mono text-xs text-zinc-600">{event.session_id.slice(0, 12)}...</span>
+                      ) : (
+                        <span className="text-xs text-zinc-700">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-zinc-500 font-mono max-w-xs">
+                      <span title={JSON.stringify(event.metadata)}>
+                        {truncate(formatMetadata(event.metadata), 80) || '—'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

@@ -65,6 +65,7 @@ export interface AuditEvent {
   status: string;
   metadata: Record<string, unknown>;
   created_at: string;
+  timestamp?: string; // API may return "timestamp" instead of "created_at"
 }
 
 export interface CostData {
