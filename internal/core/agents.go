@@ -4,12 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/model"
 )
+
+// agentContextKey is the context key for the currently-executing agent ID.
+type agentContextKey struct{}
+
+// withAgentID stores the agent ID in the context so that tool dispatch can
+// determine which agent is making the call (used by agent_delegate and
+// agent_message).
+func withAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, agentContextKey{}, agentID)
+}
+
+// agentIDFromContext retrieves the agent ID from context. Returns empty string
+// when the call originates from the top-level orchestrator loop.
+func agentIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(agentContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // AgentStatus represents the current state of a background agent
 type AgentStatus string
@@ -21,17 +41,106 @@ const (
 	AgentStopped   AgentStatus = "stopped"
 )
 
+// AgentRole represents the specialization of a background agent
+type AgentRole string
+
+const (
+	AgentRoleGeneral  AgentRole = "general"
+	AgentRoleCoder    AgentRole = "coder"
+	AgentRoleResearch AgentRole = "research"
+	AgentRoleOps      AgentRole = "ops"
+)
+
+// agentRoleDescriptions maps each role to a short directive for the system prompt.
+var agentRoleDescriptions = map[AgentRole]string{
+	AgentRoleGeneral:  "You are a general-purpose agent. Complete any task assigned to you.",
+	AgentRoleCoder:    "You are a specialist coding agent. Focus on writing, reviewing, and debugging code. Prefer precise, idiomatic code with clear explanations.",
+	AgentRoleResearch: "You are a specialist research agent. Focus on gathering, summarising, and synthesising information. Cite sources and provide concise findings.",
+	AgentRoleOps:      "You are a specialist operations agent. Focus on system administration, infrastructure, automation, and monitoring tasks.",
+}
+
+// agentRoleCapabilities maps each role to the tool names it may use.
+// An empty slice means the role inherits the full filtered tool set.
+var agentRoleCapabilities = map[AgentRole][]string{
+	AgentRoleGeneral:  {}, // unrestricted
+	AgentRoleCoder:    {"files_read", "files_write", "files_list", "files_delete", "exec_command", "apply_patch", "process_start", "process_list", "process_poll", "process_log", "process_kill"},
+	AgentRoleResearch: {"web_search", "web_fetch", "files_read", "files_write", "files_list", "net_request", "memory_write", "memory_get", "memory_search"},
+	AgentRoleOps:      {"exec_command", "files_read", "files_write", "files_list", "files_delete", "net_request", "process_start", "process_list", "process_poll", "process_log", "process_write", "process_kill"},
+}
+
+// AgentMessage is a message queued from one agent to another.
+type AgentMessage struct {
+	FromID    string    `json:"from_id"`
+	FromName  string    `json:"from_name"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// AgentLogEntry represents a single activity log line from a background agent.
+type AgentLogEntry struct {
+	Time    time.Time `json:"time"`
+	Kind    string    `json:"kind"` // "iteration", "model_call", "model_done", "tool_start", "tool_done", "text"
+	Message string    `json:"message"`
+}
+
 // BackgroundAgent represents a task-specific agent running in the background
 type BackgroundAgent struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Task        string      `json:"task"`
-	Status      AgentStatus `json:"status"`
-	CreatedAt   time.Time   `json:"created_at"`
-	CompletedAt *time.Time  `json:"completed_at,omitempty"`
-	Result      string      `json:"result,omitempty"`
-	Error       string      `json:"error,omitempty"`
-	cancel      context.CancelFunc
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Task         string        `json:"task"`
+	Status       AgentStatus   `json:"status"`
+	Role         AgentRole     `json:"role"`
+	Capabilities []string      `json:"capabilities,omitempty"`
+	ParentID     string        `json:"parent_id,omitempty"`
+	ChildIDs     []string      `json:"child_ids,omitempty"`
+	CreatedAt    time.Time     `json:"created_at"`
+	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
+	Result       string        `json:"result,omitempty"`
+	Error        string        `json:"error,omitempty"`
+	cancel       context.CancelFunc
+	logMu        sync.RWMutex
+	activityLog  []AgentLogEntry // ring buffer, max 200 entries
+	msgMu        sync.Mutex
+	inbox        []AgentMessage // pending messages from other agents
+}
+
+const maxAgentLogEntries = 200
+
+// AppendLog adds an entry to the agent's activity log (thread-safe).
+func (a *BackgroundAgent) AppendLog(kind, message string) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.activityLog = append(a.activityLog, AgentLogEntry{
+		Time:    time.Now(),
+		Kind:    kind,
+		Message: message,
+	})
+	if len(a.activityLog) > maxAgentLogEntries {
+		a.activityLog = a.activityLog[len(a.activityLog)-maxAgentLogEntries:]
+	}
+}
+
+// GetLog returns a snapshot of the agent's activity log (thread-safe).
+func (a *BackgroundAgent) GetLog() []AgentLogEntry {
+	a.logMu.RLock()
+	defer a.logMu.RUnlock()
+	out := make([]AgentLogEntry, len(a.activityLog))
+	copy(out, a.activityLog)
+	return out
+}
+
+// GetLogTail returns the last n entries of the agent's activity log.
+func (a *BackgroundAgent) GetLogTail(n int) []AgentLogEntry {
+	a.logMu.RLock()
+	defer a.logMu.RUnlock()
+	if n >= len(a.activityLog) {
+		out := make([]AgentLogEntry, len(a.activityLog))
+		copy(out, a.activityLog)
+		return out
+	}
+	out := make([]AgentLogEntry, n)
+	copy(out, a.activityLog[len(a.activityLog)-n:])
+	return out
 }
 
 // AgentManager tracks and manages background agents
@@ -48,20 +157,37 @@ func NewAgentManager() *AgentManager {
 	}
 }
 
-// Create spawns a new background agent that runs the given task
-func (am *AgentManager) Create(orch *Orchestrator, name, task string) *BackgroundAgent {
+// Create spawns a new background agent that runs the given task.
+// role selects the agent's specialisation; parentID links it to the spawning agent.
+func (am *AgentManager) Create(orch *Orchestrator, name, task string, role AgentRole, parentID string) *BackgroundAgent {
+	if role == "" {
+		role = AgentRoleGeneral
+	}
+
+	caps := agentRoleCapabilities[role]
+
 	am.mu.Lock()
 	am.nextID++
 	id := fmt.Sprintf("agent_%d", am.nextID)
 
 	agent := &BackgroundAgent{
-		ID:        id,
-		Name:      name,
-		Task:      task,
-		Status:    AgentRunning,
-		CreatedAt: time.Now().UTC(),
+		ID:           id,
+		Name:         name,
+		Task:         task,
+		Status:       AgentRunning,
+		Role:         role,
+		Capabilities: caps,
+		ParentID:     parentID,
+		CreatedAt:    time.Now().UTC(),
 	}
 	am.agents[id] = agent
+
+	// Register this agent as a child of its parent
+	if parentID != "" {
+		if parent, ok := am.agents[parentID]; ok {
+			parent.ChildIDs = append(parent.ChildIDs, id)
+		}
+	}
 	am.mu.Unlock()
 
 	// Run the agent in a goroutine
@@ -73,16 +199,150 @@ func (am *AgentManager) Create(orch *Orchestrator, name, task string) *Backgroun
 	return agent
 }
 
+// Delegate spawns a sub-agent from a parent. If wait is true it blocks until
+// the sub-agent finishes and returns its result; otherwise it returns immediately
+// with the new agent ID.
+func (am *AgentManager) Delegate(orch *Orchestrator, parentID, task string, role AgentRole, wait bool) (agentID string, result string, err error) {
+	// Derive a name from the task (first 40 chars)
+	name := task
+	if len(name) > 40 {
+		name = name[:40]
+	}
+
+	agent := am.Create(orch, name, task, role, parentID)
+
+	if !wait {
+		return agent.ID, "", nil
+	}
+
+	// Poll until the agent is done; respect context cancellation via the agent's own timeout.
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		am.mu.RLock()
+		status := agent.Status
+		agentResult := agent.Result
+		agentErr := agent.Error
+		am.mu.RUnlock()
+
+		switch status {
+		case AgentCompleted:
+			return agent.ID, agentResult, nil
+		case AgentFailed:
+			return agent.ID, "", fmt.Errorf("delegated agent failed: %s", agentErr)
+		case AgentStopped:
+			return agent.ID, "", fmt.Errorf("delegated agent was stopped before completing")
+		}
+	}
+	return agent.ID, "", fmt.Errorf("delegate polling loop exited unexpectedly")
+}
+
+// SendMessage queues a message to a target agent's inbox.
+// fromID may be "orchestrator" (the top-level run) or a registered agent ID.
+func (am *AgentManager) SendMessage(fromID, toID, message string) error {
+	am.mu.RLock()
+	from, fromIsAgent := am.agents[fromID]
+	to, toOK := am.agents[toID]
+	am.mu.RUnlock()
+
+	if !toOK {
+		return fmt.Errorf("recipient agent not found: %s", toID)
+	}
+
+	fromName := fromID // default: use the ID as display name
+	if fromIsAgent {
+		fromName = from.Name
+	}
+
+	msg := AgentMessage{
+		FromID:    fromID,
+		FromName:  fromName,
+		Message:   message,
+		Timestamp: time.Now().UTC(),
+	}
+
+	to.msgMu.Lock()
+	to.inbox = append(to.inbox, msg)
+	to.msgMu.Unlock()
+	return nil
+}
+
+// drainInbox atomically returns and clears the agent's inbox.
+func (a *BackgroundAgent) drainInbox() []AgentMessage {
+	a.msgMu.Lock()
+	defer a.msgMu.Unlock()
+	if len(a.inbox) == 0 {
+		return nil
+	}
+	msgs := make([]AgentMessage, len(a.inbox))
+	copy(msgs, a.inbox)
+	a.inbox = a.inbox[:0]
+	return msgs
+}
+
+// SelectBestAgent returns the running agent whose role best matches the task,
+// or nil if no suitable running agent exists.
+func (am *AgentManager) SelectBestAgent(task string) *BackgroundAgent {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	taskLower := strings.ToLower(task)
+
+	// Role relevance heuristics: keywords that hint at a role
+	roleKeywords := map[AgentRole][]string{
+		AgentRoleCoder:    {"code", "implement", "fix", "refactor", "debug", "function", "class", "test", "build", "compile"},
+		AgentRoleResearch: {"research", "find", "search", "look up", "summarise", "summarize", "fetch", "web", "url", "news"},
+		AgentRoleOps:      {"deploy", "run", "execute", "server", "process", "monitor", "restart", "install", "configure", "ops"},
+	}
+
+	// Score each running agent
+	bestScore := -1
+	var bestAgent *BackgroundAgent
+	for _, a := range am.agents {
+		if a.Status != AgentRunning {
+			continue
+		}
+		score := 0
+		if keywords, ok := roleKeywords[a.Role]; ok {
+			for _, kw := range keywords {
+				if strings.Contains(taskLower, kw) {
+					score++
+				}
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+			bestAgent = a
+		}
+	}
+
+	if bestScore <= 0 {
+		return nil // No sufficiently relevant agent found
+	}
+	return bestAgent
+}
+
 // runAgent executes the agent's task using its own agentic loop
 func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent *BackgroundAgent) {
 	defer agent.cancel()
 
-	// Build agent-specific prompt
+	// Build role directive
+	roleDirective := agentRoleDescriptions[agent.Role]
+	if roleDirective == "" {
+		roleDirective = agentRoleDescriptions[AgentRoleGeneral]
+	}
+
+	// Build agent-specific prompt (include parent context if delegated)
+	parentClause := ""
+	if agent.ParentID != "" {
+		parentClause = fmt.Sprintf(" You were delegated this task by agent '%s'.", agent.ParentID)
+	}
+
 	agentPrompt := fmt.Sprintf(
-		"You are a background agent named '%s'. Your specific task is:\n\n%s\n\n"+
+		"%s%s\n\nYour name is '%s' and your specific task is:\n\n%s\n\n"+
 			"Complete this task thoroughly, then provide a clear summary of what you did and the results. "+
 			"Be concise but complete.",
-		agent.Name, agent.Task,
+		roleDirective, parentClause, agent.Name, agent.Task,
 	)
 
 	// Create a dedicated run for this agent
@@ -97,8 +357,11 @@ func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent 
 		WithMetadata("agent_name", agent.Name).
 		WithMetadata("task", agent.Task))
 
+	// Attach agent ID to context so tool dispatch can route inter-agent calls
+	ctx = withAgentID(ctx, agent.ID)
+
 	// Execute the agentic loop
-	response, err := orch.executeAgentLoop(ctx, agentPrompt, run.ID)
+	response, err := orch.executeAgentLoop(ctx, agentPrompt, run.ID, agent)
 
 	am.mu.Lock()
 	now := time.Now().UTC()
@@ -169,7 +432,8 @@ func (am *AgentManager) Stop(id string) error {
 
 // executeAgentLoop is like executeAgenticLoop but for background agents.
 // It shares the orchestrator's brokers and providers but uses a separate conversation.
-func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runID string) (string, error) {
+// The agent parameter receives live activity log entries.
+func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runID string, agent *BackgroundAgent) (string, error) {
 	defaults := DefaultExecutionLimits()
 	limits := ExecutionLimits{
 		MaxIterations:     defaults.MaxIterations,
@@ -187,12 +451,39 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 
 	tools := o.getToolSchemas()
 
-	// Filter out agent tools to prevent recursive agent creation
+	// Build the set of tools disallowed for sub-agents
+	topLevelAgentTools := map[string]bool{
+		"agent_create": true,
+		"agent_list":   true,
+		"agent_stop":   true,
+	}
+	// Sub-agents get agent_delegate and agent_message but not top-level creation
+	// Top-level agents (no parent) keep all agent tools
+	isSubAgent := agent.ParentID != ""
+
+	// Build capability allow-set (nil means allow all)
+	var capSet map[string]bool
+	if len(agent.Capabilities) > 0 {
+		capSet = make(map[string]bool, len(agent.Capabilities))
+		for _, c := range agent.Capabilities {
+			capSet[c] = true
+		}
+		// Sub-agents always get inter-agent communication tools
+		capSet["agent_delegate"] = true
+		capSet["agent_message"] = true
+	}
+
 	filtered := make([]model.ToolSchema, 0, len(tools))
 	for _, t := range tools {
-		if t.Name != "agent_create" && t.Name != "agent_list" && t.Name != "agent_stop" {
-			filtered = append(filtered, t)
+		// Sub-agents cannot spawn top-level agents
+		if isSubAgent && topLevelAgentTools[t.Name] {
+			continue
 		}
+		// Apply capability filter if set
+		if capSet != nil && !capSet[t.Name] {
+			continue
+		}
+		filtered = append(filtered, t)
 	}
 	tools = filtered
 
@@ -209,6 +500,22 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 			return "", err
 		}
 
+		agent.AppendLog("iteration", fmt.Sprintf("iteration %d", tracker.iterations))
+
+		// Inject any pending inbox messages as a user message so the model
+		// can react to inter-agent communication before calling the API.
+		if inboxMsgs := agent.drainInbox(); len(inboxMsgs) > 0 {
+			var sb strings.Builder
+			sb.WriteString("[Agent inbox — messages received from other agents]\n")
+			for _, m := range inboxMsgs {
+				sb.WriteString(fmt.Sprintf("From %s (%s): %s\n", m.FromName, m.FromID, m.Message))
+			}
+			messages = append(messages, model.Message{
+				Role:    model.RoleUser,
+				Content: sb.String(),
+			})
+		}
+
 		req := model.CompletionRequest{
 			Messages:    messages,
 			Tools:       tools,
@@ -217,12 +524,22 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 			System:      systemPrompt,
 		}
 
-		apiCtx, apiCancel := tracker.APICallContext(ctx)
-		resp, err := o.provider.Complete(apiCtx, req)
-		apiCancel()
+		agent.AppendLog("model_call", fmt.Sprintf("calling %s...", o.provider.Name()))
+
+		modelStart := time.Now()
+		resp, err := o.callModelWithRetry(ctx, tracker, req)
 		if err != nil {
+			agent.AppendLog("error", fmt.Sprintf("model error: %v", err))
 			return "", fmt.Errorf("model provider error: %w", err)
 		}
+
+		modelDur := time.Since(modelStart).Round(time.Millisecond)
+		modelName := resp.Model
+		if modelName == "" {
+			modelName = o.provider.Name()
+		}
+		agent.AppendLog("model_done", fmt.Sprintf("%s responded (%s, %d tok, %s)",
+			modelName, resp.StopReason, resp.Usage.TotalTokens, modelDur))
 
 		if err := tracker.AddTokens(resp.Usage.TotalTokens); err != nil {
 			return "", err
@@ -234,12 +551,41 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 		}
 		messages = append(messages, assistantMsg)
 
+		// Log assistant text (truncated) so viewers can see what the agent is thinking
+		if resp.Message.Content != "" {
+			text := resp.Message.Content
+			if len(text) > 200 {
+				text = text[:200] + "..."
+			}
+			agent.AppendLog("text", text)
+		}
+
 		if resp.StopReason == model.StopReasonEndTurn || resp.StopReason == model.StopReasonMaxTokens {
+			agent.AppendLog("text", "agent finished")
 			return resp.Message.Content, nil
 		}
 
 		if resp.StopReason == model.StopReasonToolUse && len(resp.ToolCalls) > 0 {
+			// Log each tool call
+			for _, tc := range resp.ToolCalls {
+				argsSummary := string(tc.Input)
+				if len(argsSummary) > 120 {
+					argsSummary = argsSummary[:120] + "..."
+				}
+				agent.AppendLog("tool_start", fmt.Sprintf("%s %s", tc.Name, argsSummary))
+			}
+
 			toolResults := o.executeToolCallsParallel(ctx, runID, tracker, resp.ToolCalls)
+
+			// Log tool results
+			for _, msg := range toolResults {
+				result := msg.Content
+				if len(result) > 200 {
+					result = result[:200] + "..."
+				}
+				agent.AppendLog("tool_done", fmt.Sprintf("%s → %s", msg.Name, result))
+			}
+
 			messages = append(messages, toolResults...)
 			continue
 		}
@@ -253,6 +599,7 @@ func (o *Orchestrator) handleAgentCreate(ctx context.Context, input json.RawMess
 	var params struct {
 		Name string `json:"name"`
 		Task string `json:"task"`
+		Role string `json:"role"`
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
 		return "", fmt.Errorf("invalid tool input: %w", err)
@@ -265,13 +612,100 @@ func (o *Orchestrator) handleAgentCreate(ctx context.Context, input json.RawMess
 		return "", fmt.Errorf("agent task is required")
 	}
 
-	agent := o.agentManager.Create(o, params.Name, params.Task)
+	role := AgentRole(params.Role)
+	if role == "" {
+		role = AgentRoleGeneral
+	}
+
+	agent := o.agentManager.Create(o, params.Name, params.Task, role, "")
 
 	result, _ := json.Marshal(map[string]string{
 		"status":  "created",
 		"id":      agent.ID,
 		"name":    agent.Name,
-		"message": fmt.Sprintf("Agent '%s' created and running in background. Use agent_list to check status or agent_stop to cancel.", agent.Name),
+		"role":    string(agent.Role),
+		"message": fmt.Sprintf("Agent '%s' (role: %s) created and running in background. Use agent_list to check status or agent_stop to cancel.", agent.Name, agent.Role),
+	})
+	return string(result), nil
+}
+
+// handleAgentDelegate handles the agent_delegate tool call.
+// It spawns a sub-agent. If wait=true it blocks until the sub-agent finishes.
+// The caller's agent ID is resolved from the request context.
+func (o *Orchestrator) handleAgentDelegate(ctx context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Task string `json:"task"`
+		Role string `json:"role"`
+		Wait bool   `json:"wait"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid tool input: %w", err)
+	}
+	if params.Task == "" {
+		return "", fmt.Errorf("task is required")
+	}
+
+	role := AgentRole(params.Role)
+	if role == "" {
+		role = AgentRoleGeneral
+	}
+
+	// The caller may be an agent or the top-level orchestrator loop
+	callerID := agentIDFromContext(ctx)
+
+	subAgentID, agentResult, err := o.agentManager.Delegate(o, callerID, params.Task, role, params.Wait)
+	if err != nil {
+		return "", fmt.Errorf("delegation failed: %w", err)
+	}
+
+	if params.Wait {
+		result, _ := json.Marshal(map[string]string{
+			"status":   "completed",
+			"agent_id": subAgentID,
+			"result":   agentResult,
+		})
+		return string(result), nil
+	}
+
+	result, _ := json.Marshal(map[string]string{
+		"status":   "delegated",
+		"agent_id": subAgentID,
+		"message":  fmt.Sprintf("Sub-agent %s started in background. Use agent_list to monitor.", subAgentID),
+	})
+	return string(result), nil
+}
+
+// handleAgentMessage handles the agent_message tool call.
+// The caller's agent ID is resolved from the request context.
+func (o *Orchestrator) handleAgentMessage(ctx context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		AgentID string `json:"agent_id"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid tool input: %w", err)
+	}
+	if params.AgentID == "" {
+		return "", fmt.Errorf("agent_id is required")
+	}
+	if params.Message == "" {
+		return "", fmt.Errorf("message is required")
+	}
+
+	callerID := agentIDFromContext(ctx)
+	if callerID == "" {
+		// Called from the top-level orchestrator; use a placeholder sender
+		callerID = "orchestrator"
+	}
+
+	if err := o.agentManager.SendMessage(callerID, params.AgentID, params.Message); err != nil {
+		return "", err
+	}
+
+	result, _ := json.Marshal(map[string]string{
+		"status":  "sent",
+		"to":      params.AgentID,
+		"message": "Message delivered to agent's inbox",
 	})
 	return string(result), nil
 }
@@ -285,24 +719,32 @@ func (o *Orchestrator) handleAgentList(ctx context.Context, input json.RawMessag
 	}
 
 	type agentInfo struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Task        string `json:"task"`
-		Status      string `json:"status"`
-		CreatedAt   string `json:"created_at"`
-		CompletedAt string `json:"completed_at,omitempty"`
-		Result      string `json:"result,omitempty"`
-		Error       string `json:"error,omitempty"`
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Task         string   `json:"task"`
+		Status       string   `json:"status"`
+		Role         string   `json:"role"`
+		Capabilities []string `json:"capabilities,omitempty"`
+		ParentID     string   `json:"parent_id,omitempty"`
+		ChildIDs     []string `json:"child_ids,omitempty"`
+		CreatedAt    string   `json:"created_at"`
+		CompletedAt  string   `json:"completed_at,omitempty"`
+		Result       string   `json:"result,omitempty"`
+		Error        string   `json:"error,omitempty"`
 	}
 
 	infos := make([]agentInfo, 0, len(agents))
 	for _, a := range agents {
 		info := agentInfo{
-			ID:        a.ID,
-			Name:      a.Name,
-			Task:      a.Task,
-			Status:    string(a.Status),
-			CreatedAt: a.CreatedAt.Format(time.RFC3339),
+			ID:           a.ID,
+			Name:         a.Name,
+			Task:         a.Task,
+			Status:       string(a.Status),
+			Role:         string(a.Role),
+			Capabilities: a.Capabilities,
+			ParentID:     a.ParentID,
+			ChildIDs:     a.ChildIDs,
+			CreatedAt:    a.CreatedAt.Format(time.RFC3339),
 		}
 		if a.CompletedAt != nil {
 			info.CompletedAt = a.CompletedAt.Format(time.RFC3339)

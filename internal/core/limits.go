@@ -27,15 +27,16 @@ type ExecutionLimits struct {
 	MaxToolResultSize int
 }
 
-// DefaultExecutionLimits returns sensible defaults
+// DefaultExecutionLimits returns defaults with no artificial caps.
+// The agentic loop runs until the model is done or the context is cancelled.
 func DefaultExecutionLimits() ExecutionLimits {
 	return ExecutionLimits{
-		MaxIterations:     10,
-		TotalTimeout:      5 * time.Minute,
-		IterationTimeout:  60 * time.Second,
-		APICallTimeout:    30 * time.Second,
-		MaxTokens:         100000,      // ~$1 with GPT-4
-		MaxToolResultSize: 1024 * 1024, // 1MB
+		MaxIterations:     0,                // 0 = unlimited
+		TotalTimeout:      0,                // 0 = no timeout
+		IterationTimeout:  0,                // 0 = no timeout
+		APICallTimeout:    0,                // 0 = no timeout
+		MaxTokens:         0,                // 0 = unlimited
+		MaxToolResultSize: 10 * 1024 * 1024, // 10MB
 	}
 }
 
@@ -61,7 +62,7 @@ func (t *ExecutionTracker) BeginIteration() error {
 	t.iterations++
 	t.lastIterationStart = time.Now()
 
-	if t.iterations > t.limits.MaxIterations {
+	if t.limits.MaxIterations > 0 && t.iterations > t.limits.MaxIterations {
 		return &LimitExceededError{
 			Limit: "max_iterations",
 			Value: t.iterations,
@@ -69,12 +70,14 @@ func (t *ExecutionTracker) BeginIteration() error {
 		}
 	}
 
-	elapsed := time.Since(t.startTime)
-	if elapsed > t.limits.TotalTimeout {
-		return &LimitExceededError{
-			Limit: "total_timeout",
-			Value: int(elapsed.Seconds()),
-			Max:   int(t.limits.TotalTimeout.Seconds()),
+	if t.limits.TotalTimeout > 0 {
+		elapsed := time.Since(t.startTime)
+		if elapsed > t.limits.TotalTimeout {
+			return &LimitExceededError{
+				Limit: "total_timeout",
+				Value: int(elapsed.Seconds()),
+				Max:   int(t.limits.TotalTimeout.Seconds()),
+			}
 		}
 	}
 
@@ -85,7 +88,7 @@ func (t *ExecutionTracker) BeginIteration() error {
 func (t *ExecutionTracker) AddTokens(tokens int) error {
 	t.tokensUsed += tokens
 
-	if t.tokensUsed > t.limits.MaxTokens {
+	if t.limits.MaxTokens > 0 && t.tokensUsed > t.limits.MaxTokens {
 		return &LimitExceededError{
 			Limit: "max_tokens",
 			Value: t.tokensUsed,
@@ -111,12 +114,18 @@ func (t *ExecutionTracker) ValidateToolResultSize(result string) error {
 
 // IterationContext creates a context with iteration timeout
 func (t *ExecutionTracker) IterationContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, t.limits.IterationTimeout)
+	if t.limits.IterationTimeout > 0 {
+		return context.WithTimeout(parent, t.limits.IterationTimeout)
+	}
+	return context.WithCancel(parent)
 }
 
 // APICallContext creates a context with API call timeout
 func (t *ExecutionTracker) APICallContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, t.limits.APICallTimeout)
+	if t.limits.APICallTimeout > 0 {
+		return context.WithTimeout(parent, t.limits.APICallTimeout)
+	}
+	return context.WithCancel(parent)
 }
 
 // Stats returns current execution statistics

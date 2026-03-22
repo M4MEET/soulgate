@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/M4MEET/soulgate/internal/httpclient"
 	"github.com/M4MEET/soulgate/internal/model"
@@ -27,12 +26,13 @@ func NewProvider(apiKey, modelName, baseURL string) *Provider {
 		baseURL = "https://api.anthropic.com/v1"
 	}
 	if modelName == "" {
-		modelName = "claude-3-5-sonnet-20241022"
+		modelName = "claude-sonnet-4-20250514"
 	}
 
-	// Create secure HTTP client
+	// Create secure HTTP client with no timeouts (context handles cancellation)
 	secureConfig := httpclient.DefaultSecureConfig()
-	secureConfig.TotalTimeout = 90 * time.Second
+	secureConfig.TotalTimeout = 0
+	secureConfig.ResponseTimeout = 0
 	secureConfig.UserAgent = "SoulGate-Anthropic/0.1"
 
 	return &Provider{
@@ -96,6 +96,8 @@ func (p *Provider) Complete(ctx context.Context, req model.CompletionRequest) (*
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	// Enable prompt caching — reduces input token cost by 90% on cache hits
+	httpReq.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 
 	// Send request
 	resp, err := p.client.Do(httpReq)
@@ -124,56 +126,127 @@ func (p *Provider) Complete(ctx context.Context, req model.CompletionRequest) (*
 	return p.convertResponse(anthropicResp), nil
 }
 
-// convertRequest converts common format to Anthropic format
+// convertRequest converts common format to Anthropic format.
+// Anthropic requires strict alternation between user and assistant roles,
+// and tool results must be grouped into a single user message.
 func (p *Provider) convertRequest(req model.CompletionRequest) anthropicRequest {
 	anthropicReq := anthropicRequest{
 		Model:       p.model,
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
-		System:      req.System,
 		Messages:    make([]anthropicMessage, 0),
 	}
 
-	// Convert messages
+	// Build system as a content block array with cache_control so Anthropic
+	// can cache the (typically large, rarely changing) system prompt.
+	if req.System != "" {
+		anthropicReq.System = []anthropicSystemBlock{
+			{
+				Type:         "text",
+				Text:         req.System,
+				CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+			},
+		}
+	}
+
+	// Convert messages, grouping consecutive tool results and enforcing alternation.
 	for _, msg := range req.Messages {
-		anthropicMsg := anthropicMessage{
-			Role:    msg.Role,
-			Content: make([]anthropicContent, 0),
-		}
-
-		// Add text content
-		if msg.Content != "" {
-			anthropicMsg.Content = append(anthropicMsg.Content, anthropicContent{
-				Type: "text",
-				Text: msg.Content,
-			})
-		}
-
-		// Add tool result content
-		if msg.Role == model.RoleTool {
-			anthropicMsg.Role = "user" // Tool results go in user messages
-			anthropicMsg.Content = append(anthropicMsg.Content, anthropicContent{
+		switch msg.Role {
+		case model.RoleTool:
+			// Tool results become user messages with tool_result content blocks.
+			// If the last message is already a user message (from a prior tool result),
+			// merge into it to satisfy Anthropic's alternation requirement.
+			toolContent := anthropicContent{
 				Type:      "tool_result",
 				ToolUseID: msg.ToolCallID,
 				Content:   msg.Content,
-			})
-		}
+			}
 
-		anthropicReq.Messages = append(anthropicReq.Messages, anthropicMsg)
+			n := len(anthropicReq.Messages)
+			if n > 0 && anthropicReq.Messages[n-1].Role == "user" {
+				anthropicReq.Messages[n-1].Content = append(
+					anthropicReq.Messages[n-1].Content, toolContent)
+			} else {
+				anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
+					Role:    "user",
+					Content: []anthropicContent{toolContent},
+				})
+			}
+
+		case model.RoleAssistant:
+			content := make([]anthropicContent, 0)
+			if msg.Content != "" {
+				content = append(content, anthropicContent{
+					Type: "text",
+					Text: msg.Content,
+				})
+			}
+			// Add tool_use blocks for tool calls
+			for _, tc := range msg.ToolCalls {
+				content = append(content, anthropicContent{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Name,
+					Input: tc.Input,
+				})
+			}
+			if len(content) == 0 {
+				// Anthropic requires non-empty content
+				content = append(content, anthropicContent{Type: "text", Text: " "})
+			}
+
+			// Merge consecutive assistant messages (shouldn't happen, but be safe)
+			n := len(anthropicReq.Messages)
+			if n > 0 && anthropicReq.Messages[n-1].Role == "assistant" {
+				anthropicReq.Messages[n-1].Content = append(
+					anthropicReq.Messages[n-1].Content, content...)
+			} else {
+				anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
+					Role:    "assistant",
+					Content: content,
+				})
+			}
+
+		case model.RoleUser:
+			content := []anthropicContent{{Type: "text", Text: msg.Content}}
+
+			// Merge consecutive user messages
+			n := len(anthropicReq.Messages)
+			if n > 0 && anthropicReq.Messages[n-1].Role == "user" {
+				anthropicReq.Messages[n-1].Content = append(
+					anthropicReq.Messages[n-1].Content, content...)
+			} else {
+				anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
+					Role:    "user",
+					Content: content,
+				})
+			}
+
+		case model.RoleSystem:
+			// Skip system messages — they go in the system field, not messages
+			continue
+		}
 	}
 
-	// Convert tool schemas
+	// Convert tool schemas.
+	// Cache control is placed on the LAST tool so the entire tool list is cached
+	// as a single cache entry — the cache boundary is set at that position.
 	if len(req.Tools) > 0 {
 		anthropicReq.Tools = make([]anthropicTool, len(req.Tools))
+		last := len(req.Tools) - 1
 		for i, tool := range req.Tools {
 			var schema map[string]interface{}
 			json.Unmarshal(tool.InputSchema, &schema)
 
-			anthropicReq.Tools[i] = anthropicTool{
+			t := anthropicTool{
 				Name:        tool.Name,
 				Description: tool.Description,
 				InputSchema: schema,
 			}
+			if i == last {
+				t.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+			}
+			anthropicReq.Tools[i] = t
 		}
 	}
 
@@ -189,9 +262,11 @@ func (p *Provider) convertResponse(resp anthropicResponse) *model.CompletionResp
 		},
 		StopReason: resp.StopReason,
 		Usage: model.TokenUsage{
-			PromptTokens:     resp.Usage.InputTokens,
-			CompletionTokens: resp.Usage.OutputTokens,
-			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			PromptTokens:        resp.Usage.InputTokens,
+			CompletionTokens:    resp.Usage.OutputTokens,
+			TotalTokens:         resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			CacheCreationTokens: resp.Usage.CacheCreationInputTokens,
+			CacheReadTokens:     resp.Usage.CacheReadInputTokens,
 		},
 		Model: resp.Model,
 	}
@@ -232,13 +307,27 @@ func (p *Provider) convertResponse(resp anthropicResponse) *model.CompletionResp
 }
 
 // Anthropic API types
+
+// anthropicCacheControl instructs Anthropic to cache the associated content block.
+type anthropicCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+// anthropicSystemBlock is a single content block inside the system array.
+// Using an array (rather than a plain string) is required to attach cache_control.
+type anthropicSystemBlock struct {
+	Type         string                 `json:"type"` // always "text"
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Temperature float64            `json:"temperature,omitempty"`
-	System      string             `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Tools       []anthropicTool    `json:"tools,omitempty"`
+	Model       string                 `json:"model"`
+	MaxTokens   int                    `json:"max_tokens"`
+	Temperature float64                `json:"temperature,omitempty"`
+	System      []anthropicSystemBlock `json:"system,omitempty"`
+	Messages    []anthropicMessage     `json:"messages"`
+	Tools       []anthropicTool        `json:"tools,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -260,6 +349,7 @@ type anthropicTool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	InputSchema map[string]interface{} `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -273,6 +363,8 @@ type anthropicResponse struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }

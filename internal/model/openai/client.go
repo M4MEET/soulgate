@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/M4MEET/soulgate/internal/httpclient"
 	"github.com/M4MEET/soulgate/internal/model"
@@ -34,7 +33,8 @@ func NewProvider(apiKey, modelName, baseURL string) *Provider {
 
 	// Create secure HTTP client
 	secureConfig := httpclient.DefaultSecureConfig()
-	secureConfig.TotalTimeout = 90 * time.Second // Longer for large responses
+	secureConfig.TotalTimeout = 0    // No timeout — context handles cancellation
+	secureConfig.ResponseTimeout = 0 // No timeout on response headers
 	secureConfig.UserAgent = "SoulGate-OpenAI/0.1"
 
 	return &Provider{

@@ -81,11 +81,11 @@ func CreateSoulFile(configDir string) error {
 		return fmt.Errorf("SOUL.md already exists at %s", soulPath)
 	}
 
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	if err := os.WriteFile(soulPath, []byte(DefaultSoulTemplate()), 0644); err != nil {
+	if err := os.WriteFile(soulPath, []byte(DefaultSoulTemplate()), 0600); err != nil {
 		return fmt.Errorf("failed to write SOUL.md: %w", err)
 	}
 
@@ -96,11 +96,11 @@ func CreateSoulFile(configDir string) error {
 func UpdateSoulFile(configDir string, content string) error {
 	soulPath := filepath.Join(configDir, "SOUL.md")
 
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	if err := os.WriteFile(soulPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(soulPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("failed to write SOUL.md: %w", err)
 	}
 
