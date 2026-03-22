@@ -121,6 +121,16 @@ export interface CostData {
   tokens: number;
 }
 
+export interface CostSummary {
+  today_cost_usd: number;
+  total_cost_usd: number;
+  session_cost_usd: number;
+  total_calls: number;
+  session_calls: number;
+  by_provider: Record<string, number>;
+  last_7_days: { date: string; cost_usd: number }[];
+}
+
 export interface CronJob {
   id: string;
   name: string;
@@ -405,8 +415,18 @@ export async function fetchAuditEvents(limit = 100): Promise<AuditEvent[]> {
   return (data as { events?: AuditEvent[] }).events || [];
 }
 
+export async function fetchCostSummary(): Promise<CostSummary | null> {
+  return safeFetch<CostSummary | null>(`${BASE}/api/costs`, null);
+}
+
 export async function fetchCosts(): Promise<CostData[]> {
-  return safeFetch<CostData[]>(`${BASE}/api/costs`, []);
+  const summary = await fetchCostSummary();
+  if (!summary || !summary.last_7_days) return [];
+  return summary.last_7_days.map(d => ({
+    date: d.date,
+    cost: d.cost_usd,
+    tokens: 0,
+  }));
 }
 
 export async function fetchConfig(): Promise<ConfigData | null> {

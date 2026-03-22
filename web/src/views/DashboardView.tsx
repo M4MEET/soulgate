@@ -8,8 +8,8 @@ import {
   Activity, Cpu, HardDrive, Users, Zap, CheckCircle,
   AlertTriangle, XCircle, DollarSign, Clock, GitBranch, Server,
 } from 'lucide-react';
-import type { HealthData, SessionData, CostData } from '../lib/api';
-import { fetchCosts } from '../lib/api';
+import type { HealthData, SessionData, CostData, CostSummary } from '../lib/api';
+import { fetchCosts, fetchCostSummary } from '../lib/api';
 import StatCard from '../components/StatCard';
 import { formatRelativeTime } from '../lib/utils';
 
@@ -71,25 +71,11 @@ function Panel({ title, children, className = '' }: { title: string; children: R
 
 export default function DashboardView({ health, sessions }: Props) {
   const [costs, setCosts] = useState<CostData[]>([]);
+  const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
 
   useEffect(() => {
-    fetchCosts().then(data => {
-      if (data.length > 0) {
-        setCosts(data);
-      } else {
-        // Generate mock data for last 7 days
-        const mock: CostData[] = Array.from({ length: 7 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (6 - i));
-          return {
-            date: d.toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-            cost: Math.random() * 0.5,
-            tokens: Math.floor(Math.random() * 50000),
-          };
-        });
-        setCosts(mock);
-      }
-    });
+    fetchCosts().then(setCosts);
+    fetchCostSummary().then(setCostSummary);
   }, []);
 
   const sessionTable = useReactTable({
@@ -110,10 +96,10 @@ export default function DashboardView({ health, sessions }: Props) {
   const totalClients = Object.values(health.clients).reduce((a, b) => a + b, 0);
   const memPct = Math.min((health.memory.alloc_mb / health.memory.sys_mb) * 100, 100);
 
-  const tokenPieData = [
-    { name: 'Input', value: 68 },
-    { name: 'Output', value: 32 },
-  ];
+  // Build provider pie from real cost data
+  const providerPieData = costSummary?.by_provider
+    ? Object.entries(costSummary.by_provider).map(([name, value]) => ({ name, value: Number(value.toFixed(4)) }))
+    : [];
 
   const clientPieData = Object.entries(health.clients).map(([name, value]) => ({ name, value }));
 
@@ -128,7 +114,7 @@ export default function DashboardView({ health, sessions }: Props) {
         <StatCard icon={GitBranch}  label="Sessions"    value={health.sessions}                        color="text-violet-400" />
         <StatCard icon={HardDrive}  label="Memory"      value={`${health.memory.alloc_mb} MB`}         color="text-rose-400" />
         <StatCard icon={Server}     label="Goroutines"  value={health.memory.goroutines}               color="text-cyan-400" />
-        <StatCard icon={DollarSign} label="Cost Today"  value={costs.length ? `$${costs[costs.length - 1]?.cost.toFixed(4)}` : '$0.00'} color="text-orange-400" />
+        <StatCard icon={DollarSign} label="Cost Today"  value={costSummary ? `$${costSummary.today_cost_usd.toFixed(4)}` : '$0.00'} color="text-orange-400" />
       </div>
 
       {/* Charts row */}
@@ -149,11 +135,11 @@ export default function DashboardView({ health, sessions }: Props) {
           </ResponsiveContainer>
         </Panel>
 
-        <Panel title="Token usage">
+        <Panel title="Cost by provider">
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
-              <Pie data={tokenPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={65} dataKey="value" paddingAngle={3}>
-                {tokenPieData.map((_, i) => (
+              <Pie data={providerPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={65} dataKey="value" paddingAngle={3}>
+                {providerPieData.map((_, i) => (
                   <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                 ))}
               </Pie>
