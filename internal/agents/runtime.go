@@ -15,6 +15,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/model/anthropic"
 	"github.com/M4MEET/soulgate/internal/model/openai"
+	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/M4MEET/soulgate/internal/protocol"
 	"github.com/M4MEET/soulgate/internal/skills"
 	"github.com/google/uuid"
@@ -56,8 +57,35 @@ func NewRuntime(cfg *Config) (*Runtime, error) {
 		return nil, fmt.Errorf("failed to initialize provider: %w", err)
 	}
 
-	// Initialize file broker (simplified - no policy/audit for now)
-	fileBroker, err := files.NewBroker(cfg.Workspace.Root, nil, nil)
+	// Initialize file broker with a scoped runtime policy.
+	runtimePolicy := &policy.Policy{
+		Version: "1",
+		Policies: []policy.PolicyRule{
+			{
+				Name:     "runtime-allow-read",
+				Action:   "files.read",
+				Resource: "./**",
+				Decision: policy.DecisionAllow,
+				Priority: 10,
+			},
+			{
+				Name:     "runtime-allow-list",
+				Action:   "files.list",
+				Resource: "./**",
+				Decision: policy.DecisionAllow,
+				Priority: 10,
+			},
+			{
+				Name:     "runtime-allow-stat",
+				Action:   "files.stat",
+				Resource: "./**",
+				Decision: policy.DecisionAllow,
+				Priority: 10,
+			},
+		},
+	}
+
+	fileBroker, err := files.NewBroker(cfg.Workspace.Root, policy.NewEngine(runtimePolicy), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize file broker: %w", err)
 	}

@@ -153,3 +153,27 @@ func TestPolicyEngineDefaultDeny(t *testing.T) {
 	assert.Equal(t, DecisionDeny, result.Decision)
 	assert.Contains(t, result.Reason, "default deny")
 }
+
+func TestPolicyEngineBypassCheckerOverridesRules(t *testing.T) {
+	engine := NewEngine(&Policy{
+		Version: "1",
+		Policies: []PolicyRule{
+			{
+				Name:     "deny-all",
+				Action:   "*",
+				Resource: "**",
+				Decision: DecisionDeny,
+				Priority: 100,
+			},
+		},
+	})
+	engine.SetBypassChecker(func() bool { return true })
+
+	result, err := engine.Evaluate(context.Background(), PolicyRequest{
+		Action:   "files.read",
+		Resource: "./secret.txt",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, DecisionAllow, result.Decision)
+	assert.Contains(t, result.Reason, "bypass")
+}

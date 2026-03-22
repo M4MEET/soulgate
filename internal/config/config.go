@@ -36,6 +36,36 @@ type Config struct {
 
 	// Skills settings
 	Skills SkillsConfig `yaml:"skills"`
+
+	// MCP (Model Context Protocol) server settings
+	MCP MCPConfig `yaml:"mcp"`
+}
+
+// MCPConfig defines MCP server settings
+type MCPConfig struct {
+	// List of MCP servers to connect to
+	Servers []MCPServerConfig `yaml:"servers"`
+}
+
+// MCPServerConfig defines a single MCP server connection
+type MCPServerConfig struct {
+	// Name identifies this server (used for tool prefixing)
+	Name string `yaml:"name"`
+
+	// Command to spawn the MCP server process
+	Command string `yaml:"command"`
+
+	// Arguments for the command
+	Args []string `yaml:"args,omitempty"`
+
+	// Environment variables for the server process
+	Env map[string]string `yaml:"env,omitempty"`
+
+	// Working directory for the server process
+	WorkDir string `yaml:"work_dir,omitempty"`
+
+	// Whether this server is enabled (default true)
+	Enabled *bool `yaml:"enabled,omitempty"`
 }
 
 // WorkspaceConfig defines workspace-specific settings
@@ -167,19 +197,19 @@ func DefaultConfig() *Config {
 			MaxMemory: 64 * 1024 * 1024, // 64MB
 		},
 		Audit: AuditConfig{
-			DatabasePath: ".soulgate/audit.db",
+			DatabasePath: ".soulgate/audit.jsonl",
 			Enabled:      true,
 		},
 		Policy: PolicyConfig{
 			FilePath: ".soulgate/policy.yml",
 		},
 		Execution: ExecutionConfig{
-			MaxIterations:       10,
-			TotalTimeoutSec:     300, // 5 minutes
-			IterationTimeoutSec: 60,  // 1 minute
-			APICallTimeoutSec:   30,  // 30 seconds
-			MaxTokens:           100000,
-			MaxToolResultKB:     1024, // 1MB
+			MaxIterations:       0,     // unlimited
+			TotalTimeoutSec:     0,     // unlimited
+			IterationTimeoutSec: 0,     // unlimited
+			APICallTimeoutSec:   0,     // unlimited
+			MaxTokens:           0,     // unlimited
+			MaxToolResultKB:     10240, // 10MB
 		},
 		HTTPClient: HTTPClientConfig{
 			ConnectTimeoutSec:  10,
@@ -238,7 +268,7 @@ func (c *Config) Save(path string) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 

@@ -56,9 +56,18 @@ func Apply(workspaceRoot string, patchText string) (*PatchResult, error) {
 			result.Errors = append(result.Errors, err.Error())
 			continue
 		}
+		// Core protection: block patches to protected core files
+		if isCoreProtected(p.path) {
+			result.Errors = append(result.Errors, fmt.Sprintf("core protection: cannot modify '%s' — protected core file", p.path))
+			continue
+		}
 		if p.moveTo != "" {
 			if err := validatePath(workspaceRoot, p.moveTo); err != nil {
 				result.Errors = append(result.Errors, err.Error())
+				continue
+			}
+			if isCoreProtected(p.moveTo) {
+				result.Errors = append(result.Errors, fmt.Sprintf("core protection: cannot move to '%s' — protected core path", p.moveTo))
 				continue
 			}
 		}
@@ -127,13 +136,37 @@ func Apply(workspaceRoot string, patchText string) (*PatchResult, error) {
 	return result, nil
 }
 
+// isCoreProtected checks if a path targets SoulGate's protected core.
+func isCoreProtected(relPath string) bool {
+	normalized := filepath.ToSlash(filepath.Clean(relPath))
+	protectedDirs := []string{"internal", "cmd"}
+	for _, dir := range protectedDirs {
+		if normalized == dir || strings.HasPrefix(normalized, dir+"/") {
+			return true
+		}
+	}
+	protectedFiles := []string{"go.mod", "go.sum", "Makefile", "main.go"}
+	for _, file := range protectedFiles {
+		if normalized == file {
+			return true
+		}
+	}
+	return false
+}
+
 func validatePath(root, rel string) error {
 	cleaned := filepath.Clean(rel)
 	if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
 		return fmt.Errorf("path %q escapes workspace", rel)
 	}
-	abs := filepath.Join(root, cleaned)
-	if !strings.HasPrefix(abs, filepath.Clean(root)) {
+
+	rootClean := filepath.Clean(root)
+	abs := filepath.Clean(filepath.Join(rootClean, cleaned))
+	workspaceRel, err := filepath.Rel(rootClean, abs)
+	if err != nil {
+		return fmt.Errorf("path %q escapes workspace", rel)
+	}
+	if workspaceRel == ".." || strings.HasPrefix(workspaceRel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path %q escapes workspace", rel)
 	}
 	return nil

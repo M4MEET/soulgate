@@ -20,7 +20,7 @@ plugins:
     timeout: 30
     max_memory: 67108864
 audit:
-    database_path: /Users/demon/soulGate/demo/workspace/.soulgate/audit.db
+    database_path: /Users/demon/soulGate/demo/workspace/.soulgate/audit.jsonl
     enabled: true
 policy:
     file_path: /Users/demon/soulGate/demo/workspace/.soulgate/policy.yml

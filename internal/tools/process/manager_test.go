@@ -2,6 +2,8 @@ package process
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -285,4 +287,146 @@ func TestWriteToStdin(t *testing.T) {
 	if !strings.Contains(output, "hello world") {
 		t.Errorf("WriteToStdin: expected output to contain \"hello world\", got:\n%s", output)
 	}
+}
+
+func TestWorkspaceManagerRejectsWorkdirOutsideWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mgr := NewManagerWithWorkspace(root)
+
+	_, err := mgr.Start(context.Background(), "echo ok", "../", nil, 2*time.Second)
+	if err == nil {
+		t.Fatal("expected error for workdir outside workspace, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected outside-workspace error, got: %v", err)
+	}
+}
+
+func TestWorkspaceManagerDefaultsWorkdirToWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mgr := NewManagerWithWorkspace(root)
+
+	proc, err := mgr.Start(context.Background(), "pwd", "", nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Start: unexpected error: %v", err)
+	}
+
+	output := waitForProcessOutput(t, mgr, proc.ID)
+	got := canonicalPath(strings.TrimSpace(output))
+	want := canonicalPath(root)
+	if got != want {
+		t.Fatalf("expected pwd output %q, got %q", want, got)
+	}
+}
+
+func TestWorkspaceManagerRunsWithMinimalEnvironment(t *testing.T) {
+	// Uses process-wide env mutation through t.Setenv, so avoid parallel.
+	root := t.TempDir()
+	mgr := NewManagerWithWorkspace(root)
+
+	t.Setenv("SOULGATE_PROCESS_TEST_SECRET", "top-secret")
+
+	proc, err := mgr.Start(context.Background(), "echo ${SOULGATE_PROCESS_TEST_SECRET:-unset}", "", nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Start: unexpected error: %v", err)
+	}
+
+	output := waitForProcessOutput(t, mgr, proc.ID)
+	if strings.TrimSpace(output) != "unset" {
+		t.Fatalf("expected sandboxed env to hide inherited secret, got %q", strings.TrimSpace(output))
+	}
+}
+
+func TestWorkspaceManagerAllowsSafeCustomEnvironment(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mgr := NewManagerWithWorkspace(root)
+
+	proc, err := mgr.Start(context.Background(), "echo $SOULGATE_ENV_TEST", "", []string{"SOULGATE_ENV_TEST=ok"}, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Start: unexpected error: %v", err)
+	}
+
+	output := waitForProcessOutput(t, mgr, proc.ID)
+	if strings.TrimSpace(output) != "ok" {
+		t.Fatalf("expected custom env value, got %q", strings.TrimSpace(output))
+	}
+}
+
+func TestWorkspaceManagerBlocksUnsafeEnvironmentKeys(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mgr := NewManagerWithWorkspace(root)
+
+	_, err := mgr.Start(context.Background(), "echo ok", "", []string{"LD_PRELOAD=/tmp/hook.so"}, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for blocked environment key, got nil")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("expected blocked-key error, got: %v", err)
+	}
+}
+
+func TestWorkspaceManagerAllowsRelativeWorkdirWithinWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	subdir := filepath.Join(root, "sub")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+
+	mgr := NewManagerWithWorkspace(root)
+	proc, err := mgr.Start(context.Background(), "pwd", "sub", nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Start: unexpected error: %v", err)
+	}
+
+	output := waitForProcessOutput(t, mgr, proc.ID)
+	got := canonicalPath(strings.TrimSpace(output))
+	want := canonicalPath(subdir)
+	if got != want {
+		t.Fatalf("expected pwd output %q, got %q", want, got)
+	}
+}
+
+func waitForProcessOutput(t *testing.T, mgr *Manager, id string) string {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		proc, err := mgr.Get(id)
+		if err != nil {
+			t.Fatalf("Get: unexpected error: %v", err)
+		}
+
+		proc.mu.Lock()
+		status := proc.Status
+		proc.mu.Unlock()
+
+		if status != StatusRunning {
+			out, err := mgr.Log(id, 20)
+			if err != nil {
+				t.Fatalf("Log: unexpected error: %v", err)
+			}
+			return out
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatalf("process %s did not exit in time", id)
+	return ""
+}
+
+func canonicalPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(path)
 }

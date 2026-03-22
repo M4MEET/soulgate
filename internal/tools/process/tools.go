@@ -25,7 +25,7 @@ func ToolSchemas() []map[string]interface{} {
 					},
 					"workdir": map[string]interface{}{
 						"type":        "string",
-						"description": "Working directory for the process. Defaults to the current directory if omitted.",
+						"description": "Working directory for the process. Defaults to workspace root; paths outside the workspace are rejected.",
 					},
 					"timeout_seconds": map[string]interface{}{
 						"type":        "number",
@@ -33,7 +33,7 @@ func ToolSchemas() []map[string]interface{} {
 					},
 					"env": map[string]interface{}{
 						"type":        "array",
-						"description": "Additional environment variables in KEY=VALUE format appended to the inherited environment.",
+						"description": "Additional environment variables in KEY=VALUE format. Processes run with a minimal base environment in sandbox mode.",
 						"items": map[string]interface{}{
 							"type": "string",
 						},

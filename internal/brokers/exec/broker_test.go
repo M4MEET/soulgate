@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/brokers"
@@ -57,8 +58,8 @@ func setupTestBroker(t *testing.T) (*Broker, string, func()) {
 	engine := policy.NewEngine(pol)
 
 	// Create audit logger
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 
 	broker, err := NewBroker(tmpDir, engine, auditLogger)
@@ -73,8 +74,8 @@ func setupTestBroker(t *testing.T) (*Broker, string, func()) {
 
 func TestNewBroker(t *testing.T) {
 	tmpDir := t.TempDir()
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 	defer auditLogger.Close()
 
@@ -219,8 +220,8 @@ func TestExecuteAuditLogging(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query audit log
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 	defer auditLogger.Close()
 
@@ -261,8 +262,8 @@ func TestExecuteAuditDeniedCommand(t *testing.T) {
 	assert.Contains(t, err.Error(), "denied")
 
 	// Verify audit log (query all events for this run)
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 	defer auditLogger.Close()
 
@@ -318,6 +319,46 @@ func TestExecuteContextCancellation(t *testing.T) {
 	result, err := broker.Execute(ctx, brokerCtx, "sleep 10")
 	assert.Error(t, err)
 	assert.Nil(t, result)
+}
+
+func TestExecuteTimesOutLongRunningCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	pol := &policy.Policy{
+		Version: "1",
+		Policies: []policy.PolicyRule{
+			{
+				Name:     "allow-sleep",
+				Action:   "exec.command",
+				Resource: "sleep *",
+				Decision: policy.DecisionAllow,
+			},
+		},
+	}
+	engine := policy.NewEngine(pol)
+
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
+	require.NoError(t, err)
+	defer auditLogger.Close()
+
+	broker, err := NewBroker(tmpDir, engine, auditLogger)
+	require.NoError(t, err)
+
+	origTimeout := defaultExecCommandTimeout
+	defaultExecCommandTimeout = 150 * time.Millisecond
+	t.Cleanup(func() {
+		defaultExecCommandTimeout = origTimeout
+	})
+
+	result, err := broker.Execute(context.Background(), brokers.BrokerContext{
+		PluginID: "test-plugin",
+		RunID:    "test-run-timeout",
+	}, "sleep 2")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "timed out")
+	assert.Contains(t, err.Error(), "process_start")
 }
 
 func TestBrokerClose(t *testing.T) {
@@ -474,9 +515,25 @@ func TestSecurityEnvironmentVariables(t *testing.T) {
 }
 
 func TestSecurityNoPolicyEngine(t *testing.T) {
-	t.Skip("Policy engine nil check should be added to production code")
-	// This test is skipped because the broker currently panics with nil policy
-	// TODO: Add nil check in Execute() method
+	tmpDir := t.TempDir()
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
+	require.NoError(t, err)
+	defer auditLogger.Close()
+
+	broker, err := NewBroker(tmpDir, nil, auditLogger)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	brokerCtx := brokers.BrokerContext{
+		PluginID: "test-plugin",
+		RunID:    "test-run",
+	}
+
+	result, err := broker.Execute(ctx, brokerCtx, "echo test")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "policy engine not configured")
 }
 
 func TestMultipleCommands(t *testing.T) {

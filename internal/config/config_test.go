@@ -47,7 +47,7 @@ plugins:
   timeout: 60
 
 audit:
-  database_path: .soulgate/audit.db
+  database_path: .soulgate/audit.jsonl
   enabled: true
 `
 
@@ -277,16 +277,16 @@ func TestConfigDefaults(t *testing.T) {
 	assert.Equal(t, int64(64*1024*1024), cfg.Plugins.MaxMemory)
 
 	// Audit defaults
-	assert.Equal(t, ".soulgate/audit.db", cfg.Audit.DatabasePath)
+	assert.Equal(t, ".soulgate/audit.jsonl", cfg.Audit.DatabasePath)
 	assert.True(t, cfg.Audit.Enabled)
 
 	// Policy defaults
 	assert.Equal(t, ".soulgate/policy.yml", cfg.Policy.FilePath)
 
 	// Execution defaults
-	assert.Equal(t, 10, cfg.Execution.MaxIterations)
-	assert.Equal(t, 300, cfg.Execution.TotalTimeoutSec)
-	assert.Equal(t, 60, cfg.Execution.IterationTimeoutSec)
+	assert.Equal(t, 0, cfg.Execution.MaxIterations)
+	assert.Equal(t, 0, cfg.Execution.TotalTimeoutSec)
+	assert.Equal(t, 0, cfg.Execution.IterationTimeoutSec)
 
 	// HTTP client defaults
 	assert.Equal(t, 10, cfg.HTTPClient.ConnectTimeoutSec)
@@ -312,12 +312,12 @@ func TestModelConfigs(t *testing.T) {
 func TestExecutionConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	assert.Equal(t, 10, cfg.Execution.MaxIterations)
-	assert.Equal(t, 300, cfg.Execution.TotalTimeoutSec)
-	assert.Equal(t, 60, cfg.Execution.IterationTimeoutSec)
-	assert.Equal(t, 30, cfg.Execution.APICallTimeoutSec)
-	assert.Equal(t, 100000, cfg.Execution.MaxTokens)
-	assert.Equal(t, 1024, cfg.Execution.MaxToolResultKB)
+	assert.Equal(t, 0, cfg.Execution.MaxIterations)
+	assert.Equal(t, 0, cfg.Execution.TotalTimeoutSec)
+	assert.Equal(t, 0, cfg.Execution.IterationTimeoutSec)
+	assert.Equal(t, 0, cfg.Execution.APICallTimeoutSec)
+	assert.Equal(t, 0, cfg.Execution.MaxTokens)
+	assert.Equal(t, 10240, cfg.Execution.MaxToolResultKB)
 }
 
 func TestHTTPClientSecurityDefaults(t *testing.T) {

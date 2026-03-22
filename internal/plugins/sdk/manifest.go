@@ -2,69 +2,46 @@ package sdk
 
 import "encoding/json"
 
-// Manifest defines the plugin manifest structure
+// Manifest defines the plugin manifest structure.
+// Plugins can use "script" runtime (default, AI-creatable) or "wasm" (sandboxed).
 type Manifest struct {
-	Name        string                 `yaml:"name"`
-	Version     string                 `yaml:"version"`
-	Description string                 `yaml:"description,omitempty"`
-	Author      string                 `yaml:"author,omitempty"`
-	Type        string                 `yaml:"type,omitempty"`        // "channel", "tool", "broker"
-	Runtime     string                 `yaml:"runtime,omitempty"`     // "wasm", "go"
-	Entrypoint  string                 `yaml:"entrypoint,omitempty"`  // Path to WASM file
-	Permissions []string               `yaml:"permissions,omitempty"` // Simplified permission list
-	Tools       []ToolDef              `yaml:"tools,omitempty"`
-	Provides    map[string]interface{} `yaml:"provides,omitempty"` // What the plugin provides
-	Config      map[string]interface{} `yaml:"config,omitempty"`   // Plugin configuration schema
-	Commands    []CommandDef           `yaml:"commands,omitempty"` // Commands provided
+	Name        string            `yaml:"name"`
+	Version     string            `yaml:"version"`
+	Description string            `yaml:"description,omitempty"`
+	Author      string            `yaml:"author,omitempty"`
+	Runtime     string            `yaml:"runtime,omitempty"` // "script" (default) or "wasm"
+	Entrypoint  string            `yaml:"entrypoint,omitempty"`
+	Permissions []string          `yaml:"permissions,omitempty"`
+	Tools       []ToolDef         `yaml:"tools,omitempty"`
+	Requires    RequirementsDef   `yaml:"requires,omitempty"`
+	Config      map[string]string `yaml:"config,omitempty"` // key -> description
 }
 
-// PermissionsConfig defines the permissions requested by a plugin
-type PermissionsConfig struct {
-	FilesRead   []string `yaml:"files.read,omitempty"`
-	FilesWrite  []string `yaml:"files.write,omitempty"`
-	FilesList   []string `yaml:"files.list,omitempty"`
-	FilesStat   []string `yaml:"files.stat,omitempty"`
-	NetRequest  []string `yaml:"net.request,omitempty"`
-	ExecCommand []string `yaml:"exec.command,omitempty"`
-}
-
-// ToolDef defines a tool provided by the plugin
+// ToolDef defines a tool provided by the plugin.
 type ToolDef struct {
-	Name        string          `yaml:"name"`
-	Description string          `yaml:"description"`
-	InputSchema json.RawMessage `yaml:"input_schema"` // JSON Schema
+	Name           string          `yaml:"name"`
+	Description    string          `yaml:"description"`
+	Command        string          `yaml:"command,omitempty"` // For script runtime: command to execute
+	InputSchemaRaw interface{}     `yaml:"input_schema"`      // Parsed from YAML as generic map
+	InputSchema    json.RawMessage `yaml:"-"`                 // Computed: JSON-encoded schema
 }
 
-// CommandDef defines a command provided by the plugin
-type CommandDef struct {
-	Name        string       `yaml:"name"`
-	Description string       `yaml:"description"`
-	Usage       string       `yaml:"usage,omitempty"`
-	Args        []CommandArg `yaml:"args,omitempty"`
-}
-
-// CommandArg defines a command argument
-type CommandArg struct {
-	Name     string `yaml:"name"`
-	Required bool   `yaml:"required,omitempty"`
-}
-
-// GetPermissions returns all permissions as a flat list
-func (p *PermissionsConfig) GetPermissions(action string) []string {
-	switch action {
-	case "files.read":
-		return p.FilesRead
-	case "files.write":
-		return p.FilesWrite
-	case "files.list":
-		return p.FilesList
-	case "files.stat":
-		return p.FilesStat
-	case "net.request":
-		return p.NetRequest
-	case "exec.command":
-		return p.ExecCommand
-	default:
-		return nil
+// ResolveInputSchemas converts the YAML-parsed InputSchemaRaw to JSON for each tool.
+func ResolveInputSchemas(tools []ToolDef) error {
+	for i := range tools {
+		if tools[i].InputSchemaRaw != nil {
+			data, err := json.Marshal(tools[i].InputSchemaRaw)
+			if err != nil {
+				return err
+			}
+			tools[i].InputSchema = data
+		}
 	}
+	return nil
+}
+
+// RequirementsDef declares what the plugin needs to run.
+type RequirementsDef struct {
+	Env  []string `yaml:"env,omitempty"`  // Required environment variables
+	Bins []string `yaml:"bins,omitempty"` // Required binaries on PATH
 }

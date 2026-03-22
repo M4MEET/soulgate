@@ -89,7 +89,7 @@ func TestInitWorkspaceConfigValues(t *testing.T) {
 	assert.Equal(t, workspaceDir, workspace.Config.Workspace.Root)
 	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate"), workspace.Config.Workspace.ConfigDir)
 	assert.Equal(t, filepath.Join(workspaceDir, "plugins"), workspace.Config.Plugins.Dir)
-	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "audit.db"), workspace.Config.Audit.DatabasePath)
+	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "audit.jsonl"), workspace.Config.Audit.DatabasePath)
 	assert.Equal(t, filepath.Join(workspaceDir, ".soulgate", "policy.yml"), workspace.Config.Policy.FilePath)
 }
 
@@ -301,7 +301,7 @@ plugins:
   timeout: 30
 
 audit:
-  database_path: .soulgate/audit.db
+  database_path: .soulgate/audit.jsonl
   enabled: true
 
 policy:

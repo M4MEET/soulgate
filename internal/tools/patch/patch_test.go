@@ -205,9 +205,9 @@ func TestApplyUpdateFile(t *testing.T) {
 	dir := tmpDir(t)
 	// The hunk finder uses strings.Index on the full file content, so write a
 	// file where the context string appears verbatim.
-	writeFile(t, dir, "main.go", "package main\n\nfunc main() {\n\tfmt.Println(\"old\")\n}\n")
+	writeFile(t, dir, "app.go", "package main\n\nfunc main() {\n\tfmt.Println(\"old\")\n}\n")
 
-	patchText := "*** Begin Patch\n*** Update File: main.go\n@@@ func main() { @@@\n- \tfmt.Println(\"old\")\n+ \tfmt.Println(\"new\")\n*** End Patch"
+	patchText := "*** Begin Patch\n*** Update File: app.go\n@@@ func main() { @@@\n- \tfmt.Println(\"old\")\n+ \tfmt.Println(\"new\")\n*** End Patch"
 	result, err := Apply(dir, patchText)
 	if err != nil {
 		t.Fatalf("Apply failed: %v", err)
@@ -219,7 +219,7 @@ func TestApplyUpdateFile(t *testing.T) {
 		t.Errorf("unexpected errors: %v", result.Errors)
 	}
 
-	content := readFile(t, dir, "main.go")
+	content := readFile(t, dir, "app.go")
 	if strings.Contains(content, `"old"`) {
 		t.Errorf("old content still present: %q", content)
 	}

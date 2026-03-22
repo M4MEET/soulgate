@@ -113,5 +113,10 @@ func loadManifest(path string) (*sdk.Manifest, error) {
 		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
+	// Resolve YAML input_schema maps to JSON
+	if err := sdk.ResolveInputSchemas(manifest.Tools); err != nil {
+		return nil, fmt.Errorf("failed to resolve input schemas: %w", err)
+	}
+
 	return &manifest, nil
 }

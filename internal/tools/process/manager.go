@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,7 +45,22 @@ const (
 
 	// defaultLogLines is the number of lines Log returns when lines == 0.
 	defaultLogLines = 50
+
+	// maxProcessEnvVars bounds user-provided env entries per process.
+	maxProcessEnvVars = 64
+
+	// maxProcessEnvEntryLen bounds a single KEY=VALUE env entry length.
+	maxProcessEnvEntryLen = 4096
 )
+
+var blockedSandboxEnvKeys = map[string]struct{}{
+	"LD_PRELOAD":            {},
+	"LD_LIBRARY_PATH":       {},
+	"DYLD_INSERT_LIBRARIES": {},
+	"DYLD_LIBRARY_PATH":     {},
+	"BASH_ENV":              {},
+	"ENV":                   {},
+}
 
 // ManagedProcess holds all state for a single supervised process.
 type ManagedProcess struct {
@@ -77,9 +94,12 @@ type ManagedProcess struct {
 // Manager supervises a set of ManagedProcess instances. It is safe for
 // concurrent use.
 type Manager struct {
-	processes map[string]*ManagedProcess
-	counter   atomic.Int64 // monotonic process counter; avoids map-length races
-	mu        sync.RWMutex
+	processes           map[string]*ManagedProcess
+	counter             atomic.Int64 // monotonic process counter; avoids map-length races
+	workspaceRoot       string
+	restrictToWorkspace bool
+	baseEnv             []string
+	mu                  sync.RWMutex
 }
 
 // NewManager returns an initialised Manager ready for use.
@@ -87,6 +107,28 @@ func NewManager() *Manager {
 	return &Manager{
 		processes: make(map[string]*ManagedProcess),
 	}
+}
+
+// NewManagerWithWorkspace returns a manager constrained to the given workspace.
+// In this mode, workdir is pinned to the workspace boundary and process env is
+// built from a minimal allowlist instead of inheriting the full parent env.
+func NewManagerWithWorkspace(workspaceRoot string) *Manager {
+	mgr := NewManager()
+
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		return mgr
+	}
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = filepath.Clean(root)
+	}
+
+	mgr.workspaceRoot = absRoot
+	mgr.restrictToWorkspace = true
+	mgr.baseEnv = defaultSandboxEnv(absRoot)
+	return mgr
 }
 
 // Start launches command in a shell subprocess and returns immediately. The
@@ -112,6 +154,16 @@ func (m *Manager) Start(
 		timeout = defaultTimeout
 	}
 
+	resolvedWorkdir, err := m.resolveWorkdir(workdir)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeEnv, err := m.prepareEnvironment(env)
+	if err != nil {
+		return nil, err
+	}
+
 	// Derive a child context that is cancelled on timeout OR when the parent
 	// context is cancelled (e.g. the whole SoulGate session ends).
 	childCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -120,12 +172,14 @@ func (m *Manager) Start(
 
 	// Build the command.
 	cmd := exec.CommandContext(childCtx, "sh", "-c", command) //nolint:gosec // intentional shell execution
-	if workdir != "" {
-		cmd.Dir = workdir
+	if resolvedWorkdir != "" {
+		cmd.Dir = resolvedWorkdir
 	}
-	if len(env) > 0 {
+	if m.restrictToWorkspace {
+		cmd.Env = runtimeEnv
+	} else if len(runtimeEnv) > 0 {
 		// Inherit the parent environment and append caller-provided overrides.
-		cmd.Env = append(cmd.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), runtimeEnv...)
 	}
 
 	// Set up output capture.
@@ -161,7 +215,7 @@ func (m *Manager) Start(
 	proc := &ManagedProcess{
 		ID:         id,
 		Command:    command,
-		WorkDir:    workdir,
+		WorkDir:    resolvedWorkdir,
 		Status:     StatusRunning,
 		PID:        cmd.Process.Pid,
 		StartedAt:  time.Now().UTC(),
@@ -239,6 +293,126 @@ func (m *Manager) Start(
 	m.mu.Unlock()
 
 	return proc, nil
+}
+
+func (m *Manager) resolveWorkdir(workdir string) (string, error) {
+	trimmed := strings.TrimSpace(workdir)
+	if !m.restrictToWorkspace {
+		return trimmed, nil
+	}
+
+	root := m.workspaceRoot
+	if root == "" {
+		return "", fmt.Errorf("process: workspace root not configured")
+	}
+
+	if trimmed == "" || trimmed == "." {
+		return root, nil
+	}
+
+	cleaned := filepath.Clean(trimmed)
+	candidate := cleaned
+	if !filepath.IsAbs(cleaned) {
+		candidate = filepath.Join(root, cleaned)
+	}
+
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("process: invalid workdir %q: %w", workdir, err)
+	}
+
+	rel, err := filepath.Rel(root, absCandidate)
+	if err != nil {
+		return "", fmt.Errorf("process: failed to validate workdir %q: %w", workdir, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("process: workdir %q is outside workspace", workdir)
+	}
+
+	return absCandidate, nil
+}
+
+func (m *Manager) prepareEnvironment(env []string) ([]string, error) {
+	if len(env) > maxProcessEnvVars {
+		return nil, fmt.Errorf("process: too many environment variables (max %d)", maxProcessEnvVars)
+	}
+
+	parsed := make([]string, 0, len(env))
+	for _, entry := range env {
+		if len(entry) > maxProcessEnvEntryLen {
+			return nil, fmt.Errorf("process: environment entry too large")
+		}
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("process: invalid environment entry %q", entry)
+		}
+		if !validProcessEnvKey(key) {
+			return nil, fmt.Errorf("process: invalid environment key %q", key)
+		}
+
+		upperKey := strings.ToUpper(key)
+		if m.restrictToWorkspace {
+			if _, blocked := blockedSandboxEnvKeys[upperKey]; blocked {
+				return nil, fmt.Errorf("process: environment key %q is not allowed", key)
+			}
+		}
+
+		parsed = append(parsed, key+"="+value)
+	}
+
+	if !m.restrictToWorkspace {
+		return parsed, nil
+	}
+
+	return mergeEnv(m.baseEnv, parsed), nil
+}
+
+func defaultSandboxEnv(workspaceRoot string) []string {
+	env := []string{
+		"HOME=" + workspaceRoot,
+	}
+	for _, key := range []string{"PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "TMP", "TEMP"} {
+		if value, ok := os.LookupEnv(key); ok && value != "" {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env
+}
+
+func mergeEnv(base []string, overrides []string) []string {
+	merged := make([]string, len(base))
+	copy(merged, base)
+	for _, entry := range overrides {
+		key, _, _ := strings.Cut(entry, "=")
+		replaced := false
+		for i, existing := range merged {
+			existingKey, _, _ := strings.Cut(existing, "=")
+			if existingKey == key {
+				merged[i] = entry
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			merged = append(merged, entry)
+		}
+	}
+	return merged
+}
+
+func validProcessEnvKey(key string) bool {
+	for i, ch := range key {
+		if i == 0 {
+			if (ch < 'A' || ch > 'Z') && (ch < 'a' || ch > 'z') && ch != '_' {
+				return false
+			}
+			continue
+		}
+		if (ch < 'A' || ch > 'Z') && (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // List returns a snapshot of all managed processes. The slice is safe to read

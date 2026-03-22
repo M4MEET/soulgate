@@ -10,6 +10,7 @@ import (
 
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/brokers"
+	"github.com/M4MEET/soulgate/internal/httpclient"
 	"github.com/M4MEET/soulgate/internal/policy"
 )
 
@@ -22,12 +23,14 @@ type Broker struct {
 
 // NewBroker creates a new network broker
 func NewBroker(policyEngine *policy.Engine, auditLogger audit.Logger) (*Broker, error) {
+	secureCfg := httpclient.DefaultSecureConfig()
+	secureCfg.TotalTimeout = 30 * time.Second
+	secureCfg.UserAgent = "SoulGate-NetBroker/0.1"
+
 	return &Broker{
 		policyEngine: policyEngine,
 		auditLogger:  auditLogger,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client:       httpclient.NewSecureClient(secureCfg),
 	}, nil
 }
 
@@ -44,6 +47,12 @@ func (b *Broker) Close() error {
 
 // Request makes an HTTP request
 func (b *Broker) Request(ctx context.Context, brokerCtx brokers.BrokerContext, method, url string, body string, headers map[string]string) (*HTTPResponse, error) {
+	if b.policyEngine == nil {
+		err := fmt.Errorf("policy engine not configured")
+		b.logAuditEvent(ctx, brokerCtx, method, url, 0, audit.StatusError, err)
+		return nil, err
+	}
+
 	// Check policy
 	policyReq := policy.PolicyRequest{
 		Action:   "net.request",
@@ -116,6 +125,10 @@ func (b *Broker) Request(ctx context.Context, brokerCtx brokers.BrokerContext, m
 
 // logAuditEvent logs an audit event
 func (b *Broker) logAuditEvent(ctx context.Context, brokerCtx brokers.BrokerContext, method, url string, statusCode int, status audit.EventStatus, err error) {
+	if b.auditLogger == nil {
+		return
+	}
+
 	event := audit.NewEvent(audit.EventNetRequest, audit.CategoryBroker).
 		WithSessionID(brokerCtx.SessionID).
 		WithRunID(brokerCtx.RunID).

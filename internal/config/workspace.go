@@ -90,7 +90,7 @@ func LoadWorkspaceFromPath(path string) (*Workspace, error) {
 		// This prevents forcing existing users through onboarding on upgrade
 		if hasAPIKey {
 			// Create marker file (ignore errors - worst case: user goes through onboarding again)
-			_ = os.WriteFile(markerPath, []byte("migrated from existing workspace\n"), 0644)
+			_ = os.WriteFile(markerPath, []byte("migrated from existing workspace\n"), 0600)
 		}
 	}
 
@@ -107,7 +107,7 @@ func InitWorkspace(path string) (*Workspace, error) {
 	configDir := filepath.Join(absPath, ".soulgate")
 
 	// Create .soulgate directory
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create .soulgate directory: %w", err)
 	}
 
@@ -122,7 +122,7 @@ func InitWorkspace(path string) (*Workspace, error) {
 	config.Workspace.Root = absPath
 	config.Workspace.ConfigDir = configDir
 	config.Plugins.Dir = pluginsDir
-	config.Audit.DatabasePath = filepath.Join(configDir, "audit.db")
+	config.Audit.DatabasePath = filepath.Join(configDir, "audit.jsonl")
 	config.Policy.FilePath = filepath.Join(configDir, "policy.yml")
 
 	// Save configuration
@@ -208,7 +208,7 @@ policies:
     decision: deny
 `
 
-	return os.WriteFile(path, []byte(defaultPolicy), 0644)
+	return os.WriteFile(path, []byte(defaultPolicy), 0600)
 }
 
 // SaveConfig saves the workspace configuration to disk

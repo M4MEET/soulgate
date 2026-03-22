@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 )
 
 // Engine evaluates policy decisions
 type Engine struct {
-	policy  *Policy
-	matcher *Matcher
+	mu            sync.RWMutex
+	policy        *Policy
+	matcher       *Matcher
+	bypassChecker func() bool
 }
 
 // NewEngine creates a new policy engine
@@ -22,7 +25,15 @@ func NewEngine(policy *Policy) *Engine {
 
 // Evaluate evaluates a policy request and returns a decision
 func (e *Engine) Evaluate(ctx context.Context, req PolicyRequest) (*PolicyResult, error) {
-	if e.policy == nil {
+	if e.shouldBypass() {
+		return &PolicyResult{
+			Decision: DecisionAllow,
+			Reason:   "trust mode bypass enabled",
+		}, nil
+	}
+
+	pol := e.GetPolicy()
+	if pol == nil {
 		return &PolicyResult{
 			Decision: DecisionDeny,
 			Reason:   "no policy configured (default deny)",
@@ -30,7 +41,7 @@ func (e *Engine) Evaluate(ctx context.Context, req PolicyRequest) (*PolicyResult
 	}
 
 	// Sort rules by priority (higher priority first)
-	rules := e.getSortedRules()
+	rules := e.getSortedRules(pol)
 
 	// Evaluate each rule in priority order
 	for _, rule := range rules {
@@ -85,9 +96,9 @@ func (e *Engine) ruleMatches(rule PolicyRule, req PolicyRequest) (bool, error) {
 }
 
 // getSortedRules returns rules sorted by priority (highest first)
-func (e *Engine) getSortedRules() []PolicyRule {
-	rules := make([]PolicyRule, len(e.policy.Policies))
-	copy(rules, e.policy.Policies)
+func (e *Engine) getSortedRules(pol *Policy) []PolicyRule {
+	rules := make([]PolicyRule, len(pol.Policies))
+	copy(rules, pol.Policies)
 
 	sort.Slice(rules, func(i, j int) bool {
 		// Higher priority comes first
@@ -103,11 +114,16 @@ func (e *Engine) getSortedRules() []PolicyRule {
 
 // GetPolicy returns the current policy
 func (e *Engine) GetPolicy() *Policy {
-	return e.policy
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return clonePolicy(e.policy)
 }
 
 // AddRule adds a new rule to the policy (in-memory)
 func (e *Engine) AddRule(rule PolicyRule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if e.policy == nil {
 		e.policy = &Policy{
 			Version:  "1",
@@ -119,6 +135,9 @@ func (e *Engine) AddRule(rule PolicyRule) {
 
 // RemoveRule removes a rule by name
 func (e *Engine) RemoveRule(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if e.policy == nil {
 		return
 	}
@@ -130,4 +149,31 @@ func (e *Engine) RemoveRule(name string) {
 		}
 	}
 	e.policy.Policies = filtered
+}
+
+// SetBypassChecker configures a dynamic bypass hook for policy checks.
+// When checker returns true, Evaluate returns allow without matching rules.
+func (e *Engine) SetBypassChecker(checker func() bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.bypassChecker = checker
+}
+
+func (e *Engine) shouldBypass() bool {
+	e.mu.RLock()
+	checker := e.bypassChecker
+	e.mu.RUnlock()
+	return checker != nil && checker()
+}
+
+func clonePolicy(pol *Policy) *Policy {
+	if pol == nil {
+		return nil
+	}
+	cloned := &Policy{
+		Version:  pol.Version,
+		Policies: make([]PolicyRule, len(pol.Policies)),
+	}
+	copy(cloned.Policies, pol.Policies)
+	return cloned
 }

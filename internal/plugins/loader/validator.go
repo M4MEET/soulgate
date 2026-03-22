@@ -16,12 +16,12 @@ func ValidateManifest(manifest *sdk.Manifest) error {
 		return fmt.Errorf("plugin version is required")
 	}
 
-	if manifest.Runtime == "" {
-		return fmt.Errorf("plugin runtime is required")
-	}
-
-	if manifest.Runtime != "wasm" {
-		return fmt.Errorf("unsupported runtime: %s (only 'wasm' is supported)", manifest.Runtime)
+	// Default runtime is "script"; accept script, wasm, or empty
+	switch manifest.Runtime {
+	case "", "script", "wasm":
+		// ok
+	default:
+		return fmt.Errorf("unsupported runtime: %s (use 'script' or 'wasm')", manifest.Runtime)
 	}
 
 	if len(manifest.Tools) == 0 {
