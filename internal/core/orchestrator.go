@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/audit"
+	"github.com/M4MEET/soulgate/internal/brokers/approval"
 	"github.com/M4MEET/soulgate/internal/brokers/exec"
 	"github.com/M4MEET/soulgate/internal/brokers/files"
 	"github.com/M4MEET/soulgate/internal/brokers/net"
+	"github.com/M4MEET/soulgate/internal/brokers/secrets"
 	"github.com/M4MEET/soulgate/internal/config"
 	"github.com/M4MEET/soulgate/internal/integrations"
 	"github.com/M4MEET/soulgate/internal/mcp"
@@ -39,6 +41,8 @@ type Orchestrator struct {
 	fileBroker          *files.Broker
 	execBroker          *exec.Broker
 	netBroker           *net.Broker
+	secretBroker        *secrets.SecretBroker // encrypted secret store
+	approvalBroker      *approval.Broker // async approval queue for require_approval decisions
 	integrationsReg     *integrations.Registry
 	integrationsStore   *integrations.Store
 	memoryStore         *MemoryStore
@@ -114,6 +118,19 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	netBroker, err := net.NewBroker(policyEngine, auditLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network broker: %w", err)
+	}
+
+	// Initialize approval broker — persists pending requests in the config dir
+	// so the gateway web UI can surface them even after a restart.
+	approvalBroker := approval.NewBroker(workspace.ConfigDir)
+
+	// Initialize secret broker — stores credentials encrypted at rest.
+	// Non-fatal: failure prints a warning but does not prevent startup.
+	var secretBroker *secrets.SecretBroker
+	if sb, sbErr := secrets.NewBroker(workspace.ConfigDir, auditLogger); sbErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: secret broker: %v\n", sbErr)
+	} else {
+		secretBroker = sb
 	}
 
 	// Initialize integrations
@@ -211,7 +228,7 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 
 	// Initialize plugin manager
 	pluginDir := filepath.Join(workspace.Root, workspace.Config.Plugins.Dir)
-	pluginMgr := plugins.NewManager(pluginDir, workspace.Config.Plugins.Timeout)
+	pluginMgr := plugins.NewManager(pluginDir, workspace.Config.Plugins.Timeout, workspace.Config.Plugins.MaxMemory)
 	if err := pluginMgr.LoadAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: plugin loading: %v\n", err)
 	}
@@ -241,6 +258,8 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 		fileBroker:        fileBroker,
 		execBroker:        execBroker,
 		netBroker:         netBroker,
+		approvalBroker:    approvalBroker,
+		secretBroker:      secretBroker,
 		integrationsReg:   integrationsReg,
 		integrationsStore: integrationsStore,
 		memoryStore:       memoryStore,
@@ -268,6 +287,8 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	// Replace the placeholder watch callback with one that closes over orch.
 	// This must happen after orch is built so the thinkingCallback field is
 	// accessible.
+	// Configure symlink boundary enforcement for the file watcher.
+	watchMgr.SetWorkspaceRoot(workspace.Root)
 	watchMgr.ReplaceCallback(orch.makeWatchCallback())
 
 	return orch, nil
@@ -448,6 +469,12 @@ func (o *Orchestrator) GetPolicyEngine() *policy.Engine {
 // global → team → user → agent rules, with the most-specific scope winning.
 func (o *Orchestrator) GetScopedPolicyEngine() *policy.ScopedEngine {
 	return o.scopedPolicyEngine
+}
+
+// GetApprovalBroker returns the approval broker so the gateway can wire its
+// HTTP approval endpoints directly to the running broker instance.
+func (o *Orchestrator) GetApprovalBroker() *approval.Broker {
+	return o.approvalBroker
 }
 
 // GetAllToolSchemas returns the full catalog of all available tool schemas.
@@ -687,6 +714,11 @@ func (o *Orchestrator) Close() error {
 	// Stop all active file watchers
 	if o.watchManager != nil {
 		o.watchManager.StopAll()
+	}
+
+	// Close secret broker — zeroes in-memory plaintext values.
+	if o.secretBroker != nil {
+		_ = o.secretBroker.Close()
 	}
 
 	// Close browser manager (no-op if Chrome was never started)

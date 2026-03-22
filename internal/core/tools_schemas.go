@@ -11,6 +11,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/tools/browser"
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
 	"github.com/M4MEET/soulgate/internal/tools/cron"
+	"github.com/M4MEET/soulgate/internal/brokers/secrets"
 	"github.com/M4MEET/soulgate/internal/tools/email"
 	"github.com/M4MEET/soulgate/internal/tools/embeddings"
 	"github.com/M4MEET/soulgate/internal/tools/filewatcher"
@@ -493,6 +494,18 @@ func (o *Orchestrator) getAllToolSchemas() []model.ToolSchema {
 			Description: s["description"].(string),
 			InputSchema: json.RawMessage(schemaJSON),
 		})
+	}
+
+	// Secret broker tools (secret_set, secret_list, secret_delete, secret_inject)
+	if o.secretBroker != nil {
+		for _, s := range secrets.ToolSchemas() {
+			schemaJSON, _ := json.Marshal(s["input_schema"])
+			tools = append(tools, model.ToolSchema{
+				Name:        s["name"].(string),
+				Description: s["description"].(string),
+				InputSchema: json.RawMessage(schemaJSON),
+			})
+		}
 	}
 
 	// Add tools from configured integrations

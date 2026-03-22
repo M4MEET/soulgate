@@ -16,6 +16,10 @@
 //     sub-directory to the underlying fsnotify watcher.  New sub-directories
 //     created after Start are added dynamically on the first Create event for
 //     that directory.
+//   - Symlink safety: before any path is registered with fsnotify, symlinks
+//     are resolved and the real path is verified to reside inside the declared
+//     workspace root.  Symlinks that escape the workspace are silently skipped
+//     and a warning is written to stderr.
 package filewatcher
 
 import (
@@ -67,6 +71,10 @@ type Watcher struct {
 	// Updated atomically so callers can snapshot without locking.
 	Events atomic.Int64
 
+	// workspaceRoot is used for symlink boundary checks during recursive
+	// directory expansion.  Empty string disables symlink checking.
+	workspaceRoot string
+
 	// Private state — guarded internally.
 	fsWatcher *fsnotify.Watcher
 	cancel    context.CancelFunc
@@ -86,10 +94,11 @@ type WatcherInfo struct {
 // Manager supervises a set of Watcher instances.  It is safe for concurrent
 // use.
 type Manager struct {
-	mu       sync.RWMutex
-	watchers map[string]*Watcher
-	nextID   atomic.Int64
-	callback Callback
+	mu            sync.RWMutex
+	watchers      map[string]*Watcher
+	nextID        atomic.Int64
+	callback      Callback
+	workspaceRoot string // optional; used for symlink boundary enforcement
 }
 
 // NewManager constructs a Manager.  callback is invoked (in its own goroutine)
@@ -103,6 +112,15 @@ func NewManager(callback Callback) *Manager {
 		watchers: make(map[string]*Watcher),
 		callback: callback,
 	}
+}
+
+// SetWorkspaceRoot configures the workspace root used for symlink boundary
+// enforcement.  Any symlink that resolves to a path outside root will be
+// silently skipped.  Call this before Start to enable the check.
+func (m *Manager) SetWorkspaceRoot(root string) {
+	m.mu.Lock()
+	m.workspaceRoot = root
+	m.mu.Unlock()
 }
 
 // Start registers a new watcher and begins receiving events.
@@ -131,12 +149,24 @@ func (m *Manager) Start(ctx context.Context, path, pattern, action string, recur
 		return "", fmt.Errorf("filewatcher: path %q is not accessible: %w", absPath, err)
 	}
 
+	// Determine workspace root for symlink checks.
+	m.mu.RLock()
+	root := m.workspaceRoot
+	m.mu.RUnlock()
+
+	// Enforce symlink boundary on the root path itself before registering.
+	if root != "" {
+		if symlinkEscapes(absPath, root) {
+			return "", fmt.Errorf("filewatcher: path %q resolves outside workspace root %q", absPath, root)
+		}
+	}
+
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return "", fmt.Errorf("filewatcher: failed to create OS watcher: %w", err)
 	}
 
-	if err := addToWatcher(fsw, absPath, recursive); err != nil {
+	if err := addToWatcher(fsw, absPath, recursive, root); err != nil {
 		fsw.Close() //nolint:errcheck
 		return "", err
 	}
@@ -145,14 +175,15 @@ func (m *Manager) Start(ctx context.Context, path, pattern, action string, recur
 	watchCtx, cancel := context.WithCancel(ctx)
 
 	w := &Watcher{
-		ID:        id,
-		Path:      absPath,
-		Pattern:   pattern,
-		Action:    action,
-		Recursive: recursive,
-		CreatedAt: time.Now().UTC(),
-		fsWatcher: fsw,
-		cancel:    cancel,
+		ID:            id,
+		Path:          absPath,
+		Pattern:       pattern,
+		Action:        action,
+		Recursive:     recursive,
+		CreatedAt:     time.Now().UTC(),
+		workspaceRoot: root,
+		fsWatcher:     fsw,
+		cancel:        cancel,
 	}
 
 	m.mu.Lock()
@@ -295,9 +326,29 @@ func (m *Manager) runWatcher(ctx context.Context, w *Watcher) {
 			}
 
 			// Dynamically add new sub-directories for recursive watchers.
+			// Verify symlink boundary before registering the new directory.
 			if w.Recursive && (evt.Op&fsnotify.Create != 0) {
-				if fi, err := os.Stat(evtPath); err == nil && fi.IsDir() {
-					_ = w.fsWatcher.Add(evtPath)
+				fi, statErr := os.Lstat(evtPath)
+				if statErr == nil && fi.IsDir() {
+					// Check symlink safety before adding to the watcher.
+					if w.workspaceRoot != "" && symlinkEscapes(evtPath, w.workspaceRoot) {
+						fmt.Fprintf(os.Stderr,
+							"[filewatcher] warning: skipping %q — symlink resolves outside workspace root\n",
+							evtPath,
+						)
+					} else {
+						_ = w.fsWatcher.Add(evtPath)
+					}
+				} else if statErr == nil && fi.Mode()&os.ModeSymlink != 0 {
+					// It's a symlink to something; resolve and check.
+					if w.workspaceRoot == "" || !symlinkEscapes(evtPath, w.workspaceRoot) {
+						_ = w.fsWatcher.Add(evtPath)
+					} else {
+						fmt.Fprintf(os.Stderr,
+							"[filewatcher] warning: skipping symlink %q — resolves outside workspace root\n",
+							evtPath,
+						)
+					}
 				}
 			}
 
@@ -317,8 +368,9 @@ func (m *Manager) runWatcher(ctx context.Context, w *Watcher) {
 }
 
 // addToWatcher registers absPath with fsw.  When recursive is true every
-// sub-directory is added as well.
-func addToWatcher(fsw *fsnotify.Watcher, absPath string, recursive bool) error {
+// sub-directory is added as well.  workspaceRoot is used for symlink boundary
+// checks; pass an empty string to disable.
+func addToWatcher(fsw *fsnotify.Watcher, absPath string, recursive bool, workspaceRoot string) error {
 	if err := fsw.Add(absPath); err != nil {
 		return fmt.Errorf("filewatcher: cannot watch %q: %w", absPath, err)
 	}
@@ -343,7 +395,35 @@ func addToWatcher(fsw *fsnotify.Watcher, absPath string, recursive bool) error {
 		if p == absPath {
 			return nil // already added above
 		}
+
+		// Use Lstat so we can detect symlinks before following them.
+		lfi, lstatErr := os.Lstat(p)
+		if lstatErr != nil {
+			return nil
+		}
+
+		// Enforce symlink boundary: resolve and verify against workspaceRoot.
+		if lfi.Mode()&os.ModeSymlink != 0 {
+			if workspaceRoot != "" && symlinkEscapes(p, workspaceRoot) {
+				fmt.Fprintf(os.Stderr,
+					"[filewatcher] warning: skipping symlink %q — resolves outside workspace root\n",
+					p,
+				)
+				return filepath.SkipDir // don't descend into a symlinked subtree
+			}
+		}
+
 		if d.IsDir() {
+			// Additional boundary check for real directories as well (handles
+			// bind-mounts or nested roots that bypass symlink detection).
+			if workspaceRoot != "" && symlinkEscapes(p, workspaceRoot) {
+				fmt.Fprintf(os.Stderr,
+					"[filewatcher] warning: skipping %q — path resolves outside workspace root\n",
+					p,
+				)
+				return filepath.SkipDir
+			}
+
 			if addErr := fsw.Add(p); addErr != nil {
 				// Non-fatal — skip inaccessible directories.
 				return nil
@@ -351,6 +431,33 @@ func addToWatcher(fsw *fsnotify.Watcher, absPath string, recursive bool) error {
 		}
 		return nil
 	})
+}
+
+// symlinkEscapes returns true when path (after resolving all symlinks) lies
+// outside workspaceRoot.  It fails closed: any error during resolution is
+// treated as an escape attempt.
+func symlinkEscapes(path, workspaceRoot string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// Cannot resolve — treat as escape to be safe.
+		return true
+	}
+
+	// Ensure workspaceRoot itself is also resolved so the comparison is
+	// between two real (non-symlink) paths.
+	resolvedRoot, err := filepath.EvalSymlinks(workspaceRoot)
+	if err != nil {
+		return true
+	}
+
+	rel, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil {
+		return true
+	}
+
+	// A relative path starting with ".." means the resolved path is outside
+	// the workspace root.
+	return strings.HasPrefix(rel, "..")
 }
 
 // fsnotifyOpToEventType maps an fsnotify.Op bitmask to the coarsest EventType.

@@ -424,6 +424,57 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		},
 	},
 
+	// Secret broker tools — require explicit policy permission to manage secrets.
+	// secret_inject surfaces the handle to the model but never the plaintext value.
+	"secret_set": {
+		Action:         "secrets.write",
+		SchemaResource: "secret:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct {
+				Handle string `json:"handle"`
+			}
+			if err := json.Unmarshal(input, &p); err != nil {
+				return "", fmt.Errorf("invalid tool input: %w", err)
+			}
+			handle := strings.TrimSpace(p.Handle)
+			if handle == "" {
+				return "", fmt.Errorf("secret_set requires non-empty handle")
+			}
+			return "secret:" + handle, nil
+		},
+	},
+	"secret_list": {Action: "secrets.read", Resource: "secret:*", SchemaResource: "secret:*"},
+	"secret_delete": {
+		Action:         "secrets.write",
+		SchemaResource: "secret:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct {
+				Handle string `json:"handle"`
+			}
+			_ = json.Unmarshal(input, &p)
+			handle := strings.TrimSpace(p.Handle)
+			if handle == "" {
+				return "secret:*", nil
+			}
+			return "secret:" + handle, nil
+		},
+	},
+	"secret_inject": {
+		Action:         "secrets.read",
+		SchemaResource: "secret:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct {
+				Handle string `json:"handle"`
+			}
+			_ = json.Unmarshal(input, &p)
+			handle := strings.TrimSpace(p.Handle)
+			if handle == "" {
+				return "secret:*", nil
+			}
+			return "secret:" + handle, nil
+		},
+	},
+
 	// No-permission tools
 	"search_available_tools": {NoPermissionRequired: true},
 	"llm_task":               {NoPermissionRequired: true},

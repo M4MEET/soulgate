@@ -198,6 +198,12 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 	case "email_send":
 		return email.ExecuteTool(ctx, toolCall.Name, toolCall.Input)
 
+	case "secret_set", "secret_list", "secret_delete", "secret_inject":
+		if o.secretBroker == nil {
+			return "", fmt.Errorf("secret broker not available")
+		}
+		return o.secretBroker.ExecuteTool(ctx, toolCall.Name, toolCall.Input)
+
 	case "git_status", "git_diff", "git_log", "git_commit", "git_branch", "git_stash":
 		return gittools.ExecuteTool(ctx, o.workspace.Root, toolCall.Name, toolCall.Input)
 
