@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, RefreshCw, Play, Square, Activity } from 'lucide-react';
+import { Search, RefreshCw, Play, Square, Activity, X, Copy, Check, Clock, Tag, Layers, User, Hash } from 'lucide-react';
 import { fetchAuditEvents, type AuditEvent } from '../lib/api';
 import { formatRelativeTime, truncate } from '../lib/utils';
 import toast from 'react-hot-toast';
@@ -61,6 +61,146 @@ function getEventTime(event: AuditEvent): string {
   return (event as unknown as Record<string, string>).timestamp || event.created_at || '';
 }
 
+function EventDetailPanel({ event, onClose }: { event: AuditEvent; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const time = (event as unknown as Record<string, string>).timestamp || event.created_at || '';
+  const meta = event.metadata || {};
+  const metaEntries = Object.entries(meta).filter(([, v]) => v !== null && v !== undefined);
+
+  const copyJson = () => {
+    navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex justify-end" onClick={onClose}>
+      <div
+        className="w-full max-w-xl bg-zinc-900 border-l border-zinc-800 flex flex-col h-full overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${getTypeColor(event.type)}`}>
+              <Activity size={15} />
+            </div>
+            <div>
+              <div className="font-semibold text-zinc-100 text-sm">{(event.type || '').replace(/\./g, ' ')}</div>
+              <div className="text-xs text-zinc-500">{event.category}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={copyJson}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-400 hover:text-zinc-200 transition-all"
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              {copied ? 'Copied' : 'Copy JSON'}
+            </button>
+            <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Info grid */}
+        <div className="px-6 py-4 border-b border-zinc-800/50 grid grid-cols-2 gap-3 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Tag size={12} className="text-zinc-600" />
+            <span className="text-xs text-zinc-500">Type</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full ml-auto ${getTypeColor(event.type)}`}>
+              {event.type}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Layers size={12} className="text-zinc-600" />
+            <span className="text-xs text-zinc-500">Category</span>
+            <span className="text-xs text-zinc-300 ml-auto">{event.category || '—'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Activity size={12} className="text-zinc-600" />
+            <span className="text-xs text-zinc-500">Status</span>
+            <span className={`text-xs font-medium ml-auto ${getStatusColor(event.status)}`}>{event.status}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Clock size={12} className="text-zinc-600" />
+            <span className="text-xs text-zinc-500">Time</span>
+            <span className="text-xs text-zinc-300 ml-auto">
+              {time ? new Date(time).toLocaleString() : '—'}
+            </span>
+          </div>
+          {event.session_id && (
+            <div className="flex items-center gap-2 col-span-2">
+              <User size={12} className="text-zinc-600" />
+              <span className="text-xs text-zinc-500">Session</span>
+              <span className="text-xs text-indigo-400 font-mono ml-auto">{event.session_id}</span>
+            </div>
+          )}
+          {event.run_id && (
+            <div className="flex items-center gap-2 col-span-2">
+              <Hash size={12} className="text-zinc-600" />
+              <span className="text-xs text-zinc-500">Run</span>
+              <span className="text-xs text-zinc-400 font-mono ml-auto">{event.run_id}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 col-span-2">
+            <Hash size={12} className="text-zinc-600" />
+            <span className="text-xs text-zinc-500">Event ID</span>
+            <span className="text-xs text-zinc-500 font-mono ml-auto">{event.id}</span>
+          </div>
+        </div>
+
+        {/* Metadata */}
+        <div className="flex-1 overflow-y-auto px-6 py-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
+          <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">Metadata</h4>
+          {metaEntries.length === 0 ? (
+            <p className="text-sm text-zinc-600">No metadata</p>
+          ) : (
+            <div className="space-y-2">
+              {metaEntries.map(([key, value]) => (
+                <div key={key} className="rounded-lg bg-zinc-800/40 border border-zinc-700/40 overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/60">
+                    <span className="text-xs font-medium text-zinc-400">{key}</span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+                        toast.success(`Copied "${key}"`);
+                      }}
+                      className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                    >
+                      <Copy size={11} />
+                    </button>
+                  </div>
+                  <div className="px-3 py-2">
+                    {typeof value === 'string' ? (
+                      value.length > 200 ? (
+                        <pre className="text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{value}</pre>
+                      ) : (
+                        <span className="text-sm text-zinc-200">{value}</span>
+                      )
+                    ) : (
+                      <pre className="text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                        {JSON.stringify(value, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Raw JSON */}
+          <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mt-6 mb-3">Raw Event</h4>
+          <pre className="text-xs text-zinc-400 font-mono bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-3 whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+            {JSON.stringify(event, null, 2)}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AuditView() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +210,7 @@ export default function AuditView() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [limit, setLimit] = useState(50);
+  const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
@@ -241,7 +382,7 @@ export default function AuditView() {
               </thead>
               <tbody>
                 {filtered.map((event, idx) => (
-                  <tr key={event.id || idx} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
+                  <tr key={event.id || idx} onClick={() => setSelectedEvent(event)} className="border-b border-zinc-800/40 hover:bg-indigo-500/5 transition-colors cursor-pointer">
                     <td className="px-4 py-2.5 text-xs text-zinc-600 whitespace-nowrap">
                       {getEventTime(event) ? formatRelativeTime(getEventTime(event)) : '—'}
                     </td>
@@ -273,6 +414,11 @@ export default function AuditView() {
           </div>
         )}
       </div>
+
+      {/* Event detail panel */}
+      {selectedEvent && (
+        <EventDetailPanel event={selectedEvent} onClose={() => setSelectedEvent(null)} />
+      )}
     </div>
   );
 }
