@@ -161,6 +161,14 @@ type GatewayAPI struct {
 
 	// DenyRequest denies the approval request with the given ID.
 	DenyRequest func(id, decidedBy string) error
+
+	// GetHeartbeatStatus returns a snapshot of the heartbeat subsystem state.
+	// Returns nil when heartbeat is not wired up.
+	GetHeartbeatStatus func() map[string]interface{}
+
+	// RunHeartbeatNow triggers an immediate heartbeat run outside the normal
+	// ticker schedule. Returns the raw AI response or an error.
+	RunHeartbeatNow func() (string, error)
 }
 
 // Config holds Gateway configuration
@@ -415,6 +423,8 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/policies/", apiHandler(g.handleAPIPolicies))
 	mux.Handle("/api/approvals", apiHandler(g.handleAPIApprovals))
 	mux.Handle("/api/approvals/", apiHandler(g.handleAPIApprovals))
+	mux.Handle("/api/heartbeat", apiHandler(g.handleAPIHeartbeat))
+	mux.Handle("/api/heartbeat/run", apiHandler(g.handleAPIHeartbeatRun))
 
 	// Serve the HTTP chat API if a chat handler is configured
 	if g.config.OnChat != nil {
@@ -624,7 +634,7 @@ func (g *Gateway) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 			"message_count":  s.GetMessageCount(),
 			"assigned_agent": s.GetAssignedAgent(),
 			"created_at":     s.CreatedAt.UTC().Format(time.RFC3339),
-			"updated_at":     s.UpdatedAt.UTC().Format(time.RFC3339),
+			"last_activity":  s.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	g.sessionMux.RUnlock()
@@ -1698,6 +1708,54 @@ func (g *Gateway) handleAPIApprovals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+}
+
+// handleAPIHeartbeat serves GET /api/heartbeat — returns the heartbeat status.
+func (g *Gateway) handleAPIHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != "" {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	api := g.config.API
+	if api == nil || api.GetHeartbeatStatus == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": false,
+			"message": "heartbeat not available",
+		})
+		return
+	}
+
+	writeGatewayJSON(w, http.StatusOK, api.GetHeartbeatStatus())
+}
+
+// handleAPIHeartbeatRun serves POST /api/heartbeat/run — triggers an immediate
+// heartbeat check and returns the AI response.
+func (g *Gateway) handleAPIHeartbeatRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	api := g.config.API
+	if api == nil || api.RunHeartbeatNow == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "heartbeat not available",
+		})
+		return
+	}
+
+	response, err := api.RunHeartbeatNow()
+	if err != nil {
+		writeGatewayJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"response": response,
+	})
 }
 
 // GetClientCount returns the number of connected clients by role

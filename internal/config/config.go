@@ -4,9 +4,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// HeartbeatConfig configures the periodic heartbeat that wakes the AI agent
+// to proactively check for things that need attention.
+type HeartbeatConfig struct {
+	// Enabled controls whether the heartbeat timer runs automatically.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Interval is how often the heartbeat fires. Parsed as a Go duration
+	// string (e.g. "30m", "1h"). Defaults to 30m when zero.
+	Interval time.Duration `yaml:"interval" json:"interval"`
+
+	// Target controls where heartbeat notifications are delivered.
+	// Supported values: "none" (silent), "last" (last known channel), or a
+	// channel name that the caller recognises (e.g. a Telegram chat ID).
+	Target string `yaml:"target" json:"target"`
+
+	// PromptFile is the workspace-relative path to a Markdown file that
+	// provides the heartbeat instructions. Defaults to ".soulgate/HEARTBEAT.md".
+	PromptFile string `yaml:"prompt_file" json:"prompt_file"`
+}
 
 // Config represents the application configuration
 type Config struct {
@@ -42,6 +63,9 @@ type Config struct {
 
 	// Retention policy for audit logs, sessions, cost data, and memory.
 	Retention RetentionConfig `yaml:"retention"`
+
+	// Heartbeat configures the periodic proactive health-check.
+	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
 }
 
 // RetentionConfig defines data-retention settings for all stored artefacts.
@@ -277,6 +301,12 @@ func DefaultConfig() *Config {
 			CostLogDays:  365, // 1 year
 			MemoryDays:   0,   // forever
 			AutoPurge:    false,
+		},
+		Heartbeat: HeartbeatConfig{
+			Enabled:    false,
+			Interval:   30 * time.Minute,
+			Target:     "none",
+			PromptFile: ".soulgate/HEARTBEAT.md",
 		},
 	}
 }

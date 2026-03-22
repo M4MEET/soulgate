@@ -184,11 +184,22 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 		}
 	})
 
+	// Wire heartbeat callback so notifications appear inline in the live view.
+	hb := orch.GetHeartbeat()
+	hb.SetCallback(func(msg string) {
+		lv.mu.Lock()
+		defer lv.mu.Unlock()
+		endStream()
+		fmt.Printf("\n%s Heartbeat: %s%s\n", gwCyan, msg, gwReset)
+	})
+
 	// Create Gateway with built-in chat handler
 	gwConfig := &gateway.Config{
 		Address:           gatewayAddress,
 		Port:              gatewayPort,
 		SessionsDir:       "sessions",
+		Provider:          provider,
+		Model:             modelName,
 		WebhooksFile:      filepath.Join(workspace.ConfigDir, "webhooks.json"),
 		NotificationsFile: filepath.Join(workspace.ConfigDir, "notifications.json"),
 		APIAuthEnabled:    gatewayAuth,
@@ -388,6 +399,7 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 				m := map[string]interface{}{
 					"key":          e.Key,
 					"value":        e.Value,
+					"type":         "string",
 					"created_at":   e.CreatedAt.Format("2006-01-02T15:04:05Z"),
 					"updated_at":   e.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 					"access_count": e.AccessCount,
@@ -489,9 +501,9 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 			logMaps := make([]map[string]interface{}, 0, len(logEntries))
 			for _, e := range logEntries {
 				logMaps = append(logMaps, map[string]interface{}{
-					"time":    e.Time.Format("2006-01-02T15:04:05.000Z"),
-					"kind":    e.Kind,
-					"message": e.Message,
+					"timestamp": e.Time.Format("2006-01-02T15:04:05Z07:00"),
+					"type":      e.Kind,
+					"message":   e.Message,
 				})
 			}
 
@@ -561,9 +573,9 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 			out := make([]map[string]interface{}, 0, len(entries))
 			for _, e := range entries {
 				out = append(out, map[string]interface{}{
-					"time":    e.Time.Format("2006-01-02T15:04:05.000Z"),
-					"kind":    e.Kind,
-					"message": e.Message,
+					"timestamp": e.Time.Format("2006-01-02T15:04:05Z07:00"),
+					"type":      e.Kind,
+					"message":   e.Message,
 				})
 			}
 			return out, nil
@@ -867,6 +879,34 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 				return fmt.Errorf("approval broker not available")
 			}
 			return ab.Deny(id, decidedBy)
+		},
+
+		// GetHeartbeatStatus returns a snapshot of the heartbeat state for the
+		// /api/heartbeat endpoint.
+		GetHeartbeatStatus: func() map[string]interface{} {
+			hb := orch.GetHeartbeat()
+			s := hb.Status()
+			m := map[string]interface{}{
+				"enabled":    s.Enabled,
+				"running":    s.Running,
+				"interval":   s.Interval,
+				"run_count":  s.RunCount,
+			}
+			if !s.LastRun.IsZero() {
+				m["last_run"] = s.LastRun.Format("2006-01-02T15:04:05Z")
+			}
+			if !s.NextRun.IsZero() {
+				m["next_run"] = s.NextRun.Format("2006-01-02T15:04:05Z")
+			}
+			if s.LastResult != "" {
+				m["last_result"] = s.LastResult
+			}
+			return m
+		},
+
+		// RunHeartbeatNow triggers an immediate heartbeat check.
+		RunHeartbeatNow: func() (string, error) {
+			return orch.GetHeartbeat().RunNow()
 		},
 	}
 }

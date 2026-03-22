@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/M4MEET/soulgate/internal/model"
 )
 
 // HealthStatus is the rich payload returned by the /health and /api/health endpoints.
@@ -209,30 +211,33 @@ func (hm *healthMonitor) checkProvider() HealthCheck {
 }
 
 // probeProvider performs the actual network probe.
-// It resolves the provider's API base URL from the configured provider name
+// It resolves the provider's API base URL from the model registry
 // and issues a HEAD request with a 5-second timeout.
 func (hm *healthMonitor) probeProvider() (status, detail string) {
 	provider := hm.gw.config.Provider
 
-	baseURLs := map[string]string{
-		"anthropic":  "https://api.anthropic.com",
-		"openai":     "https://api.openai.com",
-		"groq":       "https://api.groq.com",
-		"google":     "https://generativelanguage.googleapis.com",
-		"mistral":    "https://api.mistral.ai",
-		"cohere":     "https://api.cohere.ai",
-		"deepseek":   "https://api.deepseek.com",
-		"openrouter": "https://openrouter.ai",
-		"together":   "https://api.together.xyz",
-		"perplexity": "https://api.perplexity.ai",
-		"xai":        "https://api.x.ai",
-		"ollama":     "http://localhost:11434",
+	// If provider is empty, try to resolve it from the GatewayAPI config.
+	if provider == "" && hm.gw.config.API != nil && hm.gw.config.API.GetConfig != nil {
+		if cfg := hm.gw.config.API.GetConfig(); cfg != nil {
+			if p, ok := cfg["provider"].(string); ok && p != "" {
+				provider = p
+			}
+		}
 	}
 
-	targetURL, known := baseURLs[provider]
-	if !known {
-		// Unknown or empty provider; skip the network check.
-		return "warn", fmt.Sprintf("no base URL known for provider %q; skipping probe", provider)
+	if provider == "" {
+		return "pass", "no provider configured; probe skipped"
+	}
+
+	// Look up the base URL from the model registry (single source of truth).
+	def, err := model.LookupProvider(provider)
+	if err != nil {
+		return "warn", fmt.Sprintf("unknown provider %q; skipping probe", provider)
+	}
+
+	targetURL := model.ResolveBaseURL(def, "")
+	if targetURL == "" {
+		return "warn", fmt.Sprintf("no base URL for provider %q; skipping probe", provider)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -136,6 +136,15 @@ func InitWorkspace(path string) (*Workspace, error) {
 		return nil, fmt.Errorf("failed to create policy file: %w", err)
 	}
 
+	// Create default HEARTBEAT.md if it does not exist yet.
+	heartbeatPath := filepath.Join(configDir, "HEARTBEAT.md")
+	if _, err := os.Stat(heartbeatPath); os.IsNotExist(err) {
+		if err := createDefaultHeartbeatFile(heartbeatPath); err != nil {
+			// Non-fatal — heartbeat falls back to built-in instructions.
+			fmt.Fprintf(os.Stderr, "warning: could not create HEARTBEAT.md: %v\n", err)
+		}
+	}
+
 	workspace := &Workspace{
 		Root:      absPath,
 		ConfigDir: configDir,
@@ -169,6 +178,23 @@ func findWorkspaceRoot(startPath string) (string, error) {
 
 		current = parent
 	}
+}
+
+// createDefaultHeartbeatFile writes the default HEARTBEAT.md instructions.
+func createDefaultHeartbeatFile(path string) error {
+	content := `# Heartbeat Check
+
+On each heartbeat, check:
+1. Any running background agents that completed or failed
+2. Any file watchers that triggered
+3. System health (disk space, memory)
+4. Any pending approval requests
+5. Cron jobs that failed
+
+If everything is fine, respond with just "OK".
+If something needs attention, describe it briefly.
+`
+	return os.WriteFile(path, []byte(content), 0600)
 }
 
 // createDefaultPolicy creates a default policy file

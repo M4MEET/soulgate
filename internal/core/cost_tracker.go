@@ -56,10 +56,11 @@ type CostEntry struct {
 	SessionID string    `json:"session_id"`
 }
 
-// DayCost holds total spend for a calendar day.
+// DayCost holds total spend and token usage for a calendar day.
 type DayCost struct {
-	Date string  `json:"date"` // "2006-01-02"
-	Cost float64 `json:"cost_usd"`
+	Date   string  `json:"date"` // "2006-01-02"
+	Cost   float64 `json:"cost_usd"`
+	Tokens int     `json:"tokens"`
 }
 
 // CostSummary is a snapshot suitable for the /usage command output.
@@ -296,20 +297,24 @@ func (ct *CostTracker) CostByDay(days int) []DayCost {
 	}
 
 	now := time.Now().UTC()
-	// Build a lookup of date → spend.
+	// Build lookups of date → spend and date → tokens.
 	ct.mu.Lock()
-	dayMap := make(map[string]float64, days)
+	dayCost := make(map[string]float64, days)
+	dayTokens := make(map[string]int, days)
 	for _, e := range ct.entries {
 		d := e.Timestamp.UTC().Format("2006-01-02")
-		dayMap[d] += e.Cost
+		dayCost[d] += e.Cost
+		dayTokens[d] += e.InputTok + e.OutputTok
 	}
 	ct.mu.Unlock()
 
 	result := make([]DayCost, 0, days)
 	for i := days - 1; i >= 0; i-- {
 		day := now.AddDate(0, 0, -i).Format("2006-01-02")
-		if cost, ok := dayMap[day]; ok {
-			result = append(result, DayCost{Date: day, Cost: cost})
+		cost, hasCost := dayCost[day]
+		tokens := dayTokens[day]
+		if hasCost || tokens > 0 {
+			result = append(result, DayCost{Date: day, Cost: cost, Tokens: tokens})
 		}
 	}
 	return result

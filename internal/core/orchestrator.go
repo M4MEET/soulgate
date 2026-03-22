@@ -56,6 +56,7 @@ type Orchestrator struct {
 	pluginManager       *plugins.Manager
 	canvasManager       *canvas.Manager
 	canvasPreviewMgr    *canvas.PreviewManager
+	heartbeat           *Heartbeat                // Optional periodic health-check
 	toolRegistry        *ToolRegistry
 	directives          *Directives
 	loopDetector        *LoopDetector
@@ -290,6 +291,19 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	// Configure symlink boundary enforcement for the file watcher.
 	watchMgr.SetWorkspaceRoot(workspace.Root)
 	watchMgr.ReplaceCallback(orch.makeWatchCallback())
+
+	// Initialize heartbeat if configured.
+	hbCfg := workspace.Config.Heartbeat
+	if hbCfg.Interval <= 0 {
+		hbCfg.Interval = 30 * time.Minute
+	}
+	if hbCfg.PromptFile == "" {
+		hbCfg.PromptFile = ".soulgate/HEARTBEAT.md"
+	}
+	orch.heartbeat = NewHeartbeat(orch, hbCfg)
+	if hbCfg.Enabled {
+		orch.heartbeat.Start()
+	}
 
 	return orch, nil
 }
@@ -701,8 +715,37 @@ func (o *Orchestrator) appendToHistory(msgs ...model.Message) {
 	}
 }
 
+// GetHeartbeat returns the heartbeat subsystem. The returned pointer is never
+// nil — a Heartbeat is always constructed during NewOrchestrator, but it is
+// only started automatically when HeartbeatConfig.Enabled is true.
+func (o *Orchestrator) GetHeartbeat() *Heartbeat {
+	return o.heartbeat
+}
+
+// runHeartbeat executes a single heartbeat prompt through the agentic loop
+// without modifying the user-visible conversation history. This keeps
+// heartbeat checks isolated from the ongoing chat context.
+func (o *Orchestrator) runHeartbeat(ctx context.Context, prompt string) (string, error) {
+	run := o.session.CreateRun(prompt)
+	run.Start()
+
+	response, err := o.executeAgenticLoop(ctx, prompt, run.ID)
+	if err != nil {
+		run.SetResult(fmt.Sprintf("Error: %v", err))
+		return "", err
+	}
+
+	run.SetResult(response)
+	return response, nil
+}
+
 // Close cleans up resources
 func (o *Orchestrator) Close() error {
+	// Stop heartbeat
+	if o.heartbeat != nil {
+		o.heartbeat.Stop()
+	}
+
 	// Stop MCP servers
 	if o.mcpManager != nil {
 		_ = o.mcpManager.StopAll()
