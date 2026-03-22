@@ -149,6 +149,18 @@ type GatewayAPI struct {
 
 	// DeleteScopedPolicy removes a scoped rule by name and persists the change.
 	DeleteScopedPolicy func(name string) error
+
+	// ListApprovals returns all pending approval requests as plain maps.
+	// Each map contains: id, action, resource, reason, requested_by, requested_at,
+	// status, expires_at.
+	ListApprovals func() []map[string]interface{}
+
+	// ApproveRequest approves the approval request with the given ID.
+	// decidedBy is the identifier of the operator making the decision.
+	ApproveRequest func(id, decidedBy string) error
+
+	// DenyRequest denies the approval request with the given ID.
+	DenyRequest func(id, decidedBy string) error
 }
 
 // Config holds Gateway configuration
@@ -401,6 +413,8 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/exec", apiHandler(g.handleAPIExec))
 	mux.Handle("/api/policies", apiHandler(g.handleAPIPolicies))
 	mux.Handle("/api/policies/", apiHandler(g.handleAPIPolicies))
+	mux.Handle("/api/approvals", apiHandler(g.handleAPIApprovals))
+	mux.Handle("/api/approvals/", apiHandler(g.handleAPIApprovals))
 
 	// Serve the HTTP chat API if a chat handler is configured
 	if g.config.OnChat != nil {
@@ -1591,6 +1605,95 @@ func (g *Gateway) handleAPIPolicies(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"rules": api.GetScopedPolicies()})
+		return
+	}
+
+	http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+}
+
+// handleAPIApprovals serves the approval queue endpoints.
+//
+//	GET  /api/approvals              — list pending approval requests
+//	POST /api/approvals/{id}/approve — approve a request (body: {"decided_by":"..."}  optional)
+//	POST /api/approvals/{id}/deny    — deny a request   (body: {"decided_by":"..."}  optional)
+func (g *Gateway) handleAPIApprovals(w http.ResponseWriter, r *http.Request) {
+	api := g.config.API
+
+	// Determine sub-path after /api/approvals/
+	rest := strings.TrimPrefix(r.URL.Path, "/api/approvals")
+	rest = strings.TrimPrefix(rest, "/")
+
+	// POST /api/approvals/{id}/approve  or  /api/approvals/{id}/deny
+	if r.Method == http.MethodPost && rest != "" {
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "expected path: /api/approvals/{id}/approve or /api/approvals/{id}/deny",
+			})
+			return
+		}
+		id := parts[0]
+		action := parts[1] // "approve" or "deny"
+
+		// Parse optional decided_by from body.
+		var body struct {
+			DecidedBy string 
+		}
+		// Best-effort decode; an empty or absent body is fine.
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.DecidedBy == "" {
+			body.DecidedBy = "gateway-api"
+		}
+
+		switch action {
+		case "approve":
+			if api == nil || api.ApproveRequest == nil {
+				writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"error": "approval API not available",
+				})
+				return
+			}
+			if err := api.ApproveRequest(id, body.DecidedBy); err != nil {
+				writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "approved", "id": id})
+
+		case "deny":
+			if api == nil || api.DenyRequest == nil {
+				writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"error": "approval API not available",
+				})
+				return
+			}
+			if err := api.DenyRequest(id, body.DecidedBy); err != nil {
+				writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "denied", "id": id})
+
+		default:
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "unknown action " + action + "; use approve or deny",
+			})
+		}
+		return
+	}
+
+	// GET /api/approvals — list pending requests
+	if r.Method == http.MethodGet || r.Method == "" {
+		if api == nil || api.ListApprovals == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+				"approvals": []interface{}{},
+				"count":     0,
+			})
+			return
+		}
+		approvals := api.ListApprovals()
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"approvals": approvals,
+			"count":     len(approvals),
+		})
 		return
 	}
 

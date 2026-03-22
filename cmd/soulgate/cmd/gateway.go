@@ -825,5 +825,48 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 			}
 			return se.Save()
 		},
+
+		// ListApprovals returns all pending approval requests as plain maps
+		// suitable for JSON transport to the web UI.
+		ListApprovals: func() []map[string]interface{} {
+			ab := orch.GetApprovalBroker()
+			if ab == nil {
+				return []map[string]interface{}{}
+			}
+			pending := ab.ListPending()
+			out := make([]map[string]interface{}, 0, len(pending))
+			for _, req := range pending {
+				m := map[string]interface{}{
+					"id":           req.ID,
+					"action":       req.Action,
+					"resource":     req.Resource,
+					"reason":       req.Reason,
+					"requested_by": req.RequestedBy,
+					"requested_at": req.RequestedAt.Format("2006-01-02T15:04:05Z"),
+					"status":       req.Status,
+					"expires_at":   req.ExpiresAt.Format("2006-01-02T15:04:05Z"),
+				}
+				out = append(out, m)
+			}
+			return out
+		},
+
+		// ApproveRequest approves the pending approval request identified by id.
+		ApproveRequest: func(id, decidedBy string) error {
+			ab := orch.GetApprovalBroker()
+			if ab == nil {
+				return fmt.Errorf("approval broker not available")
+			}
+			return ab.Approve(id, decidedBy)
+		},
+
+		// DenyRequest denies the pending approval request identified by id.
+		DenyRequest: func(id, decidedBy string) error {
+			ab := orch.GetApprovalBroker()
+			if ab == nil {
+				return fmt.Errorf("approval broker not available")
+			}
+			return ab.Deny(id, decidedBy)
+		},
 	}
 }

@@ -37,11 +37,12 @@ import (
 
 // Manager loads, owns, and executes plugin tools.
 type Manager struct {
-	mu        sync.RWMutex
-	pluginDir string
-	plugins   map[string]*Plugin // name -> plugin
-	toolIndex map[string]string  // qualified tool name -> plugin name
-	timeout   time.Duration
+	mu             sync.RWMutex
+	pluginDir      string
+	plugins        map[string]*Plugin // name -> plugin
+	toolIndex      map[string]string  // qualified tool name -> plugin name
+	timeout        time.Duration
+	maxMemoryBytes int64 // per-WASM-module memory cap (used when runtime = wasm)
 }
 
 // Plugin represents a loaded plugin.
@@ -58,16 +59,22 @@ type ToolSchema struct {
 }
 
 // NewManager creates a plugin manager for the given directory.
-func NewManager(pluginDir string, timeoutSec int) *Manager {
+// timeoutSec is the per-tool-call execution timeout (default 30s when <= 0).
+// maxMemoryBytes is the memory cap per WASM module (default 64MB when <= 0).
+func NewManager(pluginDir string, timeoutSec int, maxMemoryBytes int64) *Manager {
 	timeout := 30 * time.Second
 	if timeoutSec > 0 {
 		timeout = time.Duration(timeoutSec) * time.Second
 	}
+	if maxMemoryBytes <= 0 {
+		maxMemoryBytes = 64 * 1024 * 1024 // 64MB default
+	}
 	return &Manager{
-		pluginDir: pluginDir,
-		plugins:   make(map[string]*Plugin),
-		toolIndex: make(map[string]string),
-		timeout:   timeout,
+		pluginDir:      pluginDir,
+		plugins:        make(map[string]*Plugin),
+		toolIndex:      make(map[string]string),
+		timeout:        timeout,
+		maxMemoryBytes: maxMemoryBytes,
 	}
 }
 

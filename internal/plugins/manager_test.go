@@ -43,7 +43,7 @@ tools:
           type: string
 `)
 
-	mgr := NewManager(tmpDir, 10)
+	mgr := NewManager(tmpDir, 10, 0)
 	require.NoError(t, mgr.LoadAll())
 
 	// Should have loaded 1 plugin
@@ -73,7 +73,7 @@ tools:
         a:
           type: number
 `)
-	mgr := NewManager(tmpDir, 10)
+	mgr := NewManager(tmpDir, 10, 0)
 	require.NoError(t, mgr.LoadAll())
 
 	assert.True(t, mgr.IsPluginTool("calc__add"))
@@ -109,7 +109,7 @@ data = json.load(sys.stdin)
 print(json.dumps({"echoed": data.get("message", "")}))
 `)
 
-	mgr := NewManager(tmpDir, 10)
+	mgr := NewManager(tmpDir, 10, 0)
 	require.NoError(t, mgr.LoadAll())
 
 	input, _ := json.Marshal(map[string]string{"message": "hello world"})
@@ -124,7 +124,7 @@ print(json.dumps({"echoed": data.get("message", "")}))
 func TestManagerReload(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	mgr := NewManager(tmpDir, 10)
+	mgr := NewManager(tmpDir, 10, 0)
 	require.NoError(t, mgr.LoadAll())
 	assert.Equal(t, 0, len(mgr.ListPlugins()))
 
@@ -161,7 +161,7 @@ tools:
       type: object
 `)
 
-	mgr := NewManager(tmpDir, 10)
+	mgr := NewManager(tmpDir, 10, 0)
 	require.NoError(t, mgr.LoadAll()) // doesn't error, just warns
 	assert.Equal(t, 0, len(mgr.ListPlugins()))
 }
@@ -170,7 +170,7 @@ func TestManagerEmptyDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	nonExistent := filepath.Join(tmpDir, "nope")
 
-	mgr := NewManager(nonExistent, 10)
+	mgr := NewManager(nonExistent, 10, 0)
 	require.NoError(t, mgr.LoadAll())
 	assert.Equal(t, 0, len(mgr.ListPlugins()))
 }
@@ -191,7 +191,7 @@ tools:
       type: object
 `)
 
-	mgr := NewManager(tmpDir, 1) // 1 second timeout
+	mgr := NewManager(tmpDir, 1, 0) // 1 second timeout
 	require.NoError(t, mgr.LoadAll())
 
 	_, err := mgr.ExecuteTool(context.Background(), "slow__hang", []byte("{}"))
@@ -222,7 +222,7 @@ print("something went wrong", file=sys.stderr)
 sys.exit(1)
 `)
 
-	mgr := NewManager(tmpDir, 10)
+	mgr := NewManager(tmpDir, 10, 0)
 	require.NoError(t, mgr.LoadAll())
 
 	_, err := mgr.ExecuteTool(context.Background(), "failing__fail", []byte("{}"))

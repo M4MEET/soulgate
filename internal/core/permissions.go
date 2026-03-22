@@ -124,24 +124,47 @@ func (o *Orchestrator) SetPermissionCallback(callback PermissionCallback) {
 	o.permissionCallback = callback
 }
 
-// RequestPermission requests permission from the user via callback
-func (o *Orchestrator) RequestPermission(action string, resource string, reason string) (bool, bool) {
+// RequestPermission requests permission from the user.
+//
+// Decision path:
+//  1. If a TUI/interactive permissionCallback is registered, delegate to it.
+//  2. Otherwise, if an approvalBroker is configured, queue an async approval
+//     request and block until a human decides via the gateway API (5-min timeout).
+//  3. If neither is available, deny by default (safe fallback).
+//
+// Returns (approved, learnPattern). learnPattern is always false for async
+// approvals because the broker decision is not yet wired to the policy learner.
+func (o *Orchestrator) RequestPermission(ctx context.Context, action string, resource string, reason string) (bool, bool) {
 	action = normalizePolicyAction(action)
 
-	if o.permissionCallback == nil {
-		// No callback set - deny by default
-		return false, false
+	// Path 1: interactive TUI callback takes priority.
+	if o.permissionCallback != nil {
+		req := PermissionRequest{
+			Action:      action,
+			Resource:    resource,
+			Description: FormatPermissionDescription(action, resource),
+			Reason:      reason,
+		}
+		resp := o.permissionCallback(req)
+		return resp.Approved, resp.LearnPattern
 	}
 
-	req := PermissionRequest{
-		Action:      action,
-		Resource:    resource,
-		Description: FormatPermissionDescription(action, resource),
-		Reason:      reason,
+	// Path 2: async approval broker — blocks until decided or timeout.
+	if o.approvalBroker != nil {
+		requestedBy := "agent"
+		if o.session != nil {
+			requestedBy = o.session.ID
+		}
+		approved, err := o.approvalBroker.RequestApproval(ctx, action, resource, reason, requestedBy)
+		if err != nil {
+			// Context cancelled or internal error — deny safely.
+			return false, false
+		}
+		return approved, false
 	}
 
-	resp := o.permissionCallback(req)
-	return resp.Approved, resp.LearnPattern
+	// Path 3: no decision mechanism — default deny.
+	return false, false
 }
 
 // LearnPermission adds a learned permission rule and saves to policy file
@@ -305,7 +328,9 @@ func (o *Orchestrator) checkOrRequestPermissionWithFallback(
 	}
 
 	// Policy denied - request permission from user using the primary action.
-	approved, learn := o.RequestPermission(primaryAction, resource, primaryReason)
+	// RequestPermission will use the TUI callback if available, the async
+	// approval broker if configured, or deny by default.
+	approved, learn := o.RequestPermission(ctx, primaryAction, resource, primaryReason)
 	if !approved {
 		return false, primaryAction, primaryReason
 	}
