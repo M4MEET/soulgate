@@ -58,6 +58,8 @@ export interface AgentConfig {
   system_prompt: string;
   timeout_seconds: number;
   auto_restart: boolean;
+  schedule_enabled: boolean;
+  schedule_cron: string;
 }
 
 export interface AgentMetrics {
@@ -129,7 +131,7 @@ export interface CostSummary {
   session_calls: number;
   by_provider: Record<string, number>;
   by_model: Record<string, number>;
-  last_7_days: { date: string; cost_usd: number }[];
+  last_7_days: { date: string; cost_usd: number; tokens?: number }[];
 }
 
 export interface CronJob {
@@ -301,6 +303,8 @@ function makeDemoConfig(): AgentConfig {
     system_prompt: '',
     timeout_seconds: 300,
     auto_restart: false,
+    schedule_enabled: false,
+    schedule_cron: '',
   };
 }
 
@@ -412,7 +416,7 @@ export async function fetchCosts(): Promise<CostData[]> {
   return summary.last_7_days.map(d => ({
     date: d.date,
     cost: d.cost_usd,
-    tokens: 0,
+    tokens: d.tokens ?? 0,
   }));
 }
 

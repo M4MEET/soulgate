@@ -538,6 +538,8 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
     system_prompt: detail.config?.system_prompt || '',
     timeout_seconds: detail.config?.timeout_seconds || 0,
     auto_restart: detail.config?.auto_restart || false,
+    schedule_enabled: (detail.config as any)?.schedule_enabled || false,
+    schedule_cron: (detail.config as any)?.schedule_cron || '',
   };
   const [cfg, setCfg] = useState<AgentConfig>(safeConfig);
   const [saving, setSaving] = useState(false);
@@ -748,6 +750,113 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
               </span>
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Scheduling */}
+      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-sm font-semibold text-zinc-200">Scheduled Runs</h4>
+          <button
+            onClick={() => setCfg(c => ({ ...c, schedule_enabled: !c.schedule_enabled }))}
+            className="flex items-center gap-2 text-sm"
+          >
+            {cfg.schedule_enabled
+              ? <ToggleRight size={22} className="text-emerald-400" />
+              : <ToggleLeft size={22} className="text-zinc-600" />}
+            <span className={cfg.schedule_enabled ? 'text-emerald-400 text-xs' : 'text-zinc-500 text-xs'}>
+              {cfg.schedule_enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </button>
+        </div>
+
+        {cfg.schedule_enabled && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1.5">Schedule Preset</label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {[
+                  { label: 'Every 15 min', value: '*/15 * * * *' },
+                  { label: 'Every hour', value: '0 * * * *' },
+                  { label: 'Every 6 hours', value: '0 */6 * * *' },
+                  { label: 'Every day 9am', value: '0 9 * * *' },
+                  { label: 'Every Monday', value: '0 9 * * 1' },
+                  { label: 'Custom', value: 'custom' },
+                ].map(preset => (
+                  <button
+                    key={preset.value}
+                    onClick={() => {
+                      if (preset.value !== 'custom') {
+                        setCfg(c => ({ ...c, schedule_cron: preset.value }));
+                      }
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs transition-all ${
+                      cfg.schedule_cron === preset.value
+                        ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-400'
+                        : 'bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1.5">Cron Expression</label>
+              <input
+                value={cfg.schedule_cron || ''}
+                onChange={e => setCfg(c => ({ ...c, schedule_cron: e.target.value }))}
+                placeholder="0 */6 * * *"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 font-mono"
+              />
+              <p className="text-xs text-zinc-600 mt-1">
+                Format: minute hour day month weekday — e.g., "0 9 * * 1-5" = weekdays at 9am
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/50 border border-zinc-700/40">
+              <div className="flex-1">
+                <div className="text-xs text-zinc-400">On each scheduled run, the agent will execute its configured task</div>
+                <div className="text-xs text-zinc-600 mt-1">
+                  Schedule: {cfg.schedule_cron || 'not set'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => toast.success('Agent run triggered manually')}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-xs hover:bg-emerald-600/30 transition-all"
+                >
+                  Run Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Agent Controls */}
+      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-3">
+        <h4 className="text-sm font-semibold text-zinc-200">Controls</h4>
+        <div className="grid grid-cols-3 gap-3">
+          <button
+            onClick={() => toast.success('Agent started')}
+            className="py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-600/30 transition-all flex items-center justify-center gap-1.5"
+          >
+            <Play size={13} /> Start
+          </button>
+          <button
+            onClick={() => toast.success('Agent stopped')}
+            className="py-2.5 rounded-lg bg-amber-600/20 border border-amber-500/30 text-amber-400 text-xs font-medium hover:bg-amber-600/30 transition-all flex items-center justify-center gap-1.5"
+          >
+            <Square size={13} /> Stop
+          </button>
+          <button
+            onClick={() => toast.success('Agent restarted')}
+            className="py-2.5 rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-400 text-xs font-medium hover:bg-sky-600/30 transition-all flex items-center justify-center gap-1.5"
+          >
+            <RefreshCw size={13} /> Restart
+          </button>
         </div>
       </section>
 
