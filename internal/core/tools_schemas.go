@@ -373,6 +373,219 @@ func (o *Orchestrator) getAllToolSchemas() []model.ToolSchema {
 		}`),
 	})
 
+	// Skill self-modification tools — allow the AI to create, list, update, and
+	// learn new skills at runtime. Skills are SKILL.md files that get injected
+	// into the system prompt, shaping the agent's behavior persistently.
+	tools = append(tools, model.ToolSchema{
+		Name:        "skill_create",
+		Description: "Create a new skill that shapes your behavior persistently. The skill is written as a SKILL.md file and automatically loaded into your system prompt on future runs. Use this to learn new capabilities, remember user preferences, or build automation workflows.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"description": "Skill identifier (lowercase, hyphens allowed, e.g. 'email-drafting')"
+				},
+				"content": {
+					"type": "string",
+					"description": "Full SKILL.md content in markdown. Must include: # Skill: <name>, ## Behavior, ## Tools, ## Examples sections."
+				}
+			},
+			"required": ["id", "content"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "skill_list",
+		Description: "List all available skills with their names and descriptions. Use this to understand what behavioral skills are currently active.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {}
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "skill_update",
+		Description: "Update an existing skill's content. Use this to refine a skill based on feedback or new requirements.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"description": "Skill identifier to update"
+				},
+				"content": {
+					"type": "string",
+					"description": "New SKILL.md content (replaces the entire file)"
+				}
+			},
+			"required": ["id", "content"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "skill_learn",
+		Description: "Learn from a user correction or preference by creating or updating a behavioral skill. Call this when the user says 'remember this', 'always do X', 'never do Y', or corrects your approach. The learning is persisted as a skill that shapes future behavior.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"lesson": {
+					"type": "string",
+					"description": "What you learned (e.g. 'User prefers bullet points over paragraphs')"
+				},
+				"category": {
+					"type": "string",
+					"description": "Category for the learning",
+					"enum": ["preference", "correction", "workflow", "tone", "format", "integration"]
+				}
+			},
+			"required": ["lesson", "category"]
+		}`),
+	})
+
+	// Hub tools — allow the AI to search, install, and manage packages
+	// (skills, plugins, connectors, MCP servers, agents) from the SoulGate Hub.
+	// Plugin creation — allows the AI to create script-based tool plugins at runtime.
+	// The plugin becomes a callable tool immediately after creation (no restart needed).
+	tools = append(tools, model.ToolSchema{
+		Name:        "plugin_create",
+		Description: "Create a new script plugin that registers as a callable tool. Write a Python/Node/Bash script that reads JSON from stdin and writes JSON to stdout. The plugin becomes available immediately. Use this to extend your capabilities with custom tools.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"description": "Plugin name (lowercase, hyphens, e.g. 'weather-lookup')"
+				},
+				"description": {
+					"type": "string",
+					"description": "What this plugin does"
+				},
+				"language": {
+					"type": "string",
+					"description": "Script language",
+					"enum": ["python3", "node", "bash"]
+				},
+				"script": {
+					"type": "string",
+					"description": "The script source code. Must read JSON from stdin and print JSON result to stdout."
+				},
+				"tool_name": {
+					"type": "string",
+					"description": "Name for the tool (will be exposed as pluginname__toolname)"
+				},
+				"tool_description": {
+					"type": "string",
+					"description": "Description shown to the model for this tool"
+				},
+				"input_schema": {
+					"type": "object",
+					"description": "JSON Schema for the tool's input parameters"
+				},
+				"requires_env": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Environment variables the script needs (e.g. ['WEATHER_API_KEY'])"
+				},
+				"requires_bins": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Binaries the script needs on PATH (e.g. ['curl', 'jq'])"
+				}
+			},
+			"required": ["name", "description", "language", "script", "tool_name", "tool_description", "input_schema"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "plugin_list",
+		Description: "List all installed plugins with their tools.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {}
+		}`),
+	})
+
+	// Hub tools — full package lifecycle: search, install, uninstall, update, info, list.
+	// Covers all 6 package types: skills, plugins, agents, MCP servers, connectors, extensions.
+	tools = append(tools, model.ToolSchema{
+		Name:        "hub_search",
+		Description: "Search the SoulGate Hub for packages. Returns skills, plugins, connectors, MCP servers, agents, and extensions matching the query.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"description": "Search query (matches name, description, and tags)"
+				}
+			},
+			"required": ["query"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "hub_install",
+		Description: "Install a package from the SoulGate Hub. Supports: skill, plugin, agent, mcp, connector, extension. Format: 'type/name' or 'type:name'.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"package": {
+					"type": "string",
+					"description": "Package identifier (e.g. 'skill/code-review', 'mcp/github', 'connector/discord', 'plugin/weather')"
+				}
+			},
+			"required": ["package"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "hub_uninstall",
+		Description: "Uninstall a locally installed Hub package.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"package": {
+					"type": "string",
+					"description": "Package identifier to remove (e.g. 'skill/code-review', 'mcp/github')"
+				}
+			},
+			"required": ["package"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "hub_update",
+		Description: "Update all installed Hub packages to their latest versions from the registry.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {}
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "hub_info",
+		Description: "Get detailed information about a specific Hub package (version, description, author, files).",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"package": {
+					"type": "string",
+					"description": "Package identifier (e.g. 'skill/code-review')"
+				}
+			},
+			"required": ["package"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "hub_list",
+		Description: "List all locally installed Hub packages with their types, versions, and install dates.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {}
+		}`),
+	})
+
 	// Web tools (web_search, web_fetch)
 	for _, s := range web.ToolSchemas() {
 		tools = append(tools, model.ToolSchema{

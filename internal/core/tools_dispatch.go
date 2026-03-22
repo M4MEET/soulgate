@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/brokers"
 	"github.com/M4MEET/soulgate/internal/config"
+	"github.com/M4MEET/soulgate/internal/hub"
 	"github.com/M4MEET/soulgate/internal/mcp"
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/policy"
+	"github.com/M4MEET/soulgate/internal/skills"
 	"github.com/M4MEET/soulgate/internal/tools/browser"
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
 	"github.com/M4MEET/soulgate/internal/tools/computer"
@@ -107,6 +110,33 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 
 	case "agent_message":
 		return o.handleAgentMessage(ctx, toolCall.Input)
+
+	case "skill_create":
+		return o.handleSkillCreate(ctx, toolCall.Input)
+	case "skill_list":
+		return o.handleSkillList(ctx, toolCall.Input)
+	case "skill_update":
+		return o.handleSkillUpdate(ctx, toolCall.Input)
+	case "skill_learn":
+		return o.handleSkillLearn(ctx, toolCall.Input)
+
+	case "plugin_create":
+		return o.handlePluginCreate(ctx, toolCall.Input)
+	case "plugin_list":
+		return o.handlePluginList(ctx, toolCall.Input)
+
+	case "hub_search":
+		return o.handleHubSearch(ctx, toolCall.Input)
+	case "hub_install":
+		return o.handleHubInstall(ctx, toolCall.Input)
+	case "hub_uninstall":
+		return o.handleHubUninstall(ctx, toolCall.Input)
+	case "hub_update":
+		return o.handleHubUpdate(ctx, toolCall.Input)
+	case "hub_info":
+		return o.handleHubInfo(ctx, toolCall.Input)
+	case "hub_list":
+		return o.handleHubList(ctx, toolCall.Input)
 
 	case "delegate_task":
 		return o.handleDelegateTask(ctx, runID, toolCall.Input)
@@ -488,6 +518,391 @@ func (e *llmTaskExecutor) Complete(ctx context.Context, prompt string, jsonMode 
 		return "", err
 	}
 	return resp.Message.Content, nil
+}
+
+// ── Skill self-modification handlers ─────────────────────────────────────────
+
+func (o *Orchestrator) handleSkillCreate(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.ID == "" || params.Content == "" {
+		return "", fmt.Errorf("id and content are required")
+	}
+
+	skillDir := filepath.Join(o.workspace.Root, o.workspace.Config.Skills.Dir, params.ID)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create skill dir: %w", err)
+	}
+
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	// Don't overwrite existing — use skill_update for that
+	if _, err := os.Stat(skillFile); err == nil {
+		return "", fmt.Errorf("skill '%s' already exists — use skill_update to modify it", params.ID)
+	}
+
+	if err := os.WriteFile(skillFile, []byte(params.Content), 0644); err != nil {
+		return "", fmt.Errorf("failed to write SKILL.md: %w", err)
+	}
+
+	return fmt.Sprintf("Skill '%s' created successfully. It will be active in your system prompt on the next message.", params.ID), nil
+}
+
+func (o *Orchestrator) handleSkillList(_ context.Context, _ json.RawMessage) (string, error) {
+	loader := skills.NewLoader(filepath.Join(o.workspace.Root, o.workspace.Config.Skills.Dir))
+	allSkills, err := loader.LoadAll()
+	if err != nil {
+		return "", fmt.Errorf("failed to list skills: %w", err)
+	}
+
+	if len(allSkills) == 0 {
+		return "No skills installed. Use skill_create to create one.", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%d skill(s) installed:\n\n", len(allSkills)))
+	for _, s := range allSkills {
+		sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", s.Name, s.ID, s.Description))
+	}
+	return sb.String(), nil
+}
+
+func (o *Orchestrator) handleSkillUpdate(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.ID == "" || params.Content == "" {
+		return "", fmt.Errorf("id and content are required")
+	}
+
+	skillFile := filepath.Join(o.workspace.Root, o.workspace.Config.Skills.Dir, params.ID, "SKILL.md")
+	if _, err := os.Stat(skillFile); os.IsNotExist(err) {
+		return "", fmt.Errorf("skill '%s' not found — use skill_create to create it first", params.ID)
+	}
+
+	if err := os.WriteFile(skillFile, []byte(params.Content), 0644); err != nil {
+		return "", fmt.Errorf("failed to update SKILL.md: %w", err)
+	}
+
+	return fmt.Sprintf("Skill '%s' updated successfully.", params.ID), nil
+}
+
+func (o *Orchestrator) handleSkillLearn(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Lesson   string `json:"lesson"`
+		Category string `json:"category"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Lesson == "" {
+		return "", fmt.Errorf("lesson is required")
+	}
+	if params.Category == "" {
+		params.Category = "preference"
+	}
+
+	// The "learned-behaviors" skill accumulates user corrections and preferences.
+	// Each learning is appended to the skill file so it builds up over time.
+	skillDir := filepath.Join(o.workspace.Root, o.workspace.Config.Skills.Dir, "learned-behaviors")
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+
+	var existing string
+	if data, err := os.ReadFile(skillFile); err == nil {
+		existing = string(data)
+	} else {
+		// Create the skill with a header
+		if err := os.MkdirAll(skillDir, 0755); err != nil {
+			return "", fmt.Errorf("failed to create learned-behaviors dir: %w", err)
+		}
+		existing = `# Skill: Learned Behaviors
+
+Accumulated learnings from user corrections, preferences, and feedback.
+Apply these consistently in all future interactions.
+
+## Behaviors
+
+`
+	}
+
+	// Append the new learning
+	entry := fmt.Sprintf("- [%s] %s\n", params.Category, params.Lesson)
+	updated := existing + entry
+
+	if err := os.WriteFile(skillFile, []byte(updated), 0644); err != nil {
+		return "", fmt.Errorf("failed to save learning: %w", err)
+	}
+
+	return fmt.Sprintf("Learned: [%s] %s\nThis will be applied in all future interactions.", params.Category, params.Lesson), nil
+}
+
+// ── Plugin creation handlers ─────────────────────────────────────────────────
+
+func (o *Orchestrator) handlePluginCreate(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Name            string                 `json:"name"`
+		Description     string                 `json:"description"`
+		Language        string                 `json:"language"`
+		Script          string                 `json:"script"`
+		ToolName        string                 `json:"tool_name"`
+		ToolDescription string                 `json:"tool_description"`
+		InputSchema     map[string]interface{} `json:"input_schema"`
+		RequiresEnv     []string               `json:"requires_env"`
+		RequiresBins    []string               `json:"requires_bins"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Name == "" || params.Script == "" || params.ToolName == "" {
+		return "", fmt.Errorf("name, script, and tool_name are required")
+	}
+
+	pluginDir := filepath.Join(o.workspace.Root, o.workspace.Config.Plugins.Dir, params.Name)
+
+	// Don't overwrite existing plugins
+	if _, err := os.Stat(pluginDir); err == nil {
+		return "", fmt.Errorf("plugin '%s' already exists", params.Name)
+	}
+
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create plugin dir: %w", err)
+	}
+
+	// Determine script filename and command
+	var scriptFile, command string
+	switch params.Language {
+	case "python3", "python":
+		scriptFile = "main.py"
+		command = "python3 main.py"
+	case "node", "nodejs":
+		scriptFile = "main.js"
+		command = "node main.js"
+	case "bash", "sh":
+		scriptFile = "main.sh"
+		command = "bash main.sh"
+	default:
+		scriptFile = "main.py"
+		command = "python3 main.py"
+	}
+
+	// Write the script file
+	scriptPath := filepath.Join(pluginDir, scriptFile)
+	if err := os.WriteFile(scriptPath, []byte(params.Script), 0755); err != nil {
+		return "", fmt.Errorf("failed to write script: %w", err)
+	}
+
+	// Build manifest.yml
+	inputSchemaJSON, _ := json.Marshal(params.InputSchema)
+
+	requires := ""
+	if len(params.RequiresEnv) > 0 || len(params.RequiresBins) > 0 {
+		requires = "requires:\n"
+		if len(params.RequiresEnv) > 0 {
+			requires += "  env:\n"
+			for _, e := range params.RequiresEnv {
+				requires += fmt.Sprintf("    - %s\n", e)
+			}
+		}
+		if len(params.RequiresBins) > 0 {
+			requires += "  bins:\n"
+			for _, b := range params.RequiresBins {
+				requires += fmt.Sprintf("    - %s\n", b)
+			}
+		}
+	}
+
+	manifest := fmt.Sprintf(`name: %s
+version: 1.0.0
+description: %s
+runtime: script
+tools:
+  - name: %s
+    description: %s
+    command: %s
+    input_schema: %s
+%s`, params.Name, params.Description, params.ToolName, params.ToolDescription, command, string(inputSchemaJSON), requires)
+
+	manifestPath := filepath.Join(pluginDir, "manifest.yml")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
+		return "", fmt.Errorf("failed to write manifest: %w", err)
+	}
+
+	// Reload plugin manager to pick up the new plugin
+	if o.pluginManager != nil {
+		if err := o.pluginManager.Reload(); err != nil {
+			return fmt.Sprintf("Plugin '%s' created but failed to reload: %v. It will be available after restart.", params.Name, err), nil
+		}
+	}
+
+	qualifiedName := fmt.Sprintf("%s__%s", params.Name, params.ToolName)
+	return fmt.Sprintf("Plugin '%s' created and loaded. Tool '%s' is now available.", params.Name, qualifiedName), nil
+}
+
+func (o *Orchestrator) handlePluginList(_ context.Context, _ json.RawMessage) (string, error) {
+	if o.pluginManager == nil {
+		return "Plugin manager not available.", nil
+	}
+
+	pluginNames := o.pluginManager.ListPlugins()
+	if len(pluginNames) == 0 {
+		return "No plugins installed. Use plugin_create to create one.", nil
+	}
+
+	schemas := o.pluginManager.GetToolSchemas()
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%d plugin(s) installed:\n\n", len(pluginNames)))
+	for _, name := range pluginNames {
+		sb.WriteString(fmt.Sprintf("**%s**\n", name))
+		for _, s := range schemas {
+			if strings.HasPrefix(s.Name, name+"__") {
+				sb.WriteString(fmt.Sprintf("  - `%s`: %s\n", s.Name, s.Description))
+			}
+		}
+	}
+	return sb.String(), nil
+}
+
+// ── Hub package management handlers ─────────────────────────────────────────
+
+func (o *Orchestrator) handleHubSearch(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+
+	h := hub.NewHub(o.workspace.Root)
+	results, err := h.Search(params.Query)
+	if err != nil {
+		return "", fmt.Errorf("hub search failed: %w", err)
+	}
+
+	if len(results) == 0 {
+		return fmt.Sprintf("No packages found for '%s'.", params.Query), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d package(s) matching '%s':\n\n", len(results), params.Query))
+	for _, p := range results {
+		sb.WriteString(fmt.Sprintf("- **%s/%s** (v%s) — %s\n", p.Type, p.Name, p.Version, p.Description))
+		if len(p.Tags) > 0 {
+			sb.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(p.Tags, ", ")))
+		}
+	}
+	sb.WriteString("\nUse hub_install to install any package.")
+	return sb.String(), nil
+}
+
+func (o *Orchestrator) handleHubInstall(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Package string `json:"package"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Package == "" {
+		return "", fmt.Errorf("package is required (format: type/name)")
+	}
+
+	h := hub.NewHub(o.workspace.Root)
+	if err := h.Install(params.Package); err != nil {
+		return "", fmt.Errorf("installation failed: %w", err)
+	}
+
+	return fmt.Sprintf("Package '%s' installed successfully.", params.Package), nil
+}
+
+func (o *Orchestrator) handleHubList(_ context.Context, _ json.RawMessage) (string, error) {
+	h := hub.NewHub(o.workspace.Root)
+	installed, err := h.List()
+	if err != nil {
+		return "", fmt.Errorf("failed to list installed packages: %w", err)
+	}
+
+	if len(installed) == 0 {
+		return "No packages installed from the Hub. Use hub_search to find packages.", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%d package(s) installed:\n\n", len(installed)))
+	for _, p := range installed {
+		sb.WriteString(fmt.Sprintf("- **%s/%s** (v%s) — installed %s\n", p.Type, p.Name, p.Version, p.InstalledAt.Format("2006-01-02")))
+	}
+	return sb.String(), nil
+}
+
+func (o *Orchestrator) handleHubUninstall(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Package string `json:"package"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Package == "" {
+		return "", fmt.Errorf("package is required")
+	}
+
+	h := hub.NewHub(o.workspace.Root)
+	if err := h.Uninstall(params.Package); err != nil {
+		return "", fmt.Errorf("uninstall failed: %w", err)
+	}
+
+	return fmt.Sprintf("Package '%s' uninstalled successfully.", params.Package), nil
+}
+
+func (o *Orchestrator) handleHubUpdate(_ context.Context, _ json.RawMessage) (string, error) {
+	h := hub.NewHub(o.workspace.Root)
+	if err := h.Update(); err != nil {
+		return "", fmt.Errorf("update failed: %w", err)
+	}
+	return "All installed packages updated to latest versions.", nil
+}
+
+func (o *Orchestrator) handleHubInfo(_ context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Package string `json:"package"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Package == "" {
+		return "", fmt.Errorf("package is required")
+	}
+
+	h := hub.NewHub(o.workspace.Root)
+	pkg, err := h.Info(params.Package)
+	if err != nil {
+		return "", fmt.Errorf("info failed: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("**%s/%s** v%s\n\n", pkg.Type, pkg.Name, pkg.Version))
+	sb.WriteString(fmt.Sprintf("Description: %s\n", pkg.Description))
+	if pkg.Author != "" {
+		sb.WriteString(fmt.Sprintf("Author: %s\n", pkg.Author))
+	}
+	if len(pkg.Tags) > 0 {
+		sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(pkg.Tags, ", ")))
+	}
+	if pkg.Repository != "" {
+		sb.WriteString(fmt.Sprintf("Repository: %s\n", pkg.Repository))
+	}
+	if len(pkg.Files) > 0 {
+		sb.WriteString(fmt.Sprintf("Files: %s\n", strings.Join(pkg.Files, ", ")))
+	}
+	return sb.String(), nil
 }
 
 // handleDelegateTask spawns an isolated sub-agent to handle a complex task.
