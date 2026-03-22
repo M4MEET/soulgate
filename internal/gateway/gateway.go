@@ -1096,25 +1096,30 @@ func (g *Gateway) handleAPITools(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAPIAgents handles GET /api/agents.
-// Returns the list of background agents and their current status.
+// handleAPIAgents handles GET /api/agents (list) and POST /api/agents (create).
 func (g *Gateway) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-	if g.config.API == nil || g.config.API.GetAgents == nil {
+	switch r.Method {
+	case http.MethodGet:
+		if g.config.API == nil || g.config.API.GetAgents == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+				"agents":    []interface{}{},
+				"available": false,
+			})
+			return
+		}
+		agents := g.config.API.GetAgents()
 		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
-			"agents":    []interface{}{},
-			"available": false,
+			"agents": agents,
+			"count":  len(agents),
 		})
-		return
+
+	case http.MethodPost:
+		// Create agent — same logic as POST /api/agent
+		g.handleAPIAgent(w, r)
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
-	agents := g.config.API.GetAgents()
-	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
-		"agents": agents,
-		"count":  len(agents),
-	})
 }
 
 // handleAPIAgent handles POST /api/agent (create) and DELETE /api/agent/{id} (stop).
