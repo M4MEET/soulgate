@@ -77,6 +77,19 @@ type WorkspaceConfig struct {
 	ConfigDir string `yaml:"config_dir"`
 }
 
+// FallbackProviderConfig defines a single entry in the model fallback chain.
+type FallbackProviderConfig struct {
+	// Provider is the provider name from the registry (e.g. "groq", "ollama").
+	Provider string `yaml:"provider"`
+
+	// Model is the model name to use with this provider.
+	// If empty the provider's DefaultModel is used.
+	Model string `yaml:"model,omitempty"`
+
+	// Priority controls evaluation order — lower numbers are tried first.
+	Priority int `yaml:"priority"`
+}
+
 // ModelConfig defines model provider settings
 type ModelConfig struct {
 	// Default provider (openai, anthropic)
@@ -85,6 +98,11 @@ type ModelConfig struct {
 	// Provider-specific settings
 	OpenAI    OpenAIConfig    `yaml:"openai"`
 	Anthropic AnthropicConfig `yaml:"anthropic"`
+
+	// FallbackChain is an ordered list of providers to try when the primary
+	// provider fails with a retryable error (429, 500, 503, connection loss).
+	// Entries are sorted by Priority ascending before use.
+	FallbackChain []FallbackProviderConfig `yaml:"fallback_chain,omitempty"`
 }
 
 // OpenAIConfig defines OpenAI-specific settings

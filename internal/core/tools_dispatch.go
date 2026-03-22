@@ -16,8 +16,10 @@ import (
 	"github.com/M4MEET/soulgate/internal/tools/browser"
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
 	"github.com/M4MEET/soulgate/internal/tools/cron"
+	"github.com/M4MEET/soulgate/internal/tools/email"
 	"github.com/M4MEET/soulgate/internal/tools/embeddings"
 	"github.com/M4MEET/soulgate/internal/tools/filewatcher"
+	gittools "github.com/M4MEET/soulgate/internal/tools/git"
 	"github.com/M4MEET/soulgate/internal/tools/imagegen"
 	"github.com/M4MEET/soulgate/internal/tools/llmtask"
 	"github.com/M4MEET/soulgate/internal/tools/patch"
@@ -192,6 +194,12 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 
 	case "mcp_get_prompt":
 		return o.handleMCPGetPrompt(ctx, runID, toolCall.Input)
+
+	case "email_send":
+		return email.ExecuteTool(ctx, toolCall.Name, toolCall.Input)
+
+	case "git_status", "git_diff", "git_log", "git_commit", "git_branch", "git_stash":
+		return gittools.ExecuteTool(ctx, o.workspace.Root, toolCall.Name, toolCall.Input)
 
 	default:
 		// Try plugin tools (prefixed with pluginname__)

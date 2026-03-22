@@ -12,6 +12,7 @@ import (
 func TestCostTrackerRecord(t *testing.T) {
 	dir := t.TempDir()
 	ct := NewCostTracker(dir, "session-1")
+	defer ct.Flush()
 
 	// claude-sonnet-4: $3.0/M input, $15.0/M output
 	// 1000 input + 500 output → (1000/1M)*3 + (500/1M)*15 = 0.003 + 0.0075 = 0.0105
@@ -25,6 +26,7 @@ func TestCostTrackerRecord(t *testing.T) {
 func TestCostTrackerCachedTokens(t *testing.T) {
 	dir := t.TempDir()
 	ct := NewCostTracker(dir, "session-1")
+	defer ct.Flush()
 
 	// claude-sonnet-4: $3.0/M input, $15.0/M output, $0.3/M cached
 	// 1000 input (200 cached) + 500 output
@@ -39,6 +41,7 @@ func TestCostTrackerCachedTokens(t *testing.T) {
 func TestCostTrackerUnknownModel(t *testing.T) {
 	dir := t.TempDir()
 	ct := NewCostTracker(dir, "session-1")
+	defer ct.Flush()
 
 	// Unknown model should record with $0 cost but not panic.
 	ct.Record("custom", "some-unknown-model-v9", "session-1", 1000, 500, 0)
@@ -50,6 +53,7 @@ func TestCostTrackerUnknownModel(t *testing.T) {
 func TestCostTrackerByProvider(t *testing.T) {
 	dir := t.TempDir()
 	ct := NewCostTracker(dir, "session-1")
+	defer ct.Flush()
 
 	ct.Record("anthropic", "claude-sonnet-4", "session-1", 1000, 0, 0)
 	ct.Record("openai", "gpt-4.1", "session-1", 1000, 0, 0)
@@ -71,19 +75,13 @@ func TestCostTrackerPersistence(t *testing.T) {
 	// In-memory total is available immediately.
 	assert.InDelta(t, 0.0105, ct1.TotalCost(), 0.0001)
 
-	// Wait for the async appendLine goroutine to finish writing to disk.
-	// Poll until the file exists and is non-empty, up to 2 seconds.
+	// Wait for background writes to complete.
+	ct1.Flush()
+
 	expectedPath := filepath.Join(dir, "costs.jsonl")
-	var fileReady bool
-	for attempt := 0; attempt < 200; attempt++ {
-		if info, err := os.Stat(expectedPath); err == nil && info.Size() > 0 {
-			fileReady = true
-			break
-		}
-		// Yield to the scheduler so the goroutine can run.
-		_ = filepath.Walk(dir, func(_ string, _ os.FileInfo, _ error) error { return nil })
-	}
-	require.True(t, fileReady, "costs.jsonl should be written by the async flush goroutine")
+	info, err := os.Stat(expectedPath)
+	require.NoError(t, err, "costs.jsonl should exist after Flush")
+	require.Greater(t, info.Size(), int64(0), "costs.jsonl should be non-empty")
 
 	// Second tracker reads the file on startup and should see the same total.
 	ct2 := NewCostTracker(dir, "session-2")
@@ -93,6 +91,7 @@ func TestCostTrackerPersistence(t *testing.T) {
 func TestCostTrackerCostByDay(t *testing.T) {
 	dir := t.TempDir()
 	ct := NewCostTracker(dir, "session-1")
+	defer ct.Flush()
 	ct.Record("anthropic", "claude-sonnet-4", "session-1", 1000, 500, 0)
 
 	days := ct.CostByDay(7)
@@ -127,5 +126,7 @@ func TestFormatCost(t *testing.T) {
 	assert.Equal(t, "$0.00", FormatCost(0))
 	assert.Equal(t, "$0.0042", FormatCost(0.0042))
 	assert.Equal(t, "$0.0105", FormatCost(0.0105))
+	assert.Equal(t, "$0.0500", FormatCost(0.05))
 	assert.Equal(t, "$1.23", FormatCost(1.23))
+	assert.Equal(t, "$0.15", FormatCost(0.15))
 }

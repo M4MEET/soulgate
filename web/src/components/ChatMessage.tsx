@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, RotateCcw, GitFork } from 'lucide-react';
+import { Copy, Check, RotateCcw, GitFork, ChevronDown, ChevronRight, Zap } from 'lucide-react';
 
 export interface Message {
   id: string;
@@ -24,43 +24,60 @@ export interface ToolCall {
   status: 'success' | 'error' | 'running';
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, size = 14 }: { text: string; size?: number }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      className="copy-btn"
       onClick={() => {
         navigator.clipboard.writeText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }}
       title="Copy"
+      className="flex items-center justify-center w-6 h-6 rounded bg-zinc-700/50 hover:bg-zinc-600/60 text-zinc-400 hover:text-zinc-200 transition-all"
     >
-      {copied ? <Check size={14} /> : <Copy size={14} />}
+      {copied ? <Check size={size} /> : <Copy size={size} />}
     </button>
   );
 }
 
 function ToolCallCard({ tool }: { tool: ToolCall }) {
   const [expanded, setExpanded] = useState(false);
-  const statusIcon = tool.status === 'success' ? '✓' : tool.status === 'error' ? '✗' : '⟳';
-  const statusClass = `tool-status-${tool.status}`;
+
+  const statusColors: Record<ToolCall['status'], string> = {
+    success: 'text-emerald-400',
+    error: 'text-red-400',
+    running: 'text-amber-400 animate-pulse',
+  };
 
   return (
-    <div className={`tool-card ${statusClass}`}>
-      <div className="tool-header" onClick={() => setExpanded(!expanded)}>
-        <span className="tool-icon">⚡</span>
-        <span className="tool-name">{tool.name}</span>
-        <span className="tool-duration">{tool.duration}</span>
-        <span className={`tool-indicator ${statusClass}`}>{statusIcon}</span>
-        <span className="tool-expand">{expanded ? '▲' : '▼'}</span>
-      </div>
+    <div className="my-2 rounded-lg border border-zinc-700/60 overflow-hidden bg-zinc-900/60">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="flex items-center gap-2 w-full px-3 py-2 bg-zinc-800/60 hover:bg-zinc-800 transition-colors text-left"
+      >
+        <Zap size={13} className="text-amber-400 flex-shrink-0" />
+        <span className="font-mono text-xs font-semibold text-zinc-200 flex-1">{tool.name}</span>
+        <span className="text-xs text-zinc-500">{tool.duration}</span>
+        <span className={`text-xs ${statusColors[tool.status]}`}>
+          {tool.status === 'success' ? '✓' : tool.status === 'error' ? '✗' : '⟳'}
+        </span>
+        {expanded ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
+      </button>
       {expanded && (
-        <div className="tool-body">
-          {tool.args && <div className="tool-args"><code>{tool.args}</code></div>}
+        <div className="p-3 bg-zinc-950/40 text-xs font-mono">
+          {tool.args && (
+            <div className="mb-2">
+              <div className="text-zinc-500 mb-1">args</div>
+              <code className="text-zinc-300 break-all">{tool.args}</code>
+            </div>
+          )}
           {tool.result && (
-            <div className="tool-result">
-              <pre>{tool.result.slice(0, 2000)}{tool.result.length > 2000 ? '\n...' : ''}</pre>
+            <div className="border-t border-zinc-800 pt-2 mt-2">
+              <div className="text-zinc-500 mb-1">result</div>
+              <pre className="text-zinc-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                {tool.result.slice(0, 2000)}{tool.result.length > 2000 ? '\n...' : ''}
+              </pre>
             </div>
           )}
         </div>
@@ -82,81 +99,157 @@ export default function ChatMessage({
   const isSystem = message.role === 'system';
 
   if (isSystem) {
-    return <div className="msg msg-system">{message.content}</div>;
+    return (
+      <div className="text-center text-xs text-zinc-500 py-2 px-4">{message.content}</div>
+    );
   }
 
   return (
-    <div className={`msg ${isUser ? 'msg-user' : 'msg-ai'}`}>
-      <div className="msg-avatar">
-        {isUser ? '👤' : '🤖'}
+    <div className={`flex gap-3 mb-5 group ${isUser ? 'flex-row-reverse' : ''}`}>
+      {/* Avatar */}
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0 mt-0.5 ${
+        isUser ? 'bg-blue-600 text-white' : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+      }`}>
+        {isUser ? '👤' : '✦'}
       </div>
-      <div className="msg-content">
-        <div className="msg-header">
-          <span className="msg-role">{isUser ? 'You' : 'SoulGate'}</span>
-          <span className="msg-time">
+
+      {/* Content */}
+      <div className={`min-w-0 max-w-3xl ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
+        {/* Header */}
+        <div className={`flex items-center gap-2 mb-1 ${isUser ? 'flex-row-reverse' : ''}`}>
+          <span className={`text-xs font-semibold ${isUser ? 'text-blue-400' : 'text-emerald-400'}`}>
+            {isUser ? 'You' : 'SoulGate'}
+          </span>
+          <span className="text-xs text-zinc-600">
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
 
-        <div className={`msg-body ${message.streaming ? 'streaming' : ''}`}>
+        {/* Bubble */}
+        <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+          isUser
+            ? 'bg-blue-600 text-white rounded-br-md'
+            : 'bg-zinc-800/80 border border-zinc-700/50 text-zinc-100 rounded-bl-md'
+        }`}>
           {isUser ? (
-            <p>{message.content}</p>
+            <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code({ className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  const code = String(children).replace(/\n$/, '');
-                  if (match) {
-                    return (
-                      <div className="code-block">
-                        <div className="code-header">
-                          <span className="code-lang">{match[1]}</span>
-                          <CopyButton text={code} />
+            <div className="prose prose-sm prose-invert max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  code({ className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    const code = String(children).replace(/\n$/, '');
+                    if (match) {
+                      return (
+                        <div className="rounded-lg overflow-hidden my-2 border border-zinc-700/50">
+                          <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800/80">
+                            <span className="font-mono text-xs uppercase tracking-widest text-zinc-500">
+                              {match[1]}
+                            </span>
+                            <CopyButton text={code} />
+                          </div>
+                          <SyntaxHighlighter
+                            style={oneDark}
+                            language={match[1]}
+                            customStyle={{
+                              margin: 0,
+                              borderRadius: '0 0 8px 8px',
+                              fontSize: '12px',
+                              background: '#0d0d18',
+                              padding: '12px',
+                            }}
+                          >
+                            {code}
+                          </SyntaxHighlighter>
                         </div>
-                        <SyntaxHighlighter
-                          style={oneDark}
-                          language={match[1]}
-                          customStyle={{
-                            margin: 0,
-                            borderRadius: '0 0 8px 8px',
-                            fontSize: '13px',
-                            background: '#0d0d18',
-                          }}
-                        >
-                          {code}
-                        </SyntaxHighlighter>
+                      );
+                    }
+                    return (
+                      <code
+                        className="bg-zinc-900/60 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono"
+                        {...props}
+                      >
+                        {children}
+                      </code>
+                    );
+                  },
+                  a({ href, children }) {
+                    return (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:underline"
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
+                  blockquote({ children }) {
+                    return (
+                      <blockquote className="border-l-2 border-indigo-500/50 pl-3 text-zinc-400 italic my-2">
+                        {children}
+                      </blockquote>
+                    );
+                  },
+                  table({ children }) {
+                    return (
+                      <div className="overflow-x-auto my-2">
+                        <table className="text-xs border-collapse w-full">{children}</table>
                       </div>
                     );
-                  }
-                  return <code className="inline-code" {...props}>{children}</code>;
-                },
-                a({ href, children }) {
-                  return <a href={href} target="_blank" rel="noopener noreferrer" className="msg-link">{children}</a>;
-                },
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
+                  },
+                  th({ children }) {
+                    return <th className="border border-zinc-700 px-2 py-1 bg-zinc-800 text-left">{children}</th>;
+                  },
+                  td({ children }) {
+                    return <td className="border border-zinc-700 px-2 py-1">{children}</td>;
+                  },
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
           )}
-          {message.streaming && <span className="cursor-blink">▎</span>}
+          {message.streaming && (
+            <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 animate-pulse" />
+          )}
         </div>
 
+        {/* Tool calls */}
         {message.toolCalls?.map((tc, i) => <ToolCallCard key={i} tool={tc} />)}
 
-        <div className="msg-footer">
+        {/* Footer */}
+        <div className={`flex items-center gap-2 mt-1.5 min-h-5 ${isUser ? 'flex-row-reverse' : ''}`}>
           {message.tokens != null && (
-            <span className="msg-tokens">{message.tokens} tok</span>
+            <span className="text-xs text-zinc-600">{message.tokens} tok</span>
           )}
           {message.cost != null && message.cost > 0 && (
-            <span className="msg-cost">${message.cost.toFixed(4)}</span>
+            <span className="text-xs text-zinc-600">${message.cost.toFixed(5)}</span>
           )}
           {!isUser && !message.streaming && (
-            <div className="msg-actions">
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
               <CopyButton text={message.content} />
-              {onRetry && <button className="action-btn" onClick={onRetry} title="Retry"><RotateCcw size={13} /></button>}
-              {onFork && <button className="action-btn" onClick={onFork} title="Fork"><GitFork size={13} /></button>}
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  title="Retry"
+                  className="flex items-center justify-center w-6 h-6 rounded bg-zinc-700/50 hover:bg-zinc-600/60 text-zinc-400 hover:text-zinc-200 transition-all"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+              {onFork && (
+                <button
+                  onClick={onFork}
+                  title="Fork"
+                  className="flex items-center justify-center w-6 h-6 rounded bg-zinc-700/50 hover:bg-zinc-600/60 text-zinc-400 hover:text-zinc-200 transition-all"
+                >
+                  <GitFork size={12} />
+                </button>
+              )}
             </div>
           )}
         </div>

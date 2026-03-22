@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/config"
 	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/gateway"
@@ -53,6 +54,9 @@ var (
 	gatewayAddress      string
 	gatewayPort         int
 	gatewayFreshSession bool
+	gatewayAuth         bool
+	gatewayDevMode      bool
+	gatewayRateLimit    float64
 )
 
 func init() {
@@ -62,6 +66,9 @@ func init() {
 	gatewayStartCmd.Flags().StringVar(&gatewayAddress, "address", "0.0.0.0", "Gateway bind address")
 	gatewayStartCmd.Flags().IntVar(&gatewayPort, "port", 8080, "Gateway port")
 	gatewayStartCmd.Flags().BoolVar(&gatewayFreshSession, "fresh", false, "Clear conversation history before starting")
+	gatewayStartCmd.Flags().BoolVar(&gatewayAuth, "auth", false, "Enable Bearer-token authentication for /api/* endpoints")
+	gatewayStartCmd.Flags().BoolVar(&gatewayDevMode, "dev-mode", true, "Bypass auth for requests from localhost (dev convenience)")
+	gatewayStartCmd.Flags().Float64Var(&gatewayRateLimit, "rate-limit", 60, "API requests per minute allowed per token")
 }
 
 // ANSI color helpers for gateway live view
@@ -182,6 +189,10 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 		SessionsDir:       "sessions",
 		WebhooksFile:      filepath.Join(workspace.ConfigDir, "webhooks.json"),
 		NotificationsFile: filepath.Join(workspace.ConfigDir, "notifications.json"),
+		APIAuthEnabled:    gatewayAuth,
+		APIDevMode:        gatewayDevMode,
+		APIRateLimit:      gatewayRateLimit,
+		APITokensFile:     filepath.Join(workspace.ConfigDir, "api_tokens.json"),
 		OnChat: func(ctx context.Context, message string) (string, error) {
 			fmt.Printf("\n%s┌─ 📨 %s%s\n", gwCyan, message, gwReset)
 
@@ -204,6 +215,7 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 
 			return response, nil
 		},
+		API: buildGatewayAPI(orch, workspace),
 	}
 
 	gw, err := gateway.NewGateway(gwConfig)
@@ -222,4 +234,242 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("👋 Gateway stopped")
 	return nil
+}
+
+// buildGatewayAPI constructs the GatewayAPI callbacks that wire the gateway's
+// rich REST endpoints to the live orchestrator.  All callbacks are designed to
+// be safe for concurrent HTTP requests.
+func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.GatewayAPI {
+	return &gateway.GatewayAPI{
+
+		// GetConfig returns a sanitised configuration snapshot.
+		// API keys are masked — never exposed over the network.
+		GetConfig: func() map[string]interface{} {
+			cfg := ws.Config
+			provider, model := orch.GetCurrentProvider()
+
+			// Mask helper: show first 10 chars + "…" when key is present.
+			mask := func(key string) string {
+				if key == "" {
+					return ""
+				}
+				if len(key) > 10 {
+					return key[:10] + "..."
+				}
+				return "***"
+			}
+
+			return map[string]interface{}{
+				"provider": provider,
+				"model":    model,
+				"openai": map[string]interface{}{
+					"api_key":     mask(cfg.Model.OpenAI.APIKey),
+					"model":       cfg.Model.OpenAI.Model,
+					"base_url":    cfg.Model.OpenAI.BaseURL,
+					"max_tokens":  cfg.Model.OpenAI.MaxTokens,
+					"temperature": cfg.Model.OpenAI.Temperature,
+				},
+				"anthropic": map[string]interface{}{
+					"api_key":     mask(cfg.Model.Anthropic.APIKey),
+					"model":       cfg.Model.Anthropic.Model,
+					"base_url":    cfg.Model.Anthropic.BaseURL,
+					"max_tokens":  cfg.Model.Anthropic.MaxTokens,
+					"temperature": cfg.Model.Anthropic.Temperature,
+				},
+				"execution": map[string]interface{}{
+					"max_iterations":        cfg.Execution.MaxIterations,
+					"total_timeout_sec":     cfg.Execution.TotalTimeoutSec,
+					"iteration_timeout_sec": cfg.Execution.IterationTimeoutSec,
+					"api_call_timeout_sec":  cfg.Execution.APICallTimeoutSec,
+					"max_tokens":            cfg.Execution.MaxTokens,
+					"max_tool_result_kb":    cfg.Execution.MaxToolResultKB,
+				},
+				"policy_rules": func() []map[string]interface{} {
+					pol := orch.GetPolicyEngine().GetPolicy()
+					if pol == nil {
+						return []map[string]interface{}{}
+					}
+					rules := make([]map[string]interface{}, 0, len(pol.Policies))
+					for _, r := range pol.Policies {
+						rules = append(rules, map[string]interface{}{
+							"name":        r.Name,
+							"description": r.Description,
+							"action":      r.Action,
+							"resource":    r.Resource,
+							"decision":    string(r.Decision),
+							"priority":    r.Priority,
+						})
+					}
+					return rules
+				}(),
+				"plugins": map[string]interface{}{
+					"dir":        cfg.Plugins.Dir,
+					"timeout":    cfg.Plugins.Timeout,
+					"max_memory": cfg.Plugins.MaxMemory,
+				},
+			}
+		},
+
+		// SetConfig applies a single key=value update to the live provider/model.
+		// Only "provider" and "model" are currently supported; unknown keys return
+		// an error so callers receive a clear signal instead of a silent no-op.
+		SetConfig: func(key, value string) error {
+			switch key {
+			case "provider":
+				return orch.SetProvider(value, "")
+			case "model":
+				currentProvider, _ := orch.GetCurrentProvider()
+				return orch.SetProvider(currentProvider, value)
+			default:
+				return fmt.Errorf("unknown config key %q; supported keys: provider, model", key)
+			}
+		},
+
+		// GetTools returns the full tool catalog (name + description).
+		// initToolRegistry is called to ensure the catalog is populated before
+		// we read it; it is idempotent so calling it here is safe.
+		GetTools: func() []map[string]interface{} {
+			schemas := orch.GetAllToolSchemas()
+			out := make([]map[string]interface{}, 0, len(schemas))
+			for _, s := range schemas {
+				out = append(out, map[string]interface{}{
+					"name":        s.Name,
+					"description": s.Description,
+				})
+			}
+			return out
+		},
+
+		// GetAgents returns all background agents with their status.
+		GetAgents: func() []map[string]interface{} {
+			agents := orch.GetAgentManager().List()
+			out := make([]map[string]interface{}, 0, len(agents))
+			for _, a := range agents {
+				entry := map[string]interface{}{
+					"id":           a.ID,
+					"name":         a.Name,
+					"task":         a.Task,
+					"status":       string(a.Status),
+					"role":         string(a.Role),
+					"capabilities": a.Capabilities,
+					"created_at":   a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+				}
+				if a.CompletedAt != nil {
+					entry["completed_at"] = a.CompletedAt.Format("2006-01-02T15:04:05Z")
+				}
+				if a.Result != "" {
+					r := a.Result
+					if len(r) > 500 {
+						r = r[:500] + "..."
+					}
+					entry["result"] = r
+				}
+				if a.Error != "" {
+					entry["error"] = a.Error
+				}
+				if a.ParentID != "" {
+					entry["parent_id"] = a.ParentID
+				}
+				if len(a.ChildIDs) > 0 {
+					entry["child_ids"] = a.ChildIDs
+				}
+				out = append(out, entry)
+			}
+			return out
+		},
+
+		// GetMemory returns all memory entries from the global scope.
+		GetMemory: func() []map[string]interface{} {
+			entries := orch.GetMemoryStore().List()
+			out := make([]map[string]interface{}, 0, len(entries))
+			for _, e := range entries {
+				m := map[string]interface{}{
+					"key":          e.Key,
+					"value":        e.Value,
+					"created_at":   e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+					"updated_at":   e.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+					"access_count": e.AccessCount,
+				}
+				if len(e.Tags) > 0 {
+					m["tags"] = e.Tags
+				}
+				if e.ExpiresAt != nil {
+					m["expires_at"] = e.ExpiresAt.Format("2006-01-02T15:04:05Z")
+				}
+				out = append(out, m)
+			}
+			return out
+		},
+
+		// GetCosts returns the full cost summary from the cost tracker.
+		GetCosts: func() map[string]interface{} {
+			s := orch.GetCostTracker().Summary()
+			return map[string]interface{}{
+				"session_cost_usd": s.SessionCost,
+				"today_cost_usd":   s.TodayCost,
+				"total_cost_usd":   s.TotalCost,
+				"by_provider":      s.ByProvider,
+				"last_7_days":      s.Last7Days,
+				"session_calls":    s.SessionCalls,
+				"total_calls":      s.TotalCalls,
+			}
+		},
+
+		// GetAudit queries the audit log and converts events to plain maps for JSON.
+		GetAudit: func(limit int) []map[string]interface{} {
+			ctx := context.Background()
+			events, err := orch.GetAuditLogger().Query(ctx, audit.QueryFilter{Limit: limit})
+			if err != nil {
+				return []map[string]interface{}{}
+			}
+			out := make([]map[string]interface{}, 0, len(events))
+			for _, ev := range events {
+				m := map[string]interface{}{
+					"id":        ev.ID,
+					"timestamp": ev.Timestamp.Format("2006-01-02T15:04:05Z"),
+					"type":      string(ev.Type),
+					"category":  string(ev.Category),
+					"status":    string(ev.Status),
+				}
+				if ev.SessionID != "" {
+					m["session_id"] = ev.SessionID
+				}
+				if ev.RunID != "" {
+					m["run_id"] = ev.RunID
+				}
+				if ev.Action != "" {
+					m["action"] = ev.Action
+				}
+				if ev.Resource != "" {
+					m["resource"] = ev.Resource
+				}
+				if ev.Error != "" {
+					m["error"] = ev.Error
+				}
+				if len(ev.Metadata) > 0 {
+					m["metadata"] = ev.Metadata
+				}
+				out = append(out, m)
+			}
+			return out
+		},
+
+		// CreateAgent spawns a new general-purpose background agent.
+		CreateAgent: func(name, task string) (map[string]interface{}, error) {
+			agent := orch.GetAgentManager().Create(orch, name, task, core.AgentRoleGeneral, "")
+			return map[string]interface{}{
+				"id":         agent.ID,
+				"name":       agent.Name,
+				"task":       agent.Task,
+				"status":     string(agent.Status),
+				"role":       string(agent.Role),
+				"created_at": agent.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			}, nil
+		},
+
+		// StopAgent cancels a running background agent by ID.
+		StopAgent: func(id string) error {
+			return orch.GetAgentManager().Stop(id)
+		},
+	}
 }

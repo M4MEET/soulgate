@@ -527,7 +527,7 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 		agent.AppendLog("model_call", fmt.Sprintf("calling %s...", o.provider.Name()))
 
 		modelStart := time.Now()
-		resp, err := o.callModelWithRetry(ctx, tracker, req)
+		resp, err := o.callModelWithFallback(ctx, tracker, req)
 		if err != nil {
 			agent.AppendLog("error", fmt.Sprintf("model error: %v", err))
 			return "", fmt.Errorf("model provider error: %w", err)

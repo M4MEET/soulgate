@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,10 @@ type Gateway struct {
 	pairingManager *auth.PairingManager
 	authEnabled    bool
 
+	// API token auth + rate limiting for HTTP endpoints (nil when auth disabled)
+	apiAuth    *APIAuth
+	apiDevMode bool // bypass auth for localhost when true
+
 	// Configuration
 	config    *Config
 	startedAt time.Time
@@ -61,12 +66,50 @@ type Gateway struct {
 
 	// Health monitoring
 	monitor *healthMonitor
+
+	// Prometheus-compatible metrics collector
+	metrics *MetricsCollector
 }
 
 // ChatHandler processes a chat message and returns a response.
 // This allows the gateway to serve an HTTP /api/chat endpoint without
 // importing the core package directly.
 type ChatHandler func(ctx context.Context, message string) (string, error)
+
+// GatewayAPI holds optional callback functions that the gateway uses to serve
+// the rich REST API consumed by the web UI. All fields are optional; when nil
+// the corresponding endpoint returns an appropriate empty or "not available"
+// response rather than an error, so the gateway degrades gracefully when
+// wired up without a full orchestrator.
+type GatewayAPI struct {
+	// GetConfig returns a sanitised snapshot of the current configuration.
+	// Implementations MUST NOT include raw API keys in the returned map.
+	GetConfig func() map[string]interface{}
+
+	// SetConfig applies a single key=value configuration update.
+	SetConfig func(key, value string) error
+
+	// GetTools returns the list of all known tools with name/description.
+	GetTools func() []map[string]interface{}
+
+	// GetAgents returns the list of background agents and their status.
+	GetAgents func() []map[string]interface{}
+
+	// GetMemory returns all memory entries from the active memory store.
+	GetMemory func() []map[string]interface{}
+
+	// GetCosts returns cost summary data (today, total, by provider, etc.).
+	GetCosts func() map[string]interface{}
+
+	// GetAudit returns recent audit events. limit <= 0 defaults to 50.
+	GetAudit func(limit int) []map[string]interface{}
+
+	// CreateAgent spawns a new background agent. Returns agent metadata on success.
+	CreateAgent func(name, task string) (map[string]interface{}, error)
+
+	// StopAgent cancels a running background agent by ID.
+	StopAgent func(id string) error
+}
 
 // Config holds Gateway configuration
 type Config struct {
@@ -84,6 +127,28 @@ type Config struct {
 	// When non-empty Start() will load them automatically before serving.
 	WebhooksFile      string // Path to .soulgate/webhooks.json
 	NotificationsFile string // Path to .soulgate/notifications.json
+
+	// API wires up the rich REST endpoints consumed by the web UI.
+	// All fields inside GatewayAPI are optional; nil fields are handled
+	// gracefully so the gateway works even without a full orchestrator.
+	API *GatewayAPI
+
+	// APIAuthEnabled enables Bearer-token authentication + rate limiting on all
+	// HTTP /api/* endpoints. Tokens are managed via the `soulgate token` CLI.
+	APIAuthEnabled bool
+
+	// APIDevMode, when true, bypasses API auth for requests from localhost.
+	// Defaults to true so local development does not require a token.
+	APIDevMode bool
+
+	// APIRateLimit is the number of requests per minute allowed per API token.
+	// Defaults to 60 when <= 0.
+	APIRateLimit float64
+
+	// APITokensFile is the path to the JSON file that persists API tokens.
+	// Defaults to .soulgate/api_tokens.json in the workspace config dir.
+	// Only used when APIAuthEnabled is true.
+	APITokensFile string
 }
 
 // NewGateway creates a new Gateway
@@ -131,6 +196,27 @@ func NewGateway(config *Config) (*Gateway, error) {
 		}()
 	}
 
+	// Create API auth manager when enabled.
+	var apiAuth *APIAuth
+	if config.APIAuthEnabled {
+		var authErr error
+		if config.APITokensFile != "" {
+			apiAuth, authErr = NewAPIAuthFromFile(config.APITokensFile, config.APIRateLimit)
+		} else {
+			apiAuth = NewAPIAuth(config.APIRateLimit)
+		}
+		if authErr != nil {
+			return nil, fmt.Errorf("load api tokens: %w", authErr)
+		}
+		fmt.Println("API authentication enabled (Bearer token required for /api/* endpoints)")
+	}
+	// Default dev-mode to true so callers that don't set the field still get
+	// the localhost-bypass behaviour that was present before this feature.
+	apiDevMode := true
+	if config.APIAuthEnabled {
+		apiDevMode = config.APIDevMode
+	}
+
 	gw := &Gateway{
 		clients:        make(map[string]*Client),
 		agents:         make(map[string]*Client),
@@ -143,11 +229,20 @@ func NewGateway(config *Config) (*Gateway, error) {
 		tokenManager:   tokenManager,
 		pairingManager: pairingManager,
 		authEnabled:    authEnabled,
+		apiAuth:        apiAuth,
+		apiDevMode:     apiDevMode,
 		config:         config,
 		startedAt:      time.Now(),
+		metrics:        newMetricsCollector(),
 	}
 	gw.monitor = newHealthMonitor(gw)
 	return gw, nil
+}
+
+// GetAPIAuth returns the API authentication manager. Returns nil when API auth
+// is not enabled.
+func (g *Gateway) GetAPIAuth() *APIAuth {
+	return g.apiAuth
 }
 
 // LoadWebhooks initialises the inbound webhook subsystem from a JSON config file.
@@ -203,20 +298,40 @@ func (g *Gateway) Start(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
-	// WebSocket endpoint
+	// WebSocket endpoint — never gated by API auth (uses its own token scheme)
 	mux.HandleFunc("/ws", g.handleWebSocket)
 
-	// Health endpoints
+	// Health endpoints — always public so load-balancers can probe without a token
 	mux.HandleFunc("/health", g.handleHealth)
 	mux.HandleFunc("/api/health", g.handleHealth)
 
+	// apiHandler optionally wraps an http.HandlerFunc with API auth middleware.
+	// Endpoints that should be public (health, ws) are registered directly above;
+	// all /api/* endpoints below are run through this helper.
+	apiHandler := func(h http.HandlerFunc) http.Handler {
+		if g.apiAuth != nil {
+			return apiAuthMiddleware(g.apiAuth, g.apiDevMode, h)
+		}
+		return h
+	}
+
 	// REST API
-	mux.HandleFunc("/api/status", g.handleAPIStatus)
-	mux.HandleFunc("/api/sessions", g.handleAPISessions)
+	mux.Handle("/api/status", apiHandler(g.handleAPIStatus))
+	mux.Handle("/api/sessions", apiHandler(g.handleAPISessions))
+
+	// Rich web-UI endpoints — always registered; handlers degrade gracefully
+	// when the corresponding GatewayAPI callbacks are not wired up.
+	mux.Handle("/api/config", apiHandler(g.handleAPIConfig))
+	mux.Handle("/api/tools", apiHandler(g.handleAPITools))
+	mux.Handle("/api/agents", apiHandler(g.handleAPIAgents))
+	mux.Handle("/api/agent", apiHandler(g.handleAPIAgent))
+	mux.Handle("/api/memory", apiHandler(g.handleAPIMemory))
+	mux.Handle("/api/costs", apiHandler(g.handleAPICosts))
+	mux.Handle("/api/audit", apiHandler(g.handleAPIAudit))
 
 	// Serve the HTTP chat API if a chat handler is configured
 	if g.config.OnChat != nil {
-		mux.HandleFunc("/api/chat", g.handleAPIChat)
+		mux.Handle("/api/chat", apiHandler(g.handleAPIChat))
 		fmt.Println("HTTP API enabled: POST /api/chat")
 	}
 
@@ -226,15 +341,22 @@ func (g *Gateway) Start(ctx context.Context) error {
 		fmt.Println("Webhooks enabled: POST /webhook/{name}")
 	}
 
-	// Web UI — served at /  (index.html, app.js, style.css via embed.FS)
-	mux.Handle("/", http.FileServer(http.FS(webui.Assets)))
+	// Prometheus metrics endpoint
+	mux.HandleFunc("/metrics", g.handleMetrics)
+
+	// Web UI — React app served from embedded dist/ directory
+	if uiFS, err := webui.Assets(); err == nil {
+		mux.Handle("/", http.FileServer(http.FS(uiFS)))
+	}
 
 	addr := fmt.Sprintf("%s:%d", g.config.Address, g.config.Port)
 	fmt.Printf("Gateway listening on http://%s  (WebSocket: ws://%s/ws)\n", addr, addr)
 
+	// Wrap the mux with metrics middleware so every HTTP request is counted
+	// by endpoint path, then apply CORS on top.
 	server := &http.Server{
 		Addr:    addr,
-		Handler: corsMiddleware(mux),
+		Handler: corsMiddleware(metricsMiddleware(mux, g.metrics)),
 	}
 
 	// Shutdown handler
@@ -800,13 +922,255 @@ func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// ---- Rich web-UI API handlers -----------------------------------------
+//
+// All handlers below check whether the relevant GatewayAPI callback is wired
+// up. When nil they return a well-formed JSON response indicating the feature
+// is not available rather than a 500. This keeps the gateway operational even
+// when launched without a full orchestrator.
+
+// writeJSON is a small helper that sets Content-Type and encodes v as JSON.
+func writeGatewayJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v) //nolint:errcheck
+}
+
+// handleAPIConfig handles GET /api/config and POST /api/config.
+//
+// GET  — returns a sanitised configuration snapshot (no API keys).
+// POST — accepts {"key":"...", "value":"..."} to update a single setting.
+func (g *Gateway) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if g.config.API == nil || g.config.API.GetConfig == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+				"available": false,
+				"message":   "config API not wired up",
+			})
+			return
+		}
+		cfg := g.config.API.GetConfig()
+		writeGatewayJSON(w, http.StatusOK, cfg)
+
+	case http.MethodPost:
+		if g.config.API == nil || g.config.API.SetConfig == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "config update not available",
+			})
+			return
+		}
+		var req struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if req.Key == "" {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "key is required"})
+			return
+		}
+		if err := g.config.API.SetConfig(req.Key, req.Value); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAPITools handles GET /api/tools.
+// Returns the complete list of available tools with name and description.
+func (g *Gateway) handleAPITools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetTools == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"tools":     []interface{}{},
+			"available": false,
+		})
+		return
+	}
+	tools := g.config.API.GetTools()
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"tools": tools,
+		"count": len(tools),
+	})
+}
+
+// handleAPIAgents handles GET /api/agents.
+// Returns the list of background agents and their current status.
+func (g *Gateway) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetAgents == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"agents":    []interface{}{},
+			"available": false,
+		})
+		return
+	}
+	agents := g.config.API.GetAgents()
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"agents": agents,
+		"count":  len(agents),
+	})
+}
+
+// handleAPIAgent handles POST /api/agent (create) and DELETE /api/agent/{id} (stop).
+//
+// POST   — body: {"name":"...", "task":"..."}
+// DELETE — URL path: /api/agent/{id}
+func (g *Gateway) handleAPIAgent(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		if g.config.API == nil || g.config.API.CreateAgent == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "agent creation not available",
+			})
+			return
+		}
+		var req struct {
+			Name string `json:"name"`
+			Task string `json:"task"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if req.Task == "" {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "task is required"})
+			return
+		}
+		if req.Name == "" {
+			req.Name = req.Task
+			if len(req.Name) > 40 {
+				req.Name = req.Name[:40]
+			}
+		}
+		agent, err := g.config.API.CreateAgent(req.Name, req.Task)
+		if err != nil {
+			writeGatewayJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusCreated, agent)
+
+	case http.MethodDelete:
+		if g.config.API == nil || g.config.API.StopAgent == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "agent stop not available",
+			})
+			return
+		}
+		// Extract agent ID from URL: /api/agent/{id}
+		id := strings.TrimPrefix(r.URL.Path, "/api/agent/")
+		id = strings.TrimSpace(id)
+		if id == "" || id == "agent" {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "agent id is required in path: /api/agent/{id}"})
+			return
+		}
+		if err := g.config.API.StopAgent(id); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "stopped", "id": id})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAPIMemory handles GET /api/memory.
+// Returns all memory entries from the active memory store.
+func (g *Gateway) handleAPIMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetMemory == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"entries":   []interface{}{},
+			"available": false,
+		})
+		return
+	}
+	entries := g.config.API.GetMemory()
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"entries": entries,
+		"count":   len(entries),
+	})
+}
+
+// handleAPICosts handles GET /api/costs.
+// Returns cost summary data: today, total, by provider, last 7 days.
+func (g *Gateway) handleAPICosts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetCosts == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"available": false,
+			"message":   "cost tracking not available",
+		})
+		return
+	}
+	costs := g.config.API.GetCosts()
+	writeGatewayJSON(w, http.StatusOK, costs)
+}
+
+// handleAPIAudit handles GET /api/audit?limit=N.
+// Returns the most recent audit events, newest first.
+// The optional "limit" query parameter caps results (default 50, max 500).
+func (g *Gateway) handleAPIAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetAudit == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"events":    []interface{}{},
+			"available": false,
+		})
+		return
+	}
+
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := fmt.Sscanf(raw, "%d", &limit); parsed != 1 || err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit parameter"})
+			return
+		}
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	events := g.config.API.GetAudit(limit)
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"events": events,
+		"count":  len(events),
 	})
 }
 

@@ -132,7 +132,7 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 			Message:  "calling model...",
 		})
 
-		resp, err := o.callModelWithRetry(ctx, tracker, req)
+		resp, err := o.callModelWithFallback(ctx, tracker, req)
 		if err != nil {
 			return "", fmt.Errorf("model provider error: %w", err)
 		}

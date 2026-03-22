@@ -57,7 +57,7 @@ Formats:
 
 Examples:
   soulgate webhook add ci-alerts --format json --key alert.message
-  soulgate webhook add github-events --format github --secret myHMACsecret
+  soulgate webhook add github-events --format github --secret $WEBHOOK_SECRET
   soulgate webhook add plaintext-feed --format text`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWebhookAdd,

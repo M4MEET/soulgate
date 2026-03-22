@@ -66,6 +66,7 @@ type Orchestrator struct {
 	conversationHistory []model.Message           // Persistent conversation history across runs
 	historyMu           sync.RWMutex              // Protects conversationHistory
 	costTracker         *CostTracker              // Tracks API cost per session/day/provider
+	fallbackChain       *FallbackChain            // Optional ordered list of backup providers
 }
 
 // RunResult represents the result of a run
@@ -248,6 +249,7 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 		loopDetector:      NewLoopDetector(),
 		branchManager:     NewBranchManager(workspace.ConfigDir),
 		costTracker:       costTracker,
+		fallbackChain:     NewFallbackChain(workspace.Config.Model.FallbackChain),
 	}
 	if orch.policyEngine != nil {
 		orch.policyEngine.SetBypassChecker(orch.IsTrustMode)
@@ -424,6 +426,22 @@ func (o *Orchestrator) GetSession() *Session {
 // GetAuditLogger returns the audit logger
 func (o *Orchestrator) GetAuditLogger() audit.Logger {
 	return o.audit
+}
+
+// GetPolicyEngine returns the policy engine
+func (o *Orchestrator) GetPolicyEngine() *policy.Engine {
+	return o.policyEngine
+}
+
+// GetAllToolSchemas returns the full catalog of all available tool schemas.
+// This initialises the tool registry if it has not been populated yet.
+func (o *Orchestrator) GetAllToolSchemas() []model.ToolSchema {
+	o.initToolRegistry()
+	o.toolRegistry.mu.RLock()
+	defer o.toolRegistry.mu.RUnlock()
+	out := make([]model.ToolSchema, len(o.toolRegistry.allTools))
+	copy(out, o.toolRegistry.allTools)
+	return out
 }
 
 // GetWorkspace returns the current workspace

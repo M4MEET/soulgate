@@ -11,8 +11,10 @@ import (
 	"github.com/M4MEET/soulgate/internal/tools/browser"
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
 	"github.com/M4MEET/soulgate/internal/tools/cron"
+	"github.com/M4MEET/soulgate/internal/tools/email"
 	"github.com/M4MEET/soulgate/internal/tools/embeddings"
 	"github.com/M4MEET/soulgate/internal/tools/filewatcher"
+	gittools "github.com/M4MEET/soulgate/internal/tools/git"
 	"github.com/M4MEET/soulgate/internal/tools/imagegen"
 	"github.com/M4MEET/soulgate/internal/tools/llmtask"
 	"github.com/M4MEET/soulgate/internal/tools/patch"
@@ -471,6 +473,25 @@ func (o *Orchestrator) getAllToolSchemas() []model.ToolSchema {
 			Name:        s.Name,
 			Description: s.Description,
 			InputSchema: s.InputSchema,
+		})
+	}
+
+	// Email tools (email_send via SMTP)
+	for _, s := range email.ToolSchemas() {
+		tools = append(tools, model.ToolSchema{
+			Name:        s.Name,
+			Description: s.Description,
+			InputSchema: s.InputSchema,
+		})
+	}
+
+	// Git tools (git_status, git_diff, git_log, git_commit, git_branch, git_stash)
+	for _, s := range gittools.ToolSchemas() {
+		schemaJSON, _ := json.Marshal(s["input_schema"])
+		tools = append(tools, model.ToolSchema{
+			Name:        s["name"].(string),
+			Description: s["description"].(string),
+			InputSchema: json.RawMessage(schemaJSON),
 		})
 	}
 

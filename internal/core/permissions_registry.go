@@ -340,6 +340,90 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		},
 	},
 
+	// Email tools — require email.send permission; fallback to net.request for
+	// policy files that only grant generic outbound network access.
+	"email_send": {
+		Action:          "email.send",
+		FallbackActions: []string{"net.request"},
+		SchemaResource:  "email:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct{ To string `json:"to"` }
+			if err := json.Unmarshal(input, &p); err != nil {
+				return "", fmt.Errorf("invalid tool input: %w", err)
+			}
+			to := strings.TrimSpace(p.To)
+			if to == "" {
+				return "", fmt.Errorf("email_send requires non-empty to")
+			}
+			return "email:" + to, nil
+		},
+	},
+
+	// Git tools — primary action git.*, fallback to exec.command for policy files
+	// that only define the broader exec action.
+	"git_status": {
+		Action:          "git.status",
+		FallbackActions: []string{"exec.command"},
+		Resource:        "git:status",
+		SchemaResource:  "git:*",
+	},
+	"git_diff": {
+		Action:          "git.diff",
+		FallbackActions: []string{"exec.command"},
+		Resource:        "git:diff",
+		SchemaResource:  "git:*",
+	},
+	"git_log": {
+		Action:          "git.log",
+		FallbackActions: []string{"exec.command"},
+		Resource:        "git:log",
+		SchemaResource:  "git:*",
+	},
+	"git_commit": {
+		Action:          "git.commit",
+		FallbackActions: []string{"exec.command"},
+		SchemaResource:  "git:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct{ Message string `json:"message"` }
+			if err := json.Unmarshal(input, &p); err != nil {
+				return "", fmt.Errorf("invalid tool input: %w", err)
+			}
+			msg := strings.TrimSpace(p.Message)
+			if msg == "" {
+				return "", fmt.Errorf("git_commit requires non-empty message")
+			}
+			return "git:commit", nil
+		},
+	},
+	"git_branch": {
+		Action:          "git.branch",
+		FallbackActions: []string{"exec.command"},
+		SchemaResource:  "git:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct{ Action string `json:"action"` }
+			_ = json.Unmarshal(input, &p)
+			action := strings.TrimSpace(p.Action)
+			if action == "" {
+				return "git:branch", nil
+			}
+			return "git:branch:" + action, nil
+		},
+	},
+	"git_stash": {
+		Action:          "git.stash",
+		FallbackActions: []string{"exec.command"},
+		SchemaResource:  "git:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct{ Action string `json:"action"` }
+			_ = json.Unmarshal(input, &p)
+			action := strings.TrimSpace(p.Action)
+			if action == "" {
+				return "git:stash", nil
+			}
+			return "git:stash:" + action, nil
+		},
+	},
+
 	// No-permission tools
 	"search_available_tools": {NoPermissionRequired: true},
 	"llm_task":               {NoPermissionRequired: true},

@@ -77,6 +77,7 @@ type CostSummary struct {
 // All methods are safe for concurrent use from the agentic loop.
 type CostTracker struct {
 	mu        sync.Mutex
+	wg        sync.WaitGroup
 	entries   []CostEntry
 	path      string  // absolute path to .soulgate/costs.jsonl
 	totalUSD  float64 // cached sum across all entries
@@ -159,7 +160,16 @@ func (ct *CostTracker) Record(provider, modelID, sessionID string, inputTok, out
 	ct.mu.Unlock()
 
 	// Persist asynchronously so the hot path (agentic loop) is not blocked by I/O.
-	go ct.appendLine(entry)
+	ct.wg.Add(1)
+	go func() {
+		defer ct.wg.Done()
+		ct.appendLine(entry)
+	}()
+}
+
+// Flush waits for all pending background writes to complete.
+func (ct *CostTracker) Flush() {
+	ct.wg.Wait()
 }
 
 // appendLine serialises a single CostEntry and appends it to the JSONL file.
@@ -318,7 +328,7 @@ func FormatCost(usd float64) string {
 	if usd == 0 {
 		return "$0.00"
 	}
-	if usd < 0.01 {
+	if usd < 0.1 {
 		return fmt.Sprintf("$%.4f", usd)
 	}
 	return fmt.Sprintf("$%.2f", usd)
