@@ -53,7 +53,7 @@ func runAuditTail(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open audit logger
-	auditLogger, err := audit.NewSQLiteLogger(workspace.Config.Audit.DatabasePath)
+	auditLogger, err := audit.NewJSONLLogger(workspace.Config.Audit.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("failed to open audit log: %w", err)
 	}

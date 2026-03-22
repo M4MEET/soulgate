@@ -28,8 +28,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("❌ SoulGate is not initialized in this directory")
 		fmt.Println()
 		fmt.Println("To get started, run:")
-		fmt.Println("  soulgate setup    (interactive wizard)")
-		fmt.Println("  soulgate init     (quick initialization)")
+		fmt.Println("  soulgate onboarding    (interactive wizard)")
+		fmt.Println("  soulgate init          (quick initialization)")
 		return nil
 	}
 
@@ -118,7 +118,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("    ✓ Notification Service")
 	} else {
 		fmt.Println("  Status:      ⚠️  Not configured")
-		fmt.Println("  Run 'soulgate setup' to configure agents")
+		fmt.Println("  Run 'soulgate onboarding' to configure agents")
 	}
 	fmt.Println()
 

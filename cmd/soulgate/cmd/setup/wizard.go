@@ -266,9 +266,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s Created policy.yml\n", formatCheckmark(true))
 			return nil
 		}},
-		{"Setting up audit database", func() error {
+		{"Setting up audit log", func() error {
 			if enableAudit {
-				fmt.Printf("  %s Created audit.db\n", formatCheckmark(true))
+				fmt.Printf("  %s Created audit.jsonl\n", formatCheckmark(true))
 			} else {
 				fmt.Printf("  %s Audit logging disabled\n", formatCheckmark(false))
 			}

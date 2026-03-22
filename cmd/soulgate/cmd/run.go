@@ -40,7 +40,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Load workspace
 	workspace, err := config.LoadWorkspace()
 	if err != nil {
-		return fmt.Errorf("failed to load workspace: %w\n\nRun 'soulgate setup' for guided configuration, or 'soulgate init' for defaults", err)
+		return fmt.Errorf("failed to load workspace: %w\n\nRun 'soulgate onboarding' for guided configuration, or 'soulgate init' for defaults", err)
 	}
 
 	// Override provider if specified
@@ -50,10 +50,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Validate API key is configured
 	if workspace.Config.Model.DefaultProvider == "openai" && workspace.Config.Model.OpenAI.APIKey == "" {
-		return fmt.Errorf("OpenAI API key not configured.\n\nSet it with: export OPENAI_API_KEY=sk-...\nOr run 'soulgate setup' to configure everything")
+		return fmt.Errorf("OpenAI API key not configured.\n\nSet it with: export OPENAI_API_KEY=sk-...\nOr run 'soulgate onboarding' to configure everything")
 	}
 	if workspace.Config.Model.DefaultProvider == "anthropic" && workspace.Config.Model.Anthropic.APIKey == "" {
-		return fmt.Errorf("Anthropic API key not configured.\n\nSet it with: export ANTHROPIC_API_KEY=sk-ant-...\nOr run 'soulgate setup' to configure everything")
+		return fmt.Errorf("Anthropic API key not configured.\n\nSet it with: export ANTHROPIC_API_KEY=sk-ant-...\nOr run 'soulgate onboarding' to configure everything")
 	}
 
 	// Create orchestrator

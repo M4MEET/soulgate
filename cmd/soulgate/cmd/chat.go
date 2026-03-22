@@ -16,6 +16,10 @@ import (
 
 var (
 	useInteractiveTUI bool
+	forceOnboarding   bool
+	tuiGatewayURL     string
+	freshSession      bool
+	continueSession   bool
 )
 
 var chatCmd = &cobra.Command{
@@ -31,8 +35,10 @@ This provides a beautiful interactive terminal interface where you can:
 - Enhanced TUI with autocomplete and keyboard navigation
 
 Example:
-  soulgate tui
-  soulgate tui --interactive   (enhanced TUI - enabled by default)
+  soulgate tui                 (prompts: continue or fresh)
+  soulgate tui --continue      (restore previous session)
+  soulgate tui --fresh         (start clean, no history)
+  soulgate tui --onboarding    (force onboarding wizard)
 
 Chat Commands:
   /exit, /quit    Exit the chat session
@@ -52,6 +58,11 @@ Keyboard Shortcuts (interactive mode):
 func init() {
 	rootCmd.AddCommand(chatCmd)
 	chatCmd.Flags().BoolVarP(&useInteractiveTUI, "interactive", "i", true, "Use interactive TUI with autocomplete and keyboard navigation")
+	chatCmd.Flags().BoolVar(&forceOnboarding, "onboarding", false, "Force launch onboarding wizard in TUI")
+	chatCmd.Flags().StringVar(&tuiGatewayURL, "gateway", "", "Connect to Gateway WebSocket (e.g., ws://localhost:8080/ws)")
+	chatCmd.Flags().BoolVar(&freshSession, "fresh", false, "Start a fresh session (discard previous history)")
+	chatCmd.Flags().BoolVarP(&continueSession, "continue", "c", false, "Continue previous session (restore history)")
+	chatCmd.MarkFlagsMutuallyExclusive("fresh", "continue")
 }
 
 func runChat(cmd *cobra.Command, args []string) error {
@@ -72,8 +83,28 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	// Create global config directory if it doesn't exist
 	if _, err := os.Stat(globalConfigDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+		if err := os.MkdirAll(globalConfigDir, 0700); err != nil {
 			return fmt.Errorf("failed to create global config directory: %w", err)
+		}
+	}
+
+	// Harden permissions on existing installations: ensure owner-only access.
+	// This corrects directories and sensitive files created with looser permissions
+	// by earlier versions of SoulGate.
+	_ = os.Chmod(globalConfigDir, 0700)
+	for _, sensitiveFile := range []string{
+		"config.yml",
+		"policy.yml",
+		"memory.json",
+		"costs.jsonl",
+		"branches.json",
+		"session_state.json",
+		"SOUL.md",
+		".onboarding_complete",
+	} {
+		p := filepath.Join(globalConfigDir, sensitiveFile)
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Chmod(p, 0600)
 		}
 	}
 
@@ -88,7 +119,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 		workspace.Config.Workspace.Root = cwd
 		workspace.Config.Workspace.ConfigDir = globalConfigDir
-		workspace.Config.Audit.DatabasePath = filepath.Join(globalConfigDir, "audit.db")
+		workspace.Config.Audit.DatabasePath = filepath.Join(globalConfigDir, "audit.jsonl")
 		workspace.Config.Policy.FilePath = filepath.Join(globalConfigDir, "policy.yml")
 
 		// Prompt for configuration
@@ -134,7 +165,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	// Start interactive session
 	if useInteractiveTUI {
 		// Use enhanced TUI with Bubble Tea
-		return RunInteractiveTUI(orch)
+		return RunInteractiveTUI(orch, forceOnboarding, tuiGatewayURL, freshSession, continueSession)
 	}
 
 	// Use classic text-based chat
@@ -344,7 +375,7 @@ func promptChatConfiguration(workspace *config.Workspace) error {
 	configPath := filepath.Join(globalConfigDir, "config.yml")
 
 	// Ensure directory exists
-	os.MkdirAll(globalConfigDir, 0755)
+	os.MkdirAll(globalConfigDir, 0700)
 
 	if err := workspace.Config.Save(configPath); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)

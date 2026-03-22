@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/M4MEET/soulgate/cmd/soulgate/cmd/setup"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +41,4 @@ func Execute() {
 
 func init() {
 	// Global flags can be added here
-
-	// Register setup command from setup package
-	rootCmd.AddCommand(setup.SetupCmd)
 }

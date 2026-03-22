@@ -81,7 +81,7 @@ func runMessagingStart(cmd *cobra.Command, args []string) error {
 	policyEngine := policy.NewEngine(policyData)
 
 	// Initialize audit logger
-	auditLogger, err := audit.NewSQLiteLogger(workspace.Config.Audit.DatabasePath)
+	auditLogger, err := audit.NewJSONLLogger(workspace.Config.Audit.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize audit logger: %w", err)
 	}
@@ -171,7 +171,7 @@ func runMessagingSend(cmd *cobra.Command, args []string) error {
 	policyEngine := policy.NewEngine(policyData)
 
 	// Initialize audit logger
-	auditLogger, err := audit.NewSQLiteLogger(workspace.Config.Audit.DatabasePath)
+	auditLogger, err := audit.NewJSONLLogger(workspace.Config.Audit.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize audit logger: %w", err)
 	}

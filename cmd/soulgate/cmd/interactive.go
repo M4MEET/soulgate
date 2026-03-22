@@ -53,7 +53,7 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 			fmt.Println("SoulGate is not set up yet.")
 			fmt.Println()
 			fmt.Println("Run one of these commands first:")
-			fmt.Println("  soulgate setup          (interactive wizard)")
+			fmt.Println("  soulgate onboarding     (interactive wizard)")
 			fmt.Println("  soulgate init           (quick setup)")
 			fmt.Println()
 			fmt.Println("Or run: soulgate interactive --auto-setup")
@@ -147,6 +147,10 @@ func startREPL(orch *core.Orchestrator, workspace *config.Workspace) error {
 			printHelpMenu()
 			continue
 
+		case "context", "/context":
+			printUsageContext()
+			continue
+
 		case "status":
 			printStatus(workspace)
 			continue
@@ -161,7 +165,13 @@ func startREPL(orch *core.Orchestrator, workspace *config.Workspace) error {
 		fmt.Println()
 		fmt.Print("Assistant: ")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx := context.Background()
+		cancel := func() {}
+		if totalSec := workspace.Config.Execution.TotalTimeoutSec; totalSec > 0 {
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(totalSec)*time.Second)
+		} else {
+			ctx, cancel = context.WithCancel(ctx)
+		}
 		result, err := orch.Run(ctx, input)
 		cancel()
 
@@ -191,9 +201,39 @@ func printHelpMenu() {
 	fmt.Println()
 	fmt.Println("Special Commands:")
 	fmt.Println("   status    - Show workspace status")
+	fmt.Println("   context   - Show full usage guide")
 	fmt.Println("   help, ?   - Show this help")
 	fmt.Println("   clear     - Clear screen")
 	fmt.Println("   exit, quit - Exit terminal")
+	fmt.Println()
+}
+
+func printUsageContext() {
+	fmt.Println()
+	fmt.Println("+=======================================================+")
+	fmt.Println("|               SoulGate Usage Context                  |")
+	fmt.Println("+=======================================================+")
+	fmt.Println()
+	fmt.Println("What SoulGate is:")
+	fmt.Println("  A secure AI gateway. Model output is untrusted; policy and brokers enforce access.")
+	fmt.Println()
+	fmt.Println("Recommended flow:")
+	fmt.Println("  1. Run onboarding once: soulgate onboarding")
+	fmt.Println("  2. Start TUI: soulgate tui")
+	fmt.Println("  3. Check tools: /tools")
+	fmt.Println("  4. Ask tasks naturally or run shell with !command")
+	fmt.Println("  5. Inspect status/audit: soulgate status, soulgate audit tail --last 20")
+	fmt.Println()
+	fmt.Println("Core commands:")
+	fmt.Println("  soulgate init")
+	fmt.Println("  soulgate onboarding")
+	fmt.Println("  soulgate tui --onboarding")
+	fmt.Println("  soulgate run \"<prompt>\"")
+	fmt.Println("  soulgate policy show")
+	fmt.Println("  soulgate audit tail --last 20")
+	fmt.Println()
+	fmt.Println("Security note:")
+	fmt.Println("  Default access is deny unless policy allows.")
 	fmt.Println()
 }
 
