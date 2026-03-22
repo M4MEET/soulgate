@@ -173,6 +173,7 @@ type BackgroundAgent struct {
 	cancel      context.CancelFunc
 	logMu       sync.RWMutex
 	activityLog []AgentLogEntry // ring buffer, max 200 entries
+	logDir      string          // directory for JSONL activity logs
 	msgMu       sync.Mutex
 	inbox       []AgentMessage // pending messages from other agents
 }
@@ -180,17 +181,70 @@ type BackgroundAgent struct {
 const maxAgentLogEntries = 200
 
 // AppendLog adds an entry to the agent's activity log (thread-safe).
+// It also appends the entry to the agent's JSONL log file for durable persistence.
 func (a *BackgroundAgent) AppendLog(kind, message string) {
-	a.logMu.Lock()
-	defer a.logMu.Unlock()
-	a.activityLog = append(a.activityLog, AgentLogEntry{
+	entry := AgentLogEntry{
 		Time:    time.Now(),
 		Kind:    kind,
 		Message: message,
-	})
+	}
+	a.logMu.Lock()
+	a.activityLog = append(a.activityLog, entry)
 	if len(a.activityLog) > maxAgentLogEntries {
 		a.activityLog = a.activityLog[len(a.activityLog)-maxAgentLogEntries:]
 	}
+	logDir := a.logDir
+	a.logMu.Unlock()
+
+	// Best-effort JSONL append for durable persistence
+	if logDir != "" {
+		a.appendLogJSONL(entry)
+	}
+}
+
+// SetLogDir sets the directory where the agent's JSONL log file is written.
+// Must be called before the agent starts executing.
+func (a *BackgroundAgent) SetLogDir(dir string) {
+	a.logMu.Lock()
+	a.logDir = dir
+	a.logMu.Unlock()
+}
+
+// agentLogJSONLEntry is the on-disk representation of a single log entry.
+type agentLogJSONLEntry struct {
+	AgentID string    `json:"agent_id"`
+	Time    time.Time `json:"time"`
+	Kind    string    `json:"kind"`
+	Message string    `json:"message"`
+}
+
+// appendLogJSONL appends a single entry to the agent's JSONL log file.
+func (a *BackgroundAgent) appendLogJSONL(entry AgentLogEntry) {
+	a.logMu.RLock()
+	logDir := a.logDir
+	a.logMu.RUnlock()
+	if logDir == "" {
+		return
+	}
+	path := filepath.Join(logDir, a.ID+".jsonl")
+	_ = os.MkdirAll(logDir, 0700)
+	line := agentLogJSONLEntry{
+		AgentID: a.ID,
+		Time:    entry.Time,
+		Kind:    entry.Kind,
+		Message: entry.Message,
+	}
+	data, err := json.Marshal(line)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	f.Write(data)
+	f.Close()
 }
 
 // GetLog returns a snapshot of the agent's activity log (thread-safe).
@@ -321,17 +375,51 @@ type AgentManager struct {
 	agents    map[string]*BackgroundAgent
 	nextID    int
 	configDir string
+	stopCh    chan struct{} // signals the auto-save goroutine to exit
+	stopped   bool
 }
 
 // NewAgentManager creates a new agent manager.
-// If configDir is non-empty, completed agents are persisted to agents_state.json.
+// If configDir is non-empty, agent state is persisted to agents.json and
+// activity logs are appended to logs/agents.jsonl in real time.
+// A background goroutine auto-saves state every 30 seconds.
 func NewAgentManager(configDir string) *AgentManager {
 	am := &AgentManager{
 		agents:    make(map[string]*BackgroundAgent),
 		configDir: configDir,
+		stopCh:    make(chan struct{}),
 	}
 	am.loadState()
+	go am.autoSaveLoop()
 	return am
+}
+
+// StopAutoSave terminates the background auto-save goroutine.
+// Safe to call multiple times.
+func (am *AgentManager) StopAutoSave() {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if !am.stopped {
+		am.stopped = true
+		close(am.stopCh)
+	}
+}
+
+// autoSaveLoop persists agent state every 30 seconds so that a crash does not
+// lose more than half a minute of progress.
+func (am *AgentManager) autoSaveLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-am.stopCh:
+			return
+		case <-ticker.C:
+			am.mu.Lock()
+			am.saveState()
+			am.mu.Unlock()
+		}
+	}
 }
 
 // agentState is the JSON-serializable snapshot of an agent for persistence.
@@ -485,6 +573,11 @@ func (am *AgentManager) Create(orch *Orchestrator, name, task string, role Agent
 		ParentID:     parentID,
 		CreatedAt:    time.Now().UTC(),
 	}
+	// Set up durable JSONL activity logging
+	if am.configDir != "" {
+		agent.SetLogDir(filepath.Join(am.configDir, "logs", "agents"))
+	}
+
 	am.agents[id] = agent
 
 	// Register this agent as a child of its parent
