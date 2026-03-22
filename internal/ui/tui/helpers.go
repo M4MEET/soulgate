@@ -5,26 +5,255 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/M4MEET/soulgate/internal/ui/tui/components"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-// addMessage adds a message to the chat history and updates the display
-func (m *InteractiveChatModel) addMessage(text string) {
-	m.messages = append(m.messages, text)
-	content := strings.Join(m.messages, "\n\n")
-	m.output.SetContent(content)
-	m.output.GotoBottom()
+const (
+	maxRenderedMessages    = 0 // 0 = unlimited in-session scrollback
+	streamFlushInterval    = 35 * time.Millisecond
+	dependencyTickInterval = 120 * time.Millisecond
+	agentPollInterval      = 300 * time.Millisecond
+	thinkingTickInterval   = 70 * time.Millisecond
+)
+
+var availableSlashCommands = []string{
+	"/status", "/tools", "/skills", "/memory", "/soul", "/schedule",
+	"/history", "/clear", "/help", "/context", "/model", "/mcp", "/debug", "/hub",
+	"/setup", "/onboarding", "/stream", "/think", "/fast", "/verbose",
+	"/processes", "/cron", "/agent", "/agents", "/trust", "/exit", "/quit",
+	// Extended command set
+	"/new", "/reset", "/usage", "/abort", "/sessions", "/export", "/doctor",
+	// Conversation branching
+	"/fork", "/branches", "/switch", "/merge",
 }
 
-// updateAutocomplete updates the autocomplete suggestions based on current input
+// addMessage adds a message to the chat history and updates the display.
+func (m *InteractiveChatModel) addMessage(text string) {
+	m.messages = append(m.messages, text)
+	m.trimMessageBuffer()
+	m.refreshOutput(true)
+}
+
+func (m *InteractiveChatModel) trimMessageBuffer() {
+	if maxRenderedMessages <= 0 {
+		return
+	}
+
+	if len(m.messages) <= maxRenderedMessages {
+		return
+	}
+
+	dropped := len(m.messages) - (maxRenderedMessages - 1)
+	notice := colorMuted(fmt.Sprintf("  ... %d older messages hidden to keep UI responsive ...", dropped))
+	tail := append([]string{notice}, m.messages[len(m.messages)-(maxRenderedMessages-1):]...)
+	m.messages = tail
+
+	// Keep active panel indices in sync after dropping head messages.
+	if m.thinkingPanelIndex >= 0 {
+		m.thinkingPanelIndex -= dropped
+		if m.thinkingPanelIndex < 0 || m.thinkingPanelIndex >= len(m.messages) {
+			m.thinkingPanelIndex = -1
+		}
+	}
+	if m.streamPanelIndex >= 0 {
+		m.streamPanelIndex -= dropped
+		if m.streamPanelIndex < 0 || m.streamPanelIndex >= len(m.messages) {
+			m.streamPanelIndex = -1
+		}
+	}
+}
+
+func (m *InteractiveChatModel) refreshOutput(stickBottom bool) {
+	content := strings.Join(m.messages, "\n\n")
+	if content != m.lastRenderedContent {
+		m.output.SetContent(content)
+		m.lastRenderedContent = content
+	}
+	if stickBottom && m.autoScroll {
+		m.output.GotoBottom()
+	}
+}
+
+func (m *InteractiveChatModel) setLastMessage(text string, stickBottom bool) {
+	if len(m.messages) == 0 {
+		m.addMessage(text)
+		return
+	}
+	m.messages[len(m.messages)-1] = text
+	m.refreshOutput(stickBottom)
+}
+
+func (m *InteractiveChatModel) isValidMessageIndex(index int) bool {
+	return index >= 0 && index < len(m.messages)
+}
+
+func (m *InteractiveChatModel) setMessageAt(index int, text string, stickBottom bool) {
+	if !m.isValidMessageIndex(index) {
+		m.addMessage(text)
+		return
+	}
+	m.messages[index] = text
+	m.refreshOutput(stickBottom)
+}
+
+func (m *InteractiveChatModel) ensureStreamPanel() {
+	if m.isValidMessageIndex(m.streamPanelIndex) {
+		return
+	}
+	m.messages = append(m.messages, formatAIStreamingResponse(""))
+	m.streamPanelIndex = len(m.messages) - 1
+	m.trimMessageBuffer()
+	m.refreshOutput(true)
+}
+
+func streamFlushCmd() tea.Cmd {
+	return tea.Tick(streamFlushInterval, func(t time.Time) tea.Msg {
+		return streamFlushMsg{}
+	})
+}
+
+func dependencyTickCmd() tea.Cmd {
+	return tea.Tick(dependencyTickInterval, func(t time.Time) tea.Msg {
+		return dependencyProgressMsg{}
+	})
+}
+
+func thinkingTickCmd() tea.Cmd {
+	return tea.Tick(thinkingTickInterval, func(t time.Time) tea.Msg {
+		return thinkingMsg{}
+	})
+}
+
+func agentPollCmd(agentID string) tea.Cmd {
+	return tea.Tick(agentPollInterval, func(t time.Time) tea.Msg {
+		return agentPollMsg{agentID: agentID}
+	})
+}
+
+func (m *InteractiveChatModel) scheduleStreamFlush() tea.Cmd {
+	if m.streamFlushScheduled {
+		return nil
+	}
+	m.streamFlushScheduled = true
+	return streamFlushCmd()
+}
+
+func (m *InteractiveChatModel) flushStreamingPreview() {
+	if !m.streamFlushScheduled || len(m.messages) == 0 {
+		m.streamFlushScheduled = false
+		return
+	}
+	m.streamFlushScheduled = false
+
+	if m.thinkingBuffer != "" {
+		m.ensureThinkingPlaceholder()
+		if m.isValidMessageIndex(m.thinkingPanelIndex) {
+			m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
+		}
+	}
+
+	if m.isValidMessageIndex(m.streamPanelIndex) {
+		m.setMessageAt(m.streamPanelIndex, formatAIStreamingResponse(m.streamBuffer), true)
+	}
+}
+
+func (m *InteractiveChatModel) maskedOnboardingKey() string {
+	if m.onboardingInput == "" {
+		return ""
+	}
+	if len(m.onboardingInput) <= 4 {
+		return strings.Repeat("*", len(m.onboardingInput))
+	}
+	return strings.Repeat("*", len(m.onboardingInput)-4) + m.onboardingInput[len(m.onboardingInput)-4:]
+}
+
+func onboardingEnvVar(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "google":
+		return "GOOGLE_API_KEY"
+	case "groq":
+		return "GROQ_API_KEY"
+	case "mistral":
+		return "MISTRAL_API_KEY"
+	case "cohere":
+		return "COHERE_API_KEY"
+	case "deepseek":
+		return "DEEPSEEK_API_KEY"
+	case "xai":
+		return "XAI_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
+	case "together":
+		return "TOGETHER_API_KEY"
+	case "perplexity":
+		return "PERPLEXITY_API_KEY"
+	case "ollama":
+		return ""
+	default:
+		return strings.ToUpper(provider) + "_API_KEY"
+	}
+}
+
+func providerNeedsKey(provider string) bool {
+	return strings.ToLower(strings.TrimSpace(provider)) != "ollama"
+}
+
+func keyNeedsRedraw(k tea.KeyMsg) bool {
+	switch k.Type {
+	case tea.KeyRunes, tea.KeyBackspace, tea.KeyDelete, tea.KeySpace:
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeToolNameForDisplay(tool string) string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return tool
+	}
+	return strings.ReplaceAll(tool, "__", ".")
+}
+
+func isBuiltinToolName(name string) bool {
+	switch name {
+	case "files_read", "files_list", "files_write", "files_delete",
+		"exec_command", "net_request",
+		"memory_write", "memory_get", "memory_search",
+		"switch_model",
+		"agent_create", "agent_list", "agent_stop",
+		"web_search", "web_fetch",
+		"process_start", "process_list", "process_poll", "process_log", "process_write", "process_kill",
+		"pdf_read",
+		"cron_add", "cron_list", "cron_remove", "cron_pause", "cron_resume",
+		"llm_task", "apply_patch":
+		return true
+	default:
+		return false
+	}
+}
+
+// updateAutocomplete updates the autocomplete suggestions based on current input.
 func (m *InteractiveChatModel) updateAutocomplete() {
 	value := m.input.Value()
 	if strings.HasPrefix(value, "/") {
-		commands := []string{"/status", "/tools", "/skills", "/memory", "/soul", "/schedule", "/history", "/clear", "/help", "/model", "/debug", "/hub", "/setup", "/onboarding", "/stream", "/think", "/fast", "/verbose", "/processes", "/cron", "/exit", "/quit"}
-		newAutocomplete := filterStrings(commands, value)
+		results := components.FuzzyFilter(value, availableSlashCommands)
+
+		// Filter out exact matches (don't suggest what's already typed).
+		var newAutocomplete []string
+		for _, r := range results {
+			if r.Text != value {
+				newAutocomplete = append(newAutocomplete, r.Text)
+			}
+		}
 
 		wasShowing := m.showAutocomplete
-		m.showAutocomplete = len(newAutocomplete) > 0 && value != newAutocomplete[0]
+		m.showAutocomplete = len(newAutocomplete) > 0
 
 		if !wasShowing && m.showAutocomplete {
 			m.autocompleteIndex = 0
@@ -38,18 +267,7 @@ func (m *InteractiveChatModel) updateAutocomplete() {
 	}
 }
 
-// filterStrings returns items that start with prefix (but not exact matches)
-func filterStrings(items []string, prefix string) []string {
-	var filtered []string
-	for _, s := range items {
-		if strings.HasPrefix(s, prefix) && s != prefix {
-			filtered = append(filtered, s)
-		}
-	}
-	return filtered
-}
-
-// isSensitiveCommand checks if a command is potentially dangerous
+// isSensitiveCommand checks if a command is potentially dangerous.
 func isSensitiveCommand(cmd string) bool {
 	cmdLower := strings.ToLower(strings.TrimSpace(cmd))
 	cmdLower = strings.TrimPrefix(cmdLower, "!")
@@ -73,7 +291,7 @@ func isSensitiveCommand(cmd string) bool {
 	return false
 }
 
-// getSensitiveMessage returns a warning message for sensitive commands
+// getSensitiveMessage returns a warning message for sensitive commands.
 func getSensitiveMessage(cmd string) string {
 	cmdLower := strings.ToLower(cmd)
 	switch {
@@ -102,267 +320,80 @@ func getSensitiveMessage(cmd string) string {
 	}
 }
 
-// formatAIResponse formats AI response with clean, minimal styling
+// formatAIResponse delegates to the components package for assistant message rendering.
+// Retained as a package-level function for call-sites that haven't been migrated yet.
 func formatAIResponse(text string) string {
-	if text == "" {
-		return colorMuted("  (empty response)")
-	}
-
-	var sb strings.Builder
-
-	// Clean label
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246")).
-		Render("  assistant"))
-	sb.WriteString("\n")
-
-	// Process text for code blocks and formatting
-	lines := strings.Split(text, "\n")
-	inCodeBlock := false
-	codeLanguage := ""
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "```") {
-			inCodeBlock = !inCodeBlock
-			if inCodeBlock {
-				codeLanguage = strings.TrimSpace(strings.TrimPrefix(line, "```"))
-				if codeLanguage == "" {
-					codeLanguage = "code"
-				}
-				// Code block header - subtle
-				sb.WriteString("\n")
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("240")).
-					Render("    " + codeLanguage))
-				sb.WriteString("\n")
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("238")).
-					Render("   " + strings.Repeat("─", 50)))
-				sb.WriteString("\n")
-			} else {
-				// Code block footer
-				sb.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("238")).
-					Render("   " + strings.Repeat("─", 50)))
-				sb.WriteString("\n")
-			}
-			continue
-		}
-
-		if inCodeBlock {
-			styledLine := highlightCodeLine(line, codeLanguage)
-			sb.WriteString("    " + styledLine + "\n")
-		} else if strings.HasPrefix(line, "##") {
-			heading := strings.TrimLeft(line, "# ")
-			sb.WriteString("\n  " + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("255")).
-				Bold(true).
-				Render(heading) + "\n")
-		} else if strings.HasPrefix(line, "#") {
-			heading := strings.TrimLeft(line, "# ")
-			sb.WriteString("\n  " + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("255")).
-				Bold(true).
-				Underline(true).
-				Render(heading) + "\n")
-		} else if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "• ") {
-			trimmed := strings.TrimLeft(line, "-*• ")
-			sb.WriteString("  " + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("246")).
-				Render("  - ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("252")).
-					Render(trimmed) + "\n")
-		} else if strings.HasPrefix(line, ">") {
-			quoted := strings.TrimLeft(line, "> ")
-			sb.WriteString("  " + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("238")).
-				Render("  | ") +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("244")).
-					Italic(true).
-					Render(quoted) + "\n")
-		} else if strings.Contains(line, "`") && !inCodeBlock {
-			styledLine := highlightInlineCode(line)
-			sb.WriteString("  " + styledLine + "\n")
-		} else if line == "" {
-			sb.WriteString("\n")
-		} else {
-			sb.WriteString("  " + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
-				Render(line) + "\n")
-		}
-	}
-
-	return sb.String()
+	return components.FormatAssistantMessage(text)
 }
 
-// highlightCodeLine adds basic syntax highlighting to code
-func highlightCodeLine(line string, language string) string {
-	keywords := map[string][]string{
-		"go":         {"func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range", "var", "const", "defer", "go", "chan", "select", "switch", "case", "break"},
-		"python":     {"def", "class", "import", "from", "return", "if", "else", "elif", "for", "while", "try", "except", "with", "as", "yield", "lambda", "pass", "raise"},
-		"javascript": {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "try", "catch"},
-		"js":         {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "try", "catch"},
-		"typescript": {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "interface", "type"},
-		"ts":         {"function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "async", "await", "import", "export", "default", "new", "this", "interface", "type"},
-		"bash":       {"if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac", "function", "export", "local", "echo", "exit"},
-		"sh":         {"if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac", "function", "export", "local", "echo", "exit"},
-		"rust":       {"fn", "let", "mut", "pub", "struct", "enum", "impl", "trait", "use", "mod", "if", "else", "for", "while", "match", "return", "self", "Self"},
-		"java":       {"public", "private", "protected", "class", "interface", "void", "int", "String", "return", "if", "else", "for", "while", "new", "static", "final", "import"},
-	}
-
-	trimmed := strings.TrimSpace(line)
-
-	// Comments
-	if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("242")).
-			Italic(true).
-			Render(line)
-	}
-
-	// Strings
-	if strings.Contains(line, "\"") || strings.Contains(line, "'") {
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("179")).
-			Render(line)
-	}
-
-	// Check for keywords
-	lang := strings.ToLower(language)
-	if kwList, ok := keywords[lang]; ok {
-		words := strings.Fields(trimmed)
-		for _, word := range words {
-			for _, kw := range kwList {
-				if word == kw || strings.HasPrefix(word, kw+"(") || strings.HasPrefix(word, kw+".") {
-					return lipgloss.NewStyle().
-						Foreground(lipgloss.Color("176")).
-						Render(line)
-				}
-			}
-		}
-	}
-
-	// Default code color
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("117")).
-		Render(line)
+// formatAIStreamingResponse is a lightweight renderer used during token streaming.
+func formatAIStreamingResponse(text string) string {
+	return components.FormatAssistantStreamingMessage(text)
 }
 
-// highlightInlineCode highlights `code` in text
-func highlightInlineCode(text string) string {
-	parts := strings.Split(text, "`")
-	var sb strings.Builder
-
-	for i, part := range parts {
-		if i%2 == 1 {
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("117")).
-				Background(lipgloss.Color("236")).
-				Render(" " + part + " "))
-		} else {
-			sb.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
-				Render(part))
-		}
-	}
-
-	return sb.String()
-}
-
-// formatThinkingToolCall formats a tool call for the live thinking output
+// formatThinkingToolCall delegates to the components package.
 func formatThinkingToolCall(toolName string, args string) string {
-	toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
-	argsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-
-	// Parse args to show key info
-	argsSummary := abbreviateArgs(args, 80)
-
-	var sb strings.Builder
-	sb.WriteString("\n")
-	sb.WriteString(dimStyle.Render("  ┌─ "))
-	sb.WriteString(toolStyle.Render(toolName))
-	if argsSummary != "" {
-		sb.WriteString(argsStyle.Render(" " + argsSummary))
-	}
-	sb.WriteString("\n")
-	return sb.String()
+	return components.FormatToolCall(toolName, args)
 }
 
-// formatThinkingToolResult formats a tool result for the live thinking output
+// formatThinkingToolResult delegates to the components package.
 func formatThinkingToolResult(toolName string, result string, duration time.Duration) string {
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	resultStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-
-	// Abbreviate result
-	summary := abbreviateResult(result, 120)
-
-	var sb strings.Builder
-	sb.WriteString(dimStyle.Render("  └─ "))
-	sb.WriteString(okStyle.Render(fmt.Sprintf("done %s", duration.Round(time.Millisecond))))
-	if summary != "" {
-		sb.WriteString(resultStyle.Render(" " + summary))
-	}
-	sb.WriteString("\n")
-	return sb.String()
+	return components.FormatToolResult(toolName, result, duration)
 }
 
-// abbreviateArgs shortens tool arguments for display
-func abbreviateArgs(args string, maxLen int) string {
-	args = strings.TrimSpace(args)
-	if args == "" || args == "{}" || args == "null" {
-		return ""
-	}
-	// Clean up JSON for readability
-	args = strings.ReplaceAll(args, "\"", "")
-	args = strings.ReplaceAll(args, "{", "")
-	args = strings.ReplaceAll(args, "}", "")
-	args = strings.TrimSpace(args)
-	if len(args) > maxLen {
-		args = args[:maxLen] + "..."
-	}
-	return args
-}
-
-// ensureThinkingPlaceholder makes sure there's a placeholder message for thinking output
-func (m *InteractiveChatModel) ensureThinkingPlaceholder() {
-	if len(m.messages) == 0 || !strings.Contains(m.messages[len(m.messages)-1], "thinking") {
-		m.messages = append(m.messages, formatThinkingPanel(""))
-	}
-}
-
-// formatThinkingPanel renders the thinking output panel (non-streaming mode)
+// formatThinkingPanel delegates to the components package.
 func formatThinkingPanel(content string) string {
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-
-	var sb strings.Builder
-	sb.WriteString("  ")
-	sb.WriteString(labelStyle.Render("thinking"))
-	sb.WriteString("\n")
-	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 50)))
-	sb.WriteString("\n")
-	if content != "" {
-		sb.WriteString(content)
-	}
-	return sb.String()
+	return components.FormatThinkingPanel(content)
 }
 
-// abbreviateResult shortens tool results for display
-func abbreviateResult(result string, maxLen int) string {
-	result = strings.TrimSpace(result)
-	if result == "" {
-		return ""
+// formatThinkingIteration delegates to the components package.
+func formatThinkingIteration(iteration int) string {
+	return components.FormatThinkingIteration(iteration)
+}
+
+// formatThinkingModelCall delegates to the components package.
+func formatThinkingModelCall(provider string) string {
+	return components.FormatThinkingModelCall(provider)
+}
+
+// formatThinkingModelDone delegates to the components package.
+func formatThinkingModelDone(modelName string, stopReason string, tokens int, duration time.Duration) string {
+	return components.FormatThinkingModelDone(modelName, stopReason, tokens, duration)
+}
+
+// formatThinkingStatus delegates to the components package.
+func formatThinkingStatus(message string) string {
+	return components.FormatThinkingStatus(message)
+}
+
+// formatThinkingTokenUsage delegates to the components package.
+func formatThinkingTokenUsage(total int) string {
+	return components.FormatThinkingTokenUsage(total)
+}
+
+// ensureThinkingPlaceholder makes sure there's a placeholder message for thinking output.
+func (m *InteractiveChatModel) ensureThinkingPlaceholder() {
+	if m.isValidMessageIndex(m.thinkingPanelIndex) {
+		return
 	}
-	// Take first line only
-	if idx := strings.IndexByte(result, '\n'); idx >= 0 {
-		result = result[:idx]
+
+	placeholder := components.FormatThinkingPanel("")
+
+	// In streaming mode, keep "thinking" above the streamed assistant panel.
+	if m.isValidMessageIndex(m.streamPanelIndex) {
+		insertAt := m.streamPanelIndex
+		m.messages = append(m.messages, "")
+		copy(m.messages[insertAt+1:], m.messages[insertAt:])
+		m.messages[insertAt] = placeholder
+		m.thinkingPanelIndex = insertAt
+		m.streamPanelIndex++
+		m.trimMessageBuffer()
+		m.refreshOutput(true)
+		return
 	}
-	if len(result) > maxLen {
-		result = result[:maxLen] + "..."
-	}
-	return result
+
+	m.messages = append(m.messages, placeholder)
+	m.thinkingPanelIndex = len(m.messages) - 1
+	m.trimMessageBuffer()
+	m.refreshOutput(true)
 }

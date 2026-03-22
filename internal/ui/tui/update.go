@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/core"
+	"github.com/M4MEET/soulgate/internal/ui/tui/components"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Custom message type for dependency installation completion
@@ -25,7 +25,7 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Handle onboarding (absolute highest priority)
 		if m.ShowOnboarding {
-			return m.handleOnboardingInput(msg.String())
+			return m.handleOnboardingInput(msg)
 		}
 
 		// Handle setup wizard (highest priority)
@@ -50,74 +50,92 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Handle permission prompt first (highest priority)
-		if m.showPermissionPrompt && m.permissionResponse != nil {
-			switch msg.String() {
-			case "a", "A":
-				// Allow once
-				m.showPermissionPrompt = false
-				m.addMessage(colorSuccess("✓ Permission granted (this time)"))
-				m.permissionResponse <- core.PermissionResponse{Approved: true, LearnPattern: false}
-				m.permissionResponse = nil
-				return m, nil
-
-			case "l", "L":
-				// Learn and always allow
-				m.showPermissionPrompt = false
-				m.addMessage(colorSuccess("✓ Permission granted and learned!"))
-				m.permissionResponse <- core.PermissionResponse{Approved: true, LearnPattern: true}
-				m.permissionResponse = nil
-				return m, nil
-
-			case "d", "D", "n", "N", "esc":
-				// Deny
-				m.showPermissionPrompt = false
-				m.addMessage(colorError("✗ Permission denied"))
-				m.permissionResponse <- core.PermissionResponse{Approved: false, LearnPattern: false}
-				m.permissionResponse = nil
-				return m, nil
+		if handled, result := m.permission.HandleKey(msg.String()); handled {
+			if result != nil {
+				if result.Approved {
+					if result.LearnPattern {
+						m.addMessage(colorSuccess("✓ Permission granted and learned!"))
+					} else {
+						m.addMessage(colorSuccess("✓ Permission granted (this time)"))
+					}
+				} else {
+					m.addMessage(colorError("✗ Permission denied"))
+				}
 			}
-			// Ignore other keys when permission prompt is showing
 			return m, nil
 		}
 
 		// Handle confirmation dialog
-		if m.showConfirmation {
-			switch msg.String() {
-			case "y", "Y":
-				// Confirm - execute pending action
-				m.showConfirmation = false
-				m.addMessage(colorSuccess("✓ Confirmed"))
-				if m.pendingAction != nil {
-					cmd := m.pendingAction()
-					m.pendingAction = nil
-					return m, cmd
+		if m.confirmation.Active {
+			pendingAction := m.confirmation.PendingAction
+			handled, confirmed := m.confirmation.HandleKey(msg.String())
+			if handled {
+				if confirmed {
+					m.addMessage(colorSuccess("✓ Confirmed"))
+					if pendingAction != nil {
+						return m, pendingAction()
+					}
+				} else {
+					m.addMessage(colorMuted("✗ Cancelled"))
 				}
 				return m, nil
-
-			case "n", "N", "esc":
-				// Cancel
-				m.showConfirmation = false
-				m.addMessage(colorMuted("✗ Cancelled"))
-				m.pendingAction = nil
-				return m, nil
 			}
-			// Ignore other keys when confirmation is showing
-			return m, nil
 		}
 
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyCtrlD:
+		case tea.KeyCtrlC:
 			return m, tea.Quit
+
+		case tea.KeyCtrlD:
+			// Exit only when input is empty (matches shell behaviour)
+			if m.input.Value() == "" {
+				return m, tea.Quit
+			}
+			return m, nil
 
 		case tea.KeyCtrlL:
 			// Clear screen
 			m.messages = []string{welcomeMessage()}
-			m.output.SetContent(strings.Join(m.messages, "\n\n"))
+			m.refreshOutput(true)
 			return m, nil
 
 		case tea.KeyCtrlH:
-			// Show help
-			m.addMessage(renderHelp())
+			// Toggle the help overlay
+			m.showHelpOverlay = !m.showHelpOverlay
+			return m, nil
+
+		case tea.KeyCtrlN:
+			// New conversation: clear messages and AI context
+			m.messages = []string{welcomeMessage()}
+			m.refreshOutput(true)
+			m.orch.SetConversationHistory(nil)
+			m.sessionTokensUsed = 0
+			m.addMessage(colorSuccess("  New conversation started. AI context cleared."))
+			return m, nil
+
+		case tea.KeyCtrlG:
+			// Open agent list
+			m.addMessage(m.renderAgentList())
+			return m, nil
+
+		case tea.KeyCtrlT:
+			// Toggle live thinking display
+			m.showThinkingOutput = !m.showThinkingOutput
+			if m.showThinkingOutput {
+				m.addMessage(colorSuccess("  Live thinking output: on"))
+			} else {
+				m.addMessage(colorMuted("  Live thinking output: off"))
+			}
+			return m, nil
+
+		case tea.KeyCtrlO:
+			// Toggle verbose tool output
+			m.showVerboseTools = !m.showVerboseTools
+			if m.showVerboseTools {
+				m.addMessage(colorSuccess("  Verbose tool output: on"))
+			} else {
+				m.addMessage(colorMuted("  Verbose tool output: off"))
+			}
 			return m, nil
 
 		case tea.KeyUp:
@@ -223,19 +241,34 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyPgUp:
 			// Scroll output up
-			m.output.ViewUp()
+			m.autoScroll = false
+			m.output.HalfPageUp()
 			return m, nil
 
 		case tea.KeyPgDown:
 			// Scroll output down
-			m.output.ViewDown()
+			m.output.HalfPageDown()
+			if m.output.AtBottom() {
+				m.autoScroll = true
+			}
 			return m, nil
 
 		case tea.KeyEsc:
+			// Close help overlay if open
+			if m.showHelpOverlay {
+				m.showHelpOverlay = false
+				return m, nil
+			}
 			// Close autocomplete suggestions
 			if m.showAutocomplete {
 				m.showAutocomplete = false
 				m.autocompleteIndex = 0
+				return m, nil
+			}
+			// Abort current AI generation if thinking
+			if m.thinking {
+				triggerAbort(m.cancelHandle)
+				m.addMessage(colorWarn("  Generation aborted."))
 				return m, nil
 			}
 			return m, nil
@@ -269,19 +302,15 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history = append(m.history, value)
 			m.historyIndex = -1
 
-			// Clear input
+			// Clear input and stop agent watching
 			m.input.SetValue("")
 			m.showAutocomplete = false
 			m.autocompleteIndex = 0
+			m.watchingAgentID = ""
+			m.autoScroll = true
 
 			// Add user message to output
-			m.addMessage(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
-				Bold(true).
-				Render("  you") + "\n  " +
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("252")).
-					Render(value))
+			m.addMessage(components.FormatUserMessage(value))
 
 			// Handle commands
 			if strings.HasPrefix(value, "/") {
@@ -297,19 +326,21 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.thinking = true
 			m.status = "Thinking..."
 			m.spinnerFrame = 0
+			m.streamFlushScheduled = false
+			m.streamBuffer = ""
+			m.thinkingBuffer = ""
+			m.streamPanelIndex = -1
+			m.thinkingPanelIndex = -1
 
 			if m.streamingEnabled {
 				// In streaming mode, add a placeholder message for live updates
-				m.streamBuffer = ""
-				m.addMessage(formatAIResponse(""))
+				m.ensureStreamPanel()
 			}
 
 			// Start both the AI request and thinking animation
 			return m, tea.Batch(
 				m.sendToAI(value),
-				tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
-					return thinkingMsg{}
-				}),
+				thinkingTickCmd(),
 			)
 		}
 
@@ -324,63 +355,75 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.output.Height = viewportHeight
 		m.input.Width = msg.Width - 8
+		if len(m.messages) > 0 {
+			m.refreshOutput(false)
+		}
 		return m, nil
+
+	case tea.MouseMsg:
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			m.autoScroll = false
+			m.output.LineUp(3)
+			return m, nil
+		case tea.MouseWheelDown:
+			m.output.LineDown(3)
+			if m.output.AtBottom() {
+				m.autoScroll = true
+			}
+			return m, nil
+		}
 
 	case responseMsg:
 		m.thinking = false
 		m.status = "Ready"
 		m.thinkingActivity = ""
 		m.thinkingLog = nil
+		m.streamFlushScheduled = false
 		// Refresh model info to show actual model name from API response
 		m.currentProvider, m.currentModel = m.orch.GetCurrentProvider()
 		if msg.err != nil {
-			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-			var sb strings.Builder
-			sb.WriteString(errStyle.Render("  error") + "\n")
-			sb.WriteString("  " + errStyle.Render(msg.err.Error()) + "\n\n")
-			sb.WriteString(dim.Render("  Check: echo $OPENAI_API_KEY") + "\n")
-			sb.WriteString(dim.Render("  Check: cat ~/.soulgate/config.yml") + "\n")
-			if m.streamingEnabled && len(m.messages) > 0 {
+			errMsg := components.FormatErrorMessage(msg.err)
+			if m.streamingEnabled && m.isValidMessageIndex(m.streamPanelIndex) {
 				// Replace the stream placeholder
-				m.messages[len(m.messages)-1] = sb.String()
-				m.output.SetContent(strings.Join(m.messages, "\n\n"))
+				m.setMessageAt(m.streamPanelIndex, errMsg, true)
 			} else {
-				m.addMessage(sb.String())
+				m.addMessage(errMsg)
 			}
 		} else {
-			if m.streamingEnabled && len(m.messages) > 0 {
+			if m.streamingEnabled && m.isValidMessageIndex(m.streamPanelIndex) {
 				// Replace the stream placeholder with the final formatted response
-				m.messages[len(m.messages)-1] = formatAIResponse(msg.text)
-				m.output.SetContent(strings.Join(m.messages, "\n\n"))
-				m.output.GotoBottom()
-			} else if m.streamBuffer != "" && len(m.messages) > 0 {
-				// Non-streaming with thinking output: finalize the thinking panel, then add response
-				m.messages[len(m.messages)-1] = formatThinkingPanel(m.streamBuffer)
-				m.addMessage(formatAIResponse(msg.text))
+				m.setMessageAt(m.streamPanelIndex, formatAIResponse(msg.text), true)
 			} else {
 				m.addMessage(formatAIResponse(msg.text))
 			}
 		}
 		m.streamBuffer = ""
+		m.thinkingBuffer = ""
+		m.streamPanelIndex = -1
+		m.thinkingPanelIndex = -1
 		return m, nil
 
 	case thinkingMsg:
 		if m.thinking {
 			// Advance spinner frame
 			m.spinnerFrame = (m.spinnerFrame + 1) % 10
+			// Advance waiting phrase every ~28 ticks (~2 seconds at 70ms per tick)
+			m.waitingPhraseTick++
+			if m.waitingPhraseTick >= 28 {
+				m.waitingPhraseTick = 0
+				m.waitingPhraseIndex = (m.waitingPhraseIndex + 1) % len(waitingPhrases)
+			}
 			// Update thinking animation
-			return m, tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
-				return thinkingMsg{}
-			})
+			return m, thinkingTickCmd()
 		}
 		return m, nil
 
 	case PermissionRequestMsg:
 		// Show permission prompt
-		m.showPermissionPrompt = true
-		m.permissionRequest = &msg.Request
-		m.permissionResponse = msg.Response
+		m.permission.Active = true
+		m.permission.Request = &msg.Request
+		m.permission.Response = msg.Response
 		return m, nil
 
 	case thinkingEventMsg:
@@ -397,8 +440,32 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch evt.Kind {
 		case core.ThinkingIteration:
 			m.thinkingActivity = fmt.Sprintf("iteration %d", evt.Iteration)
+
+			// Show iteration marker in the chat output
+			line := formatThinkingIteration(evt.Iteration)
+			if m.streamingEnabled {
+				m.thinkingBuffer += line
+				return m, m.scheduleStreamFlush()
+			} else {
+				m.ensureThinkingPlaceholder()
+				m.thinkingBuffer += line
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
+			}
+
 		case core.ThinkingModelCall:
 			m.thinkingActivity = "calling model..."
+
+			// Show model call in the chat output
+			line := formatThinkingModelCall(evt.Provider)
+			if m.streamingEnabled {
+				m.thinkingBuffer += line
+				return m, m.scheduleStreamFlush()
+			} else {
+				m.ensureThinkingPlaceholder()
+				m.thinkingBuffer += line
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
+			}
+
 		case core.ThinkingModelDone:
 			modelName := evt.Model
 			if modelName == "" {
@@ -406,53 +473,229 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.thinkingActivity = fmt.Sprintf("model: %s (%s, %d tok, %s)",
 				modelName, evt.StopReason, evt.TokensUsed, evt.Duration.Round(time.Millisecond))
+			// Accumulate tokens per model call for session-level tracking
+			m.sessionTokensUsed += evt.TokensUsed
+
+			// Show model response info in the chat output
+			line := formatThinkingModelDone(modelName, evt.StopReason, evt.TokensUsed, evt.Duration)
+			if m.streamingEnabled {
+				m.thinkingBuffer += line
+				return m, m.scheduleStreamFlush()
+			} else {
+				m.ensureThinkingPlaceholder()
+				m.thinkingBuffer += line
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
+			}
+
 		case core.ThinkingToolStart:
-			m.thinkingActivity = fmt.Sprintf("running %s", evt.ToolName)
+			toolName := sanitizeToolNameForDisplay(evt.ToolName)
+			if toolName == "" {
+				toolName = evt.ToolName
+			}
+			m.thinkingActivity = fmt.Sprintf("running %s", toolName)
 
 			// Show tool call in the chat output for live view
-			toolLine := formatThinkingToolCall(evt.ToolName, evt.ToolArgs)
-			if m.streamingEnabled && len(m.messages) > 0 {
-				m.streamBuffer += toolLine
-				m.messages[len(m.messages)-1] = formatAIResponse(m.streamBuffer)
+			toolLine := formatThinkingToolCall(toolName, evt.ToolArgs)
+			if m.streamingEnabled {
+				m.thinkingBuffer += toolLine
+				return m, m.scheduleStreamFlush()
 			} else {
 				// Non-streaming: update the last thinking placeholder
 				m.ensureThinkingPlaceholder()
-				m.streamBuffer += toolLine
-				m.messages[len(m.messages)-1] = formatThinkingPanel(m.streamBuffer)
+				m.thinkingBuffer += toolLine
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
 			}
-			m.output.SetContent(strings.Join(m.messages, "\n\n"))
-			m.output.GotoBottom()
 		case core.ThinkingToolDone:
-			m.thinkingActivity = fmt.Sprintf("%s done (%s)", evt.ToolName, evt.Duration.Round(time.Millisecond))
+			toolName := sanitizeToolNameForDisplay(evt.ToolName)
+			if toolName == "" {
+				toolName = evt.ToolName
+			}
+			m.thinkingActivity = fmt.Sprintf("%s done (%s)", toolName, evt.Duration.Round(time.Millisecond))
 
 			// Show abbreviated result in live view
-			resultLine := formatThinkingToolResult(evt.ToolName, evt.ToolResult, evt.Duration)
-			if m.streamingEnabled && len(m.messages) > 0 {
-				m.streamBuffer += resultLine
-				m.messages[len(m.messages)-1] = formatAIResponse(m.streamBuffer)
+			resultLine := formatThinkingToolResult(toolName, evt.ToolResult, evt.Duration)
+			if m.streamingEnabled {
+				m.thinkingBuffer += resultLine
+				return m, m.scheduleStreamFlush()
 			} else {
 				m.ensureThinkingPlaceholder()
-				m.streamBuffer += resultLine
-				m.messages[len(m.messages)-1] = formatThinkingPanel(m.streamBuffer)
+				m.thinkingBuffer += resultLine
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
 			}
-			m.output.SetContent(strings.Join(m.messages, "\n\n"))
-			m.output.GotoBottom()
+
+		case core.ThinkingTokenUsage:
+			m.thinkingActivity = fmt.Sprintf("tokens used %d", evt.TokensUsed)
+			// Accumulate session-level token count (status bar display)
+			if evt.TokensUsed > m.sessionTokensUsed {
+				m.sessionTokensUsed = evt.TokensUsed
+			}
+
+			line := formatThinkingTokenUsage(evt.TokensUsed)
+			if m.streamingEnabled {
+				m.thinkingBuffer += line
+				return m, m.scheduleStreamFlush()
+			} else {
+				m.ensureThinkingPlaceholder()
+				m.thinkingBuffer += line
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
+			}
+
+		case core.ThinkingStatus:
+			if msg := strings.TrimSpace(evt.Message); msg != "" {
+				m.thinkingActivity = msg
+			}
+			line := formatThinkingStatus(evt.Message)
+			if m.streamingEnabled {
+				m.thinkingBuffer += line
+				return m, m.scheduleStreamFlush()
+			} else {
+				m.ensureThinkingPlaceholder()
+				m.thinkingBuffer += line
+				m.setMessageAt(m.thinkingPanelIndex, formatThinkingPanel(m.thinkingBuffer), true)
+			}
 		}
 		return m, nil
 
 	case streamChunkMsg:
 		// Streaming token arrived - append to buffer and update display
 		m.streamBuffer += msg.chunk
-		// Update the last message in the output with accumulated stream content
-		if len(m.messages) > 0 {
-			m.messages[len(m.messages)-1] = formatAIResponse(m.streamBuffer)
-			m.output.SetContent(strings.Join(m.messages, "\n\n"))
-			m.output.GotoBottom()
+		return m, m.scheduleStreamFlush()
+
+	case streamFlushMsg:
+		m.flushStreamingPreview()
+		return m, nil
+
+	case agentPollMsg:
+		// Refresh the watched agent's activity log
+		if m.watchingAgentID == "" || m.watchingAgentID != msg.agentID {
+			return m, nil
 		}
+
+		agent, ok := m.orch.GetAgentManager().Get(msg.agentID)
+		if !ok {
+			m.watchingAgentID = ""
+			return m, nil
+		}
+
+		// Update the last message with fresh agent detail
+		if len(m.messages) > 0 {
+			m.setLastMessage(m.renderAgentDetail(msg.agentID), true)
+		}
+
+		// Keep polling if agent is still running
+		if agent.Status == core.AgentRunning {
+			return m, agentPollCmd(msg.agentID)
+		}
+
+		// Agent finished — do one final render and stop watching
+		m.watchingAgentID = ""
 		return m, nil
 
 	case dependencyInstallCompleteMsg:
-		// Dependency installation completed
+		// Dependency installation completed; auto-advance for a smoother flow.
+		if m.ShowOnboarding && m.OnboardingState != nil {
+			m.OnboardingState.InstallingDependencies = false
+			if m.OnboardingState.GetCurrentStep().Name == "dependencies" {
+				m.OnboardingState.NextStep()
+			}
+		}
+		return m, nil
+
+	case dependencyProgressMsg:
+		if m.ShowOnboarding && m.OnboardingState != nil && m.OnboardingState.InstallingDependencies {
+			m.onboardingSpinnerFrame = (m.onboardingSpinnerFrame + 1) % 10
+			return m, dependencyTickCmd()
+		}
+		return m, nil
+
+	case gatewayConnectedMsg:
+		m.gatewayConnected = true
+		m.addMessage(colorSuccess(fmt.Sprintf("Gateway connected as %s", msg.clientID)))
+		return m, nil
+
+	case gatewayDisconnectedMsg:
+		m.gatewayConnected = false
+		if msg.err != nil {
+			m.addMessage(colorError(fmt.Sprintf("Gateway disconnected: %v", msg.err)))
+		} else {
+			m.addMessage(colorMuted("Gateway disconnected"))
+		}
+		return m, nil
+
+	case gatewayMessageMsg:
+		f := msg.frame
+		// Display incoming channel message in TUI
+		senderLabel := f.Sender.Username
+		if senderLabel == "" {
+			senderLabel = f.Sender.Name
+		}
+		if senderLabel == "" {
+			senderLabel = f.Sender.ID
+		}
+		displayMsg := fmt.Sprintf("\n  %s  %s\n  %s\n",
+			colorAccent(fmt.Sprintf("[%s] @%s", f.Channel, senderLabel)),
+			colorMuted(time.Unix(f.Timestamp, 0).Format("15:04:05")),
+			f.Text,
+		)
+		m.addMessage(displayMsg)
+
+		// Auto-process with orchestrator
+		m.thinking = true
+		m.status = fmt.Sprintf("Processing [%s]...", f.Channel)
+		m.spinnerFrame = 0
+		m.streamFlushScheduled = false
+		m.streamBuffer = ""
+		m.thinkingBuffer = ""
+		m.streamPanelIndex = -1
+		m.thinkingPanelIndex = -1
+
+		if m.streamingEnabled {
+			m.ensureStreamPanel()
+		}
+
+		return m, tea.Batch(
+			m.processGatewayMessage(f),
+			thinkingTickCmd(),
+		)
+
+	case gatewayResponseMsg:
+		m.thinking = false
+		m.status = "Ready"
+		m.thinkingActivity = ""
+		m.thinkingLog = nil
+
+		if msg.err != nil {
+			errMsg := components.FormatErrorMessage(msg.err)
+			if m.streamingEnabled && m.isValidMessageIndex(m.streamPanelIndex) {
+				m.setMessageAt(m.streamPanelIndex, errMsg, true)
+			} else {
+				m.addMessage(errMsg)
+			}
+		} else {
+			// Display response in TUI
+			if m.streamingEnabled && m.isValidMessageIndex(m.streamPanelIndex) {
+				m.setMessageAt(m.streamPanelIndex, formatAIResponse(msg.response), true)
+			} else {
+				m.addMessage(formatAIResponse(msg.response))
+			}
+
+			// Send response back to Gateway → channel
+			gw := m.getGatewayClient()
+			if gw != nil && msg.frame != nil {
+				if err := gw.SendChannelResponse(
+					msg.frame.Channel,
+					msg.frame.ConversationID,
+					msg.frame.SessionID,
+					msg.response,
+				); err != nil {
+					m.addMessage(colorError(fmt.Sprintf("Failed to send to %s: %v", msg.frame.Channel, err)))
+				}
+			}
+		}
+		m.streamBuffer = ""
+		m.thinkingBuffer = ""
+		m.streamPanelIndex = -1
+		m.thinkingPanelIndex = -1
 		return m, nil
 	}
 
