@@ -526,9 +526,22 @@ function ActivityTab({ agentId }: { agentId: string }) {
 // ── Detail Page: Configuration Tab ──────────────────────────────────────────
 
 function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSaved: () => void }) {
-  const [cfg, setCfg] = useState<AgentConfig>({ ...detail.config });
+  // Normalize null fields to safe defaults
+  const safeConfig: AgentConfig = {
+    model: detail.config?.model || '',
+    provider: detail.config?.provider || '',
+    allowed_tools: detail.config?.allowed_tools || [],
+    max_tokens: detail.config?.max_tokens || 0,
+    max_cost_usd: detail.config?.max_cost_usd || 0,
+    thinking_level: detail.config?.thinking_level || 'off',
+    temperature: detail.config?.temperature || 0.7,
+    system_prompt: detail.config?.system_prompt || '',
+    timeout_seconds: detail.config?.timeout_seconds || 0,
+    auto_restart: detail.config?.auto_restart || false,
+  };
+  const [cfg, setCfg] = useState<AgentConfig>(safeConfig);
   const [saving, setSaving] = useState(false);
-  const [availableTools, setAvailableTools] = useState<string[]>(['read_file', 'write_file', 'exec', 'search', 'list_files', 'fetch_url', 'git']);
+  const [availableTools, setAvailableTools] = useState<string[]>(['files_read', 'files_write', 'exec_command', 'web_search', 'files_list', 'web_fetch', 'git_status']);
 
   const m = detail.metrics;
   const tokenPct = Math.min((m.tokens_used / (cfg.max_tokens || 8192)) * 100, 100);
@@ -555,12 +568,15 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
   };
 
   const toggleTool = (tool: string) => {
-    setCfg(c => ({
-      ...c,
-      allowed_tools: c.allowed_tools.includes(tool)
-        ? c.allowed_tools.filter(t => t !== tool)
-        : [...c.allowed_tools, tool],
-    }));
+    setCfg(c => {
+      const current = c.allowed_tools || [];
+      return {
+        ...c,
+        allowed_tools: current.includes(tool)
+          ? current.filter(t => t !== tool)
+          : [...current, tool],
+      };
+    });
   };
 
   return (
