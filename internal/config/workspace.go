@@ -309,37 +309,76 @@ If something needs attention, describe it briefly.
 func createDefaultPolicy(path string) error {
 	defaultPolicy := `version: "1"
 
-# Default policy: allow workspace reads, deny everything else
+# Default policy: allow core operations, prompt for sensitive ones
 policies:
-  - name: "allow-workspace-reads"
-    description: "Allow reading files within the workspace"
-    action: "files.read"
+  # File operations within workspace
+  - name: "allow-workspace-files"
+    action: "files.*"
     resource: "./**"
     decision: allow
+    priority: 10
 
-  - name: "allow-workspace-list"
-    description: "Allow listing directories within the workspace"
-    action: "files.list"
+  # Shell command execution
+  - name: "allow-exec"
+    action: "exec.*"
+    resource: "*"
+    decision: allow
+    priority: 10
+
+  # Web access
+  - name: "allow-web"
+    action: "web.*"
+    resource: "*"
+    decision: allow
+    priority: 10
+
+  - name: "allow-net"
+    action: "net.*"
+    resource: "*"
+    decision: allow
+    priority: 10
+
+  # Memory operations
+  - name: "allow-memory"
+    action: "memory.*"
+    resource: "*"
+    decision: allow
+    priority: 10
+
+  # Agent management
+  - name: "allow-agents"
+    action: "agent.*"
+    resource: "*"
+    decision: allow
+    priority: 10
+
+  # Process management
+  - name: "allow-process"
+    action: "process.*"
+    resource: "*"
+    decision: allow
+    priority: 10
+
+  # Patch/apply operations
+  - name: "allow-patch"
+    action: "patch.*"
     resource: "./**"
     decision: allow
+    priority: 10
 
-  - name: "allow-workspace-stat"
-    description: "Allow stat operations within the workspace"
-    action: "files.stat"
-    resource: "./**"
-    decision: allow
-
+  # Security: deny parent directory access
   - name: "deny-parent-access"
-    description: "Deny access to parent directories"
     action: "files.*"
     resource: "../**"
     decision: deny
+    priority: 100
 
+  # Security: deny absolute paths outside workspace
   - name: "deny-absolute-paths"
-    description: "Deny absolute paths outside workspace"
     action: "files.*"
     resource: "/**"
     decision: deny
+    priority: 100
 `
 
 	return os.WriteFile(path, []byte(defaultPolicy), 0600)

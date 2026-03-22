@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetToolSchemasFiltersPermissionedToolsWithoutPolicyApproval(t *testing.T) {
+func TestGetToolSchemasShowsAllToolsWhenPolicyIsEmpty(t *testing.T) {
+	// When there's no policy rules, all tools should be visible.
+	// The policy engine restricts; an empty/nil policy means no restrictions.
 	orch := &Orchestrator{
 		policyEngine:    policy.NewEngine(nil),
 		integrationsReg: integrations.NewRegistry(),
@@ -20,9 +22,8 @@ func TestGetToolSchemasFiltersPermissionedToolsWithoutPolicyApproval(t *testing.
 	tools := orch.getToolSchemas()
 	names := toolNameSet(tools)
 
-	assert.False(t, names["exec_command"])
-	assert.False(t, names["files_read"])
-	assert.False(t, names["web_search"])
+	assert.True(t, names["exec_command"])
+	assert.True(t, names["files_read"])
 	assert.True(t, names["memory_get"])
 	assert.True(t, names["switch_model"])
 }

@@ -71,10 +71,10 @@ func TestInitWorkspacePolicyContent(t *testing.T) {
 
 	// Verify policy contains expected rules
 	policyStr := string(content)
-	assert.Contains(t, policyStr, "allow-workspace-reads")
-	assert.Contains(t, policyStr, "allow-workspace-list")
+	assert.Contains(t, policyStr, "allow-workspace-files")
+	assert.Contains(t, policyStr, "allow-exec")
 	assert.Contains(t, policyStr, "deny-parent-access")
-	assert.Contains(t, policyStr, "files.read")
+	assert.Contains(t, policyStr, "files.*")
 	assert.Contains(t, policyStr, "./**")
 }
 
@@ -259,7 +259,7 @@ func TestCreateDefaultPolicy(t *testing.T) {
 	policyStr := string(content)
 	assert.Contains(t, policyStr, "version:")
 	assert.Contains(t, policyStr, "policies:")
-	assert.Contains(t, policyStr, "allow-workspace-reads")
+	assert.Contains(t, policyStr, "allow-workspace-files")
 	assert.Contains(t, policyStr, "deny-parent-access")
 }
 

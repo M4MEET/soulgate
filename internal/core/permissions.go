@@ -261,7 +261,16 @@ func (o *Orchestrator) checkOrRequestPermissionWithFallback(
 	}
 
 	if o.policyEngine == nil {
-		return false, primaryAction, "policy engine not configured"
+		// No policy engine → prompt user if possible, otherwise allow.
+		// The policy engine restricts; its absence should not block everything.
+		if o.permissionCallback != nil {
+			approved, learn := o.RequestPermission(ctx, primaryAction, resource, "no policy configured")
+			if approved && learn {
+				_ = o.LearnPermission(primaryAction, resource)
+			}
+			return approved, primaryAction, "no policy configured"
+		}
+		return true, primaryAction, ""
 	}
 
 	candidates := make([]string, 0, 1+len(fallbackActions))

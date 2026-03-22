@@ -867,11 +867,14 @@ func (o *Orchestrator) shouldExposeToolSchema(toolName string) bool {
 
 func (o *Orchestrator) policyAllowsSchemaChecks(checks []permissionCheck) bool {
 	if o.policyEngine == nil {
-		return false
+		// No policy engine → no restrictions → show all tools
+		return true
 	}
 	pol := o.policyEngine.GetPolicy()
-	if pol == nil {
-		return o.permissionCallback != nil
+	if pol == nil || len(pol.Policies) == 0 {
+		// No policy rules → default-allow for tool visibility
+		// (actual execution still goes through authorizeToolCall)
+		return true
 	}
 
 	matcher := policy.NewMatcher()
