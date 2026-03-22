@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/M4MEET/soulgate/internal/a2a"
 	"github.com/M4MEET/soulgate/internal/auth"
 	"github.com/M4MEET/soulgate/internal/gateway/webui"
 	"github.com/M4MEET/soulgate/internal/protocol"
@@ -83,6 +84,10 @@ type Gateway struct {
 	// clients, so this map is the only way to track them.
 	spawnedConnectors   map[string]*SpawnedConnector
 	spawnedConnectorsMu sync.RWMutex
+
+	// A2A (Agent-to-Agent) protocol server and agent registry
+	a2aServer   *a2a.Server
+	a2aRegistry *a2a.AgentRegistry
 }
 
 // SpawnedConnector tracks a connector process launched via POST /api/connectors.
@@ -288,6 +293,10 @@ type Config struct {
 	// /api/teams endpoints and wires user context into every authenticated
 	// request. Typically set to the workspace .soulgate config directory.
 	UsersFile string
+
+	// ConfigDir is the .soulgate workspace config directory, used for
+	// persisting A2A state and other gateway-owned data.
+	ConfigDir string
 }
 
 // NewGateway creates a new Gateway
@@ -387,6 +396,14 @@ func NewGateway(config *Config) (*Gateway, error) {
 		spawnedConnectors: make(map[string]*SpawnedConnector),
 	}
 	gw.monitor = newHealthMonitor(gw)
+
+	// Initialize A2A agent registry
+	if config.ConfigDir != "" {
+		gw.a2aRegistry = a2a.NewAgentRegistry(config.ConfigDir)
+	} else {
+		gw.a2aRegistry = a2a.NewAgentRegistry("")
+	}
+
 	return gw, nil
 }
 
@@ -570,6 +587,9 @@ func (g *Gateway) Start(ctx context.Context) error {
 		mux.HandleFunc("/webhook/", g.handleWebhook)
 		fmt.Println("Webhooks enabled: POST /webhook/{name}")
 	}
+
+	// A2A (Agent-to-Agent) protocol endpoints
+	g.registerA2ARoutes(mux, apiHandler)
 
 	// Prometheus metrics endpoint
 	mux.HandleFunc("/metrics", g.handleMetrics)
