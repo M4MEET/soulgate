@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -397,6 +398,9 @@ func (s *Scheduler) dispatch(ctx context.Context, id string, now time.Time) {
 
 	// Persist state after every execution attempt.
 	_ = s.save()
+
+	// Append to the durable execution history journal.
+	s.appendHistory(id, job.Name, now, result, execErr)
 }
 
 // --------------------------------------------------------------------------
@@ -494,4 +498,83 @@ func computeNextRun(kind ScheduleKind, schedule string, from time.Time) (time.Ti
 	default:
 		return time.Time{}, fmt.Errorf("unknown schedule kind %q", kind)
 	}
+}
+
+// --------------------------------------------------------------------------
+// Execution History (durable JSONL journal)
+// --------------------------------------------------------------------------
+
+const historyFilename = "logs/cron_history.jsonl"
+
+// HistoryEntry records a single cron job execution for auditing purposes.
+type HistoryEntry struct {
+	JobID    string    `json:"job_id"`
+	JobName  string    `json:"job_name"`
+	RunAt    time.Time `json:"run_at"`
+	Duration string    `json:"duration,omitempty"`
+	Result   string    `json:"result,omitempty"`
+	Error    string    `json:"error,omitempty"`
+	Success  bool      `json:"success"`
+}
+
+// appendHistory appends a single execution record to the JSONL history file.
+// Errors are silently swallowed — history is best-effort.
+func (s *Scheduler) appendHistory(jobID, jobName string, runAt time.Time, result string, err error) {
+	path := filepath.Join(s.dataDir, historyFilename)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+
+	entry := HistoryEntry{
+		JobID:   jobID,
+		JobName: jobName,
+		RunAt:   runAt,
+		Success: err == nil,
+	}
+	if err != nil {
+		entry.Error = err.Error()
+	} else {
+		r := result
+		if len(r) > 500 {
+			r = r[:500] + "..."
+		}
+		entry.Result = r
+	}
+
+	data, marshalErr := json.Marshal(entry)
+	if marshalErr != nil {
+		return
+	}
+	data = append(data, '\n')
+
+	f, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if openErr != nil {
+		return
+	}
+	f.Write(data)
+	f.Close()
+}
+
+// History returns the last n execution records from the JSONL history file.
+// Returns nil if no history exists.
+func (s *Scheduler) History(limit int) []HistoryEntry {
+	path := filepath.Join(s.dataDir, historyFilename)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var entries []HistoryEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var e HistoryEntry
+		if json.Unmarshal([]byte(line), &e) == nil {
+			entries = append(entries, e)
+		}
+	}
+
+	if limit > 0 && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries
 }
