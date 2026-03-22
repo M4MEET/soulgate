@@ -1248,11 +1248,7 @@ export default function ChatView() {
             >
               {displayMessages.map(msg => (
                 <div key={msg.id} className="group">
-                  <ChatMessage
-                    message={msg}
-                    onRetry={msg.role === 'assistant' ? () => handleRetry(msg.id) : undefined}
-                    onFork={() => handleForkFromMessage(msg.id)}
-                  />
+                  <ChatMessage message={msg} />
                   {!msg.streaming && msg.role !== 'system' && (
                     <MessageActions
                       message={msg}

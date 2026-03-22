@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, RotateCcw, GitFork, ChevronDown, ChevronRight, Zap } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, Zap } from 'lucide-react';
 
 export interface Message {
   id: string;
@@ -87,15 +87,7 @@ function ToolCallCard({ tool }: { tool: ToolCall }) {
   );
 }
 
-export default function ChatMessage({
-  message,
-  onRetry,
-  onFork,
-}: {
-  message: Message;
-  onRetry?: () => void;
-  onFork?: () => void;
-}) {
+export default function ChatMessage({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -368,38 +360,17 @@ export default function ChatMessage({
         {/* Tool calls */}
         {message.toolCalls?.map((tc, i) => <ToolCallCard key={i} tool={tc} />)}
 
-        {/* Footer */}
-        <div className={`flex items-center gap-2 mt-1.5 min-h-5 ${isUser ? 'flex-row-reverse' : ''}`}>
-          {message.tokens != null && (
-            <span className="text-xs text-zinc-600">{message.tokens} tok</span>
-          )}
-          {message.cost != null && message.cost > 0 && (
-            <span className="text-xs text-zinc-600">${message.cost.toFixed(5)}</span>
-          )}
-          {!isUser && !message.streaming && (
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
-              <CopyButton text={message.content} />
-              {onRetry && (
-                <button
-                  onClick={onRetry}
-                  title="Retry"
-                  className="flex items-center justify-center w-6 h-6 rounded bg-zinc-700/50 hover:bg-zinc-600/60 text-zinc-400 hover:text-zinc-200 transition-all"
-                >
-                  <RotateCcw size={12} />
-                </button>
-              )}
-              {onFork && (
-                <button
-                  onClick={onFork}
-                  title="Fork"
-                  className="flex items-center justify-center w-6 h-6 rounded bg-zinc-700/50 hover:bg-zinc-600/60 text-zinc-400 hover:text-zinc-200 transition-all"
-                >
-                  <GitFork size={12} />
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        {/* Footer — tokens/cost only, action buttons are in ChatView's MessageActions */}
+        {(message.tokens != null || (message.cost != null && message.cost > 0)) && (
+          <div className={`flex items-center gap-2 mt-1.5 ${isUser ? 'flex-row-reverse' : ''}`}>
+            {message.tokens != null && (
+              <span className="text-xs text-zinc-600">{message.tokens} tok</span>
+            )}
+            {message.cost != null && message.cost > 0 && (
+              <span className="text-xs text-zinc-600">${message.cost.toFixed(5)}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
