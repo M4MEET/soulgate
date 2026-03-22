@@ -351,7 +351,7 @@ export async function fetchAgentMessages(id: string): Promise<AgentMessage[]> {
 
 export async function updateAgentConfig(id: string, config: Partial<AgentConfig>): Promise<void> {
   await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/config`, {
-    method: 'PUT',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
@@ -366,7 +366,7 @@ export async function sendAgentMessage(id: string, message: string): Promise<voi
 }
 
 export async function stopAgent(id: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export async function deleteAgent(id: string): Promise<void> {
@@ -374,7 +374,8 @@ export async function deleteAgent(id: string): Promise<void> {
 }
 
 export async function pauseAgent(id: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/pause`, { method: 'POST' });
+  // Pause is not supported by the backend — stop instead
+  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export async function fetchMemory(): Promise<MemoryEntry[]> {
