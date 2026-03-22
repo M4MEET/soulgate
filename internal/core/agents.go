@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -315,15 +317,121 @@ func (a *BackgroundAgent) recordResponseTime(ms float64) {
 
 // AgentManager tracks and manages background agents
 type AgentManager struct {
-	mu     sync.RWMutex
-	agents map[string]*BackgroundAgent
-	nextID int
+	mu        sync.RWMutex
+	agents    map[string]*BackgroundAgent
+	nextID    int
+	configDir string
 }
 
-// NewAgentManager creates a new agent manager
-func NewAgentManager() *AgentManager {
-	return &AgentManager{
-		agents: make(map[string]*BackgroundAgent),
+// NewAgentManager creates a new agent manager.
+// If configDir is non-empty, completed agents are persisted to agents_state.json.
+func NewAgentManager(configDir string) *AgentManager {
+	am := &AgentManager{
+		agents:    make(map[string]*BackgroundAgent),
+		configDir: configDir,
+	}
+	am.loadState()
+	return am
+}
+
+// agentState is the JSON-serializable snapshot of an agent for persistence.
+type agentState struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Task        string     `json:"task"`
+	Role        AgentRole  `json:"role"`
+	Status      AgentStatus `json:"status"`
+	Result      string     `json:"result,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ParentID    string     `json:"parent_id,omitempty"`
+	Config      AgentConfig `json:"config"`
+}
+
+func (am *AgentManager) statePath() string {
+	if am.configDir == "" {
+		return ""
+	}
+	return filepath.Join(am.configDir, "agents_state.json")
+}
+
+func (am *AgentManager) saveState() {
+	path := am.statePath()
+	if path == "" {
+		return
+	}
+
+	var states []agentState
+	for _, a := range am.agents {
+		states = append(states, agentState{
+			ID:          a.ID,
+			Name:        a.Name,
+			Task:        a.Task,
+			Role:        a.Role,
+			Status:      a.Status,
+			Result:      a.Result,
+			Error:       a.Error,
+			CreatedAt:   a.CreatedAt,
+			CompletedAt: a.CompletedAt,
+			ParentID:    a.ParentID,
+			Config:      a.GetConfig(),
+		})
+	}
+
+	data, err := json.MarshalIndent(states, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(path, data, 0600)
+}
+
+func (am *AgentManager) loadState() {
+	path := am.statePath()
+	if path == "" {
+		return
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+
+	var states []agentState
+	if err := json.Unmarshal(data, &states); err != nil {
+		return
+	}
+
+	for _, s := range states {
+		agent := &BackgroundAgent{
+			ID:          s.ID,
+			Name:        s.Name,
+			Task:        s.Task,
+			Role:        s.Role,
+			Status:      s.Status,
+			Result:      s.Result,
+			Error:       s.Error,
+			CreatedAt:   s.CreatedAt,
+			CompletedAt: s.CompletedAt,
+			ParentID:    s.ParentID,
+		}
+		agent.SetConfig(s.Config)
+
+		// Running agents that were interrupted are marked as stopped
+		if agent.Status == AgentRunning {
+			agent.Status = AgentStopped
+			now := time.Now()
+			agent.CompletedAt = &now
+			agent.Error = "interrupted: gateway restarted"
+		}
+
+		am.agents[s.ID] = agent
+
+		// Track highest ID
+		var num int
+		if _, err := fmt.Sscanf(s.ID, "agent_%d", &num); err == nil && num >= am.nextID {
+			am.nextID = num
+		}
 	}
 }
 
@@ -358,6 +466,7 @@ func (am *AgentManager) Create(orch *Orchestrator, name, task string, role Agent
 			parent.ChildIDs = append(parent.ChildIDs, id)
 		}
 	}
+	am.saveState()
 	am.mu.Unlock()
 
 	// Run the agent in a goroutine
@@ -595,6 +704,7 @@ func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent 
 		agent.Result = response
 		run.SetResult(response)
 	}
+	am.saveState()
 	am.mu.Unlock()
 
 	// Log agent completion
@@ -646,6 +756,7 @@ func (am *AgentManager) Stop(id string) error {
 	now := time.Now().UTC()
 	agent.Status = AgentStopped
 	agent.CompletedAt = &now
+	am.saveState()
 	return nil
 }
 

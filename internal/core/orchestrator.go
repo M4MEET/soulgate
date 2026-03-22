@@ -263,7 +263,7 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 		integrationsReg:   integrationsReg,
 		integrationsStore: integrationsStore,
 		memoryStore:       memoryStore,
-		agentManager:      NewAgentManager(),
+		agentManager:      NewAgentManager(workspace.ConfigDir),
 		processManager:    process.NewManagerWithWorkspace(workspace.Root),
 		cronScheduler:     cron.NewScheduler(workspace.ConfigDir),
 		watchManager:      watchMgr,
