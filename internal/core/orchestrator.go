@@ -742,6 +742,13 @@ func (o *Orchestrator) appendToHistory(msgs ...model.Message) {
 		}
 		o.conversationHistory = o.conversationHistory[1:]
 	}
+
+	// Sync to branch manager so conversation survives crashes
+	if o.branchManager != nil {
+		cp := make([]model.Message, len(o.conversationHistory))
+		copy(cp, o.conversationHistory)
+		_ = o.branchManager.SyncMessages(cp)
+	}
 }
 
 // summarizeToolInteraction builds a concise breadcrumb string from an
@@ -957,6 +964,11 @@ func (o *Orchestrator) Close() error {
 	// Stop cron scheduler
 	o.cronScheduler.Stop()
 
+	// Stop agent auto-save loop and persist final state
+	if o.agentManager != nil {
+		o.agentManager.StopAutoSave()
+	}
+
 	// Stop all active file watchers
 	if o.watchManager != nil {
 		o.watchManager.StopAll()
@@ -973,6 +985,15 @@ func (o *Orchestrator) Close() error {
 	// Stop any active canvas preview servers
 	if o.canvasPreviewMgr != nil {
 		o.canvasPreviewMgr.StopAll()
+	}
+
+	// Persist final conversation state to branches
+	if o.branchManager != nil {
+		o.historyMu.RLock()
+		cp := make([]model.Message, len(o.conversationHistory))
+		copy(cp, o.conversationHistory)
+		o.historyMu.RUnlock()
+		_ = o.branchManager.SyncMessages(cp)
 	}
 
 	// Log session end
