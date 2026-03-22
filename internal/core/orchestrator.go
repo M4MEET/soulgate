@@ -480,6 +480,20 @@ func (o *Orchestrator) GetProcessManager() *process.Manager {
 	return o.processManager
 }
 
+// GetFileBroker returns the file broker for direct use by trusted callers such
+// as the gateway's /api/files and /api/file endpoints. The broker enforces
+// policy and audit logging on every operation.
+func (o *Orchestrator) GetFileBroker() *files.Broker {
+	return o.fileBroker
+}
+
+// GetExecBroker returns the exec broker for direct use by trusted callers such
+// as the gateway's /api/exec endpoint. The broker enforces policy and audit
+// logging on every operation.
+func (o *Orchestrator) GetExecBroker() *exec.Broker {
+	return o.execBroker
+}
+
 // GetCronScheduler returns the cron scheduler
 func (o *Orchestrator) GetCronScheduler() *cron.Scheduler {
 	return o.cronScheduler

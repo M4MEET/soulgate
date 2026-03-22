@@ -74,6 +74,17 @@ export interface CostData {
   tokens: number;
 }
 
+export interface CronJob {
+  id: string;
+  name: string;
+  schedule: string;
+  task: string;
+  status: 'active' | 'paused' | 'error';
+  last_run?: string;
+  next_run?: string;
+  created_at: string;
+}
+
 export interface ConfigData {
   provider: string;
   model: string;
@@ -234,4 +245,95 @@ export async function tryTool(name: string, args: Record<string, unknown>): Prom
     body: JSON.stringify(args),
   });
   return res.json();
+}
+
+// ── File Browser API ───────────────────────────────────────────────────────
+
+export interface FileEntry {
+  name: string;
+  is_dir: boolean;
+  size: number;
+}
+
+export interface FilesResponse {
+  entries: FileEntry[];
+  path: string;
+  available?: boolean;
+}
+
+export interface FileContentResponse {
+  path: string;
+  content: string;
+}
+
+export async function listFiles(path = '.'): Promise<FilesResponse> {
+  const data = await safeFetch<FilesResponse>(
+    `${BASE}/api/files?path=${encodeURIComponent(path)}`,
+    { entries: [], path }
+  );
+  return data;
+}
+
+export async function readFile(path: string): Promise<FileContentResponse> {
+  const res = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error((err as { error?: string }).error || 'Failed to read file');
+  }
+  return res.json();
+}
+
+// ── Terminal / Exec API ────────────────────────────────────────────────────
+
+export interface ExecResponse {
+  output: string;
+  exit_code: number;
+  error?: string;
+}
+
+export async function execCommand(command: string): Promise<ExecResponse> {
+  const res = await fetch(`${BASE}/api/exec`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command }),
+  });
+  // Return parsed body regardless of status so callers can show exit_code
+  return res.json();
+}
+
+// ── Cron API ───────────────────────────────────────────────────────────────
+
+export async function fetchCronJobs(): Promise<CronJob[]> {
+  const data = await safeFetch<{ jobs?: CronJob[] } | CronJob[]>(`${BASE}/api/cron`, []);
+  if (Array.isArray(data)) return data;
+  return (data as { jobs?: CronJob[] }).jobs || [];
+}
+
+export async function createCronJob(payload: { name: string; schedule: string; task: string }): Promise<CronJob> {
+  const res = await fetch(`${BASE}/api/cron`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to create cron job' }));
+    throw new Error((err as { error?: string }).error || 'Failed to create cron job');
+  }
+  return res.json();
+}
+
+export async function deleteCronJob(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/cron/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete cron job');
+}
+
+export async function toggleCronJob(id: string): Promise<CronJob> {
+  const res = await fetch(`${BASE}/api/cron/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to toggle cron job');
+  return res.json();
+}
+
+export async function runCronJobNow(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/cron/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to trigger cron job');
 }

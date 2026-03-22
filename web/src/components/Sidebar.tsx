@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, LayoutDashboard, Settings, Bot, Wrench,
   Brain, BookOpen, Shield, Plug, ChevronLeft, ChevronRight,
-  Hexagon,
+  Hexagon, Webhook, DollarSign, Clock, Palette, Sun, Moon,
+  FolderOpen, Terminal,
 } from 'lucide-react';
+import NotificationCenter, { type Notification } from './NotificationCenter';
 
 export type ViewId =
   | 'chat'
@@ -15,18 +17,30 @@ export type ViewId =
   | 'sessions'
   | 'audit'
   | 'connectors'
+  | 'webhooks'
+  | 'costs'
+  | 'cron'
+  | 'canvas'
+  | 'files'
+  | 'terminal'
   | 'settings';
 
 const NAV_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
-  { id: 'chat',       icon: MessageSquare,  label: 'Chat' },
+  { id: 'chat',       icon: MessageSquare,   label: 'Chat' },
   { id: 'dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
-  { id: 'agents',     icon: Bot,            label: 'Agents' },
-  { id: 'tools',      icon: Wrench,         label: 'Tools' },
-  { id: 'memory',     icon: Brain,          label: 'Memory' },
-  { id: 'sessions',   icon: BookOpen,       label: 'Sessions' },
-  { id: 'audit',      icon: Shield,         label: 'Audit' },
-  { id: 'connectors', icon: Plug,           label: 'Connectors' },
-  { id: 'settings',   icon: Settings,       label: 'Settings' },
+  { id: 'agents',     icon: Bot,             label: 'Agents' },
+  { id: 'tools',      icon: Wrench,          label: 'Tools' },
+  { id: 'memory',     icon: Brain,           label: 'Memory' },
+  { id: 'sessions',   icon: BookOpen,        label: 'Sessions' },
+  { id: 'audit',      icon: Shield,          label: 'Audit' },
+  { id: 'connectors', icon: Plug,            label: 'Connectors' },
+  { id: 'webhooks',   icon: Webhook,         label: 'Webhooks' },
+  { id: 'costs',      icon: DollarSign,      label: 'Costs' },
+  { id: 'cron',       icon: Clock,           label: 'Cron' },
+  { id: 'canvas',     icon: Palette,         label: 'Canvas' },
+  { id: 'files',      icon: FolderOpen,      label: 'Files' },
+  { id: 'terminal',   icon: Terminal,        label: 'Terminal' },
+  { id: 'settings',   icon: Settings,        label: 'Settings' },
 ];
 
 interface Props {
@@ -34,9 +48,28 @@ interface Props {
   onViewChange: (v: ViewId) => void;
   connected: boolean;
   onCommandPalette: () => void;
+  onShowShortcuts: () => void;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
+  notifications: Notification[];
+  unreadCount: number;
+  onMarkAllRead: () => void;
+  onDismissNotification: (id: string) => void;
 }
 
-export default function Sidebar({ view, onViewChange, connected, onCommandPalette }: Props) {
+export default function Sidebar({
+  view,
+  onViewChange,
+  connected,
+  onCommandPalette,
+  onShowShortcuts,
+  theme,
+  onToggleTheme,
+  notifications,
+  unreadCount,
+  onMarkAllRead,
+  onDismissNotification,
+}: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -115,6 +148,44 @@ export default function Sidebar({ view, onViewChange, connected, onCommandPalett
 
       {/* Bottom actions */}
       <div className="px-2 pb-3 flex flex-col gap-1 border-t border-zinc-800 pt-3">
+        {/* Notification center */}
+        <NotificationCenter
+          notifications={notifications}
+          unreadCount={unreadCount}
+          onMarkAllRead={onMarkAllRead}
+          onDismiss={onDismissNotification}
+          connected={connected}
+          collapsed={collapsed}
+        />
+
+        {/* Theme toggle */}
+        <button
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          className={`flex items-center rounded-lg transition-all text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 ${
+            collapsed ? 'justify-center w-9 h-9 mx-auto' : 'gap-2 px-3 py-2 w-full'
+          }`}
+        >
+          {theme === 'dark'
+            ? <Sun size={16} className="flex-shrink-0" />
+            : <Moon size={16} className="flex-shrink-0" />
+          }
+          <AnimatePresence>
+            {!collapsed && (
+              <motion.span
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -6 }}
+                transition={{ duration: 0.12 }}
+                className="text-xs whitespace-nowrap"
+              >
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </button>
+
+        {/* Command palette (expanded only) */}
         {!collapsed && (
           <button
             onClick={onCommandPalette}
@@ -124,6 +195,19 @@ export default function Sidebar({ view, onViewChange, connected, onCommandPalett
             <kbd className="font-mono text-xs bg-zinc-800 px-1.5 py-0.5 rounded">⌘K</kbd>
           </button>
         )}
+
+        {/* Keyboard shortcuts (expanded only) */}
+        {!collapsed && (
+          <button
+            onClick={onShowShortcuts}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-all w-full"
+          >
+            <span className="flex-1 text-left">Keyboard shortcuts</span>
+            <kbd className="font-mono text-xs bg-zinc-800 px-1.5 py-0.5 rounded">?</kbd>
+          </button>
+        )}
+
+        {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed(c => !c)}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}

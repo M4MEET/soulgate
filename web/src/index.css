@@ -1,1 +1,43 @@
 @import "tailwindcss";
+
+/* ── Light mode overrides ─────────────────────────────────────────────────────
+   Applied when data-theme="light" is set on <html> or a root element.
+   We override the most-used zinc dark tokens to produce a neutral light theme.
+   Tailwind utility classes still win via specificity; these target custom props.
+────────────────────────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Root background */
+  background-color: #f4f4f5;
+  color: #18181b;
+}
+
+/* Zinc surface overrides for light mode */
+[data-theme="light"] .bg-zinc-950 { background-color: #f4f4f5 !important; }
+[data-theme="light"] .bg-zinc-900 { background-color: #ffffff !important; }
+[data-theme="light"] .bg-zinc-800 { background-color: #e4e4e7 !important; }
+[data-theme="light"] .bg-zinc-700 { background-color: #d4d4d8 !important; }
+
+[data-theme="light"] .border-zinc-800 { border-color: #e4e4e7 !important; }
+[data-theme="light"] .border-zinc-700 { border-color: #d4d4d8 !important; }
+
+[data-theme="light"] .text-zinc-100 { color: #18181b !important; }
+[data-theme="light"] .text-zinc-200 { color: #27272a !important; }
+[data-theme="light"] .text-zinc-300 { color: #3f3f46 !important; }
+[data-theme="light"] .text-zinc-400 { color: #52525b !important; }
+[data-theme="light"] .text-zinc-500 { color: #71717a !important; }
+[data-theme="light"] .text-zinc-600 { color: #a1a1aa !important; }
+[data-theme="light"] .text-zinc-700 { color: #d4d4d8 !important; }
+
+/* Hover states in light mode */
+[data-theme="light"] .hover\:bg-zinc-800:hover { background-color: #e4e4e7 !important; }
+[data-theme="light"] .hover\:bg-zinc-700:hover { background-color: #d4d4d8 !important; }
+[data-theme="light"] .hover\:text-zinc-100:hover { color: #18181b !important; }
+[data-theme="light"] .hover\:text-zinc-200:hover { color: #27272a !important; }
+[data-theme="light"] .hover\:text-zinc-300:hover { color: #3f3f46 !important; }
+
+/* Scrollbar */
+[data-theme="light"] * {
+  scrollbar-color: #d4d4d8 transparent;
+}

@@ -109,6 +109,17 @@ type GatewayAPI struct {
 
 	// StopAgent cancels a running background agent by ID.
 	StopAgent func(id string) error
+
+	// ListFiles returns the directory listing at the given workspace-relative
+	// path. Each entry is a map with keys: name, is_dir, size.
+	ListFiles func(path string) ([]map[string]interface{}, error)
+
+	// ReadFile returns the text content of the workspace-relative file at path.
+	ReadFile func(path string) (string, error)
+
+	// ExecCommand executes the given shell command inside the workspace and
+	// returns output and exit_code. The broker enforces policy on every call.
+	ExecCommand func(command string) (string, int, error)
 }
 
 // Config holds Gateway configuration
@@ -328,6 +339,9 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/memory", apiHandler(g.handleAPIMemory))
 	mux.Handle("/api/costs", apiHandler(g.handleAPICosts))
 	mux.Handle("/api/audit", apiHandler(g.handleAPIAudit))
+	mux.Handle("/api/files", apiHandler(g.handleAPIFiles))
+	mux.Handle("/api/file", apiHandler(g.handleAPIFile))
+	mux.Handle("/api/exec", apiHandler(g.handleAPIExec))
 
 	// Serve the HTTP chat API if a chat handler is configured
 	if g.config.OnChat != nil {
@@ -1171,6 +1185,113 @@ func (g *Gateway) handleAPIAudit(w http.ResponseWriter, r *http.Request) {
 	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
 		"events": events,
 		"count":  len(events),
+	})
+}
+
+// handleAPIFiles handles GET /api/files?path=<workspace-relative-path>.
+// Returns a JSON array of directory entries with name, is_dir, and size.
+func (g *Gateway) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.ListFiles == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"entries":   []interface{}{},
+			"available": false,
+		})
+		return
+	}
+
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = "."
+	}
+
+	entries, err := g.config.API.ListFiles(path)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"entries": entries,
+		"path":    path,
+	})
+}
+
+// handleAPIFile handles GET /api/file?path=<workspace-relative-path>.
+// Returns the raw text content of the requested file.
+func (g *Gateway) handleAPIFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.ReadFile == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "file read API not available",
+		})
+		return
+	}
+
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+
+	content, err := g.config.API.ReadFile(path)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"path":    path,
+		"content": content,
+	})
+}
+
+// handleAPIExec handles POST /api/exec.
+// Body: {"command": "ls -la"}
+// Response: {"output": "...", "exit_code": 0}
+func (g *Gateway) handleAPIExec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.ExecCommand == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "exec API not available",
+		})
+		return
+	}
+
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Command == "" {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required"})
+		return
+	}
+
+	output, exitCode, err := g.config.API.ExecCommand(req.Command)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"error":     err.Error(),
+			"output":    output,
+			"exit_code": exitCode,
+		})
+		return
+	}
+
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"output":    output,
+		"exit_code": exitCode,
 	})
 }
 

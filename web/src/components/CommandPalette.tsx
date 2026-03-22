@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   MessageSquare, LayoutDashboard, Bot, Wrench, Brain,
   BookOpen, Shield, Plug, Settings, Trash2, Download,
-  RefreshCw, Terminal, Search,
+  RefreshCw, Terminal, Search, Webhook, FolderOpen,
 } from 'lucide-react';
 import type { ViewId } from './Sidebar';
 
@@ -25,6 +25,9 @@ const COMMANDS: Command[] = [
   { id: 'nav-sessions',   label: 'Go to Sessions',    icon: BookOpen,        action: 'navigate', target: 'sessions' },
   { id: 'nav-audit',      label: 'Go to Audit Log',   icon: Shield,          action: 'navigate', target: 'audit' },
   { id: 'nav-connectors', label: 'Go to Connectors',  icon: Plug,            action: 'navigate', target: 'connectors' },
+  { id: 'nav-webhooks',   label: 'Go to Webhooks',    icon: Webhook,         action: 'navigate', target: 'webhooks' },
+  { id: 'nav-files',      label: 'Go to File Browser', icon: FolderOpen,      action: 'navigate', target: 'files' },
+  { id: 'nav-terminal',   label: 'Go to Terminal',     icon: Terminal,        action: 'navigate', target: 'terminal' },
   { id: 'nav-settings',   label: 'Go to Settings',    icon: Settings,        action: 'navigate', target: 'settings' },
   { id: 'new-chat',       label: 'New Conversation',  icon: MessageSquare,   action: 'action',   shortcut: '⌘N' },
   { id: 'clear-chat',     label: 'Clear Chat',        icon: Trash2,          action: 'action',   shortcut: '⌘L' },

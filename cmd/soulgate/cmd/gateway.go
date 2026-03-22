@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/M4MEET/soulgate/internal/audit"
+	"github.com/M4MEET/soulgate/internal/brokers"
 	"github.com/M4MEET/soulgate/internal/config"
 	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/gateway"
@@ -470,6 +471,66 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 		// StopAgent cancels a running background agent by ID.
 		StopAgent: func(id string) error {
 			return orch.GetAgentManager().Stop(id)
+		},
+
+		// ListFiles delegates to the FileBroker to list a workspace directory.
+		// The path is relative to the workspace root.
+		ListFiles: func(path string) ([]map[string]interface{}, error) {
+			ctx := context.Background()
+			bCtx := brokers.BrokerContext{
+				WorkspaceRoot: ws.Root,
+				PluginID:      "gateway-ui",
+				RunID:         "ui",
+				SessionID:     "ui",
+			}
+			fb := orch.GetFileBroker()
+			entries, err := fb.ListDir(ctx, bCtx, path)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]map[string]interface{}, 0, len(entries))
+			for _, e := range entries {
+				out = append(out, map[string]interface{}{
+					"name":   e.Name,
+					"is_dir": e.IsDir,
+					"size":   e.Size,
+				})
+			}
+			return out, nil
+		},
+
+		// ReadFile delegates to the FileBroker to read file content.
+		// The path is relative to the workspace root.
+		ReadFile: func(path string) (string, error) {
+			ctx := context.Background()
+			bCtx := brokers.BrokerContext{
+				WorkspaceRoot: ws.Root,
+				PluginID:      "gateway-ui",
+				RunID:         "ui",
+				SessionID:     "ui",
+			}
+			data, err := orch.GetFileBroker().ReadFile(ctx, bCtx, path)
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
+		},
+
+		// ExecCommand delegates to the ExecBroker to run a shell command.
+		// Policy enforcement and audit logging are applied by the broker.
+		ExecCommand: func(command string) (string, int, error) {
+			ctx := context.Background()
+			bCtx := brokers.BrokerContext{
+				WorkspaceRoot: ws.Root,
+				PluginID:      "gateway-ui",
+				RunID:         "ui",
+				SessionID:     "ui",
+			}
+			result, err := orch.GetExecBroker().Execute(ctx, bCtx, command)
+			if err != nil {
+				return "", 1, err
+			}
+			return result.Output, result.ExitCode, nil
 		},
 	}
 }
