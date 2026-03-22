@@ -39,6 +39,30 @@ type Config struct {
 
 	// MCP (Model Context Protocol) server settings
 	MCP MCPConfig `yaml:"mcp"`
+
+	// Retention policy for audit logs, sessions, cost data, and memory.
+	Retention RetentionConfig `yaml:"retention"`
+}
+
+// RetentionConfig defines data-retention settings for all stored artefacts.
+// A zero Days value means "keep forever" (the safe default).
+type RetentionConfig struct {
+	// AuditLogDays is the number of days to retain audit JSONL files.
+	// Files whose entire day has elapsed beyond this limit are deleted.
+	AuditLogDays int `yaml:"audit_log_days"`
+
+	// SessionDays is the number of days to retain session records.
+	SessionDays int `yaml:"session_days"`
+
+	// CostLogDays is the number of days to retain cost log entries.
+	CostLogDays int `yaml:"cost_log_days"`
+
+	// MemoryDays is the number of days to retain memory entries.
+	// 0 means keep forever.
+	MemoryDays int `yaml:"memory_days"`
+
+	// AutoPurge, when true, runs retention automatically at startup.
+	AutoPurge bool `yaml:"auto_purge"`
 }
 
 // MCPConfig defines MCP server settings
@@ -146,8 +170,12 @@ type AuditConfig struct {
 
 // PolicyConfig defines policy engine settings
 type PolicyConfig struct {
-	// Path to policy file
+	// Path to the base policy file
 	FilePath string `yaml:"file_path"`
+
+	// ScopedFilePath is the path to the hierarchical (global/team/user/agent)
+	// scoped policy file.  When empty the scoped engine starts with no rules.
+	ScopedFilePath string `yaml:"scoped_file_path"`
 }
 
 // ExecutionConfig defines execution limits
@@ -219,7 +247,8 @@ func DefaultConfig() *Config {
 			Enabled:      true,
 		},
 		Policy: PolicyConfig{
-			FilePath: ".soulgate/policy.yml",
+			FilePath:       ".soulgate/policy.yml",
+			ScopedFilePath: ".soulgate/scoped_policy.yml",
 		},
 		Execution: ExecutionConfig{
 			MaxIterations:       0,     // unlimited
@@ -241,6 +270,13 @@ func DefaultConfig() *Config {
 		Skills: SkillsConfig{
 			Dir:          "skills",
 			MaxSkillSize: 102400, // 100KB
+		},
+		Retention: RetentionConfig{
+			AuditLogDays: 90,  // 3 months
+			SessionDays:  30,  // 1 month
+			CostLogDays:  365, // 1 year
+			MemoryDays:   0,   // forever
+			AutoPurge:    false,
 		},
 	}
 }

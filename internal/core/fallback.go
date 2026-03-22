@@ -100,6 +100,11 @@ func buildFallbackProvider(fp FallbackProvider) (model.Provider, error) {
 // fallback chain on retryable errors.  It restores the original provider after
 // the call regardless of outcome so the Orchestrator's state is not mutated.
 //
+// If the context carries a per-agent provider override (set by
+// executeAgentWithModel via withAgentProvider), that provider is used as the
+// effective primary instead of o.provider.  The override is resolved inside
+// callModelOnce so the shared o.provider field is never mutated.
+//
 // The method is intentionally kept separate from callModelWithRetry: the retry
 // loop handles transient failures against a single provider; the fallback chain
 // handles provider-level failures where the entire endpoint is unavailable or
@@ -114,8 +119,14 @@ func (o *Orchestrator) callModelWithFallback(
 		return o.callModelWithRetry(ctx, tracker, req)
 	}
 
+	// Determine the effective primary provider.  When a per-agent override is
+	// present in the context (placed there by executeAgentWithModel), that
+	// provider is used without touching the shared orchestrator field.
+	primaryProvider := o.resolveProvider(ctx)
+
 	// Try primary provider first (with its own retry budget).
-	primaryProvider := o.provider
+	// callModelOnce also calls resolveProvider so no mutation of o.provider is
+	// needed here.
 	resp, primaryErr := o.callModelWithRetry(ctx, tracker, req)
 	if primaryErr == nil {
 		return resp, nil
@@ -127,7 +138,9 @@ func (o *Orchestrator) callModelWithFallback(
 		return nil, primaryErr
 	}
 
-	// Walk the chain.
+	// Walk the chain.  Each fallback provider is injected by temporarily
+	// overriding the context-carried provider key so that callModelOnce uses it
+	// without mutating o.provider.
 	for _, fp := range o.fallbackChain.Providers() {
 		fallbackProv, err := buildFallbackProvider(fp)
 		if err != nil {
@@ -163,14 +176,10 @@ func (o *Orchestrator) callModelWithFallback(
 			})
 		}
 
-		// Temporarily switch the provider in the orchestrator so that
-		// callModelWithRetry (and the streaming path inside it) uses it.
-		o.provider = fallbackProv
-		resp, err = o.callModelWithRetry(ctx, tracker, req)
-
-		// Restore the original provider unconditionally.
-		o.provider = primaryProvider
-
+		// Inject the fallback provider via the context so callModelOnce uses it
+		// without mutating the shared o.provider field.
+		fallbackCtx := withAgentProvider(ctx, fallbackProv)
+		resp, err = o.callModelWithRetry(fallbackCtx, tracker, req)
 		if err == nil {
 			return resp, nil
 		}

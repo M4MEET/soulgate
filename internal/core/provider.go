@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/M4MEET/soulgate/internal/model"
@@ -8,7 +9,8 @@ import (
 	"github.com/M4MEET/soulgate/internal/model/openai"
 )
 
-// SetProvider dynamically switches the model provider
+// SetProvider dynamically switches the model provider and model name.
+// It is safe to call concurrently; all state mutations are protected by providerMu.
 func (o *Orchestrator) SetProvider(providerName string, modelName string) error {
 	def, err := model.LookupProvider(providerName)
 	if err != nil {
@@ -39,6 +41,9 @@ func (o *Orchestrator) SetProvider(providerName string, modelName string) error 
 		newProvider = openai.NewProvider(apiKey, modelName, baseURL)
 	}
 
+	o.providerMu.Lock()
+	defer o.providerMu.Unlock()
+
 	// Switch provider
 	o.provider = newProvider
 	o.actualModelName = "" // Reset - will be set on next API response
@@ -55,8 +60,12 @@ func (o *Orchestrator) SetProvider(providerName string, modelName string) error 
 	return nil
 }
 
-// GetCurrentProvider returns the current provider name and model
+// GetCurrentProvider returns the current provider name and model.
+// It is safe to call concurrently.
 func (o *Orchestrator) GetCurrentProvider() (string, string) {
+	o.providerMu.RLock()
+	defer o.providerMu.RUnlock()
+
 	providerName := o.workspace.Config.Model.DefaultProvider
 
 	def, err := model.LookupProvider(providerName)
@@ -84,6 +93,18 @@ func (o *Orchestrator) GetCurrentProvider() (string, string) {
 	}
 
 	return providerName, modelName
+}
+
+// resolveProvider returns the effective model.Provider for a request.
+// When the context carries a per-agent provider override (placed there by
+// executeAgentWithModel), that override is returned.  Otherwise o.provider is
+// used.  This allows background agents to use their own model without mutating
+// the shared orchestrator field.
+func (o *Orchestrator) resolveProvider(ctx context.Context) model.Provider {
+	if p := agentProviderFromContext(ctx); p != nil {
+		return p
+	}
+	return o.provider
 }
 
 func formatProviderList() string {

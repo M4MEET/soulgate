@@ -22,6 +22,9 @@ import CronView from './views/CronView';
 import CanvasView from './views/CanvasView';
 import FileBrowserView from './views/FileBrowserView';
 import TerminalView from './views/TerminalView';
+import UsersView from './views/UsersView';
+import TeamsView from './views/TeamsView';
+import PoliciesView from './views/PoliciesView';
 
 // ── Theme persistence ─────────────────────────────────────────────────────────
 
@@ -175,6 +178,9 @@ export default function App() {
           {view === 'files'      && <FileBrowserView />}
           {view === 'terminal'   && <TerminalView />}
           {view === 'settings'   && <SettingsView health={health} />}
+          {view === 'users'      && <UsersView />}
+          {view === 'teams'      && <TeamsView />}
+          {view === 'policies'   && <PoliciesView />}
         </div>
       </div>
 

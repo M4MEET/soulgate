@@ -53,7 +53,7 @@ func (o *Orchestrator) callModelWithRetry(
 
 		o.emitThinking(ThinkingEvent{
 			Kind:     ThinkingStatus,
-			Provider: o.provider.Name(),
+			Provider: o.resolveProvider(ctx).Name(),
 			Message:  fmt.Sprintf("transient model error, retrying (%d/%d)", attempt, attempts-1),
 		})
 
@@ -69,8 +69,12 @@ func (o *Orchestrator) callModelOnce(
 	ctx context.Context,
 	req model.CompletionRequest,
 ) (*model.CompletionResponse, bool, error) {
+	// Use the per-agent provider override when present; otherwise fall back to
+	// the shared orchestrator provider.
+	provider := o.resolveProvider(ctx)
+
 	if o.streaming && o.streamCallback != nil {
-		streamCh, err := o.provider.StreamComplete(ctx, req)
+		streamCh, err := provider.StreamComplete(ctx, req)
 		if err != nil {
 			return nil, false, err
 		}
@@ -96,7 +100,7 @@ func (o *Orchestrator) callModelOnce(
 		return resp, streamedOutput, nil
 	}
 
-	resp, err := o.provider.Complete(ctx, req)
+	resp, err := provider.Complete(ctx, req)
 	if err != nil {
 		return nil, false, err
 	}

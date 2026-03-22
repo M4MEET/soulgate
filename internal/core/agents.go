@@ -11,10 +11,18 @@ import (
 
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/model"
+	"github.com/M4MEET/soulgate/internal/model/anthropic"
+	"github.com/M4MEET/soulgate/internal/model/openai"
 )
 
 // agentContextKey is the context key for the currently-executing agent ID.
 type agentContextKey struct{}
+
+// agentProviderKey is the context key that carries a per-agent model.Provider
+// override.  When set, callModelWithFallback uses this provider instead of
+// o.provider, ensuring concurrent background agents can each use their own
+// model without racing on the shared orchestrator field.
+type agentProviderKey struct{}
 
 // withAgentID stores the agent ID in the context so that tool dispatch can
 // determine which agent is making the call (used by agent_delegate and
@@ -30,6 +38,23 @@ func agentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// withAgentProvider stores a per-agent model provider override in the context.
+// The provider is used by callModelWithFallback instead of o.provider so that
+// concurrent background agents can each use their own model without a race on
+// the shared orchestrator field.
+func withAgentProvider(ctx context.Context, p model.Provider) context.Context {
+	return context.WithValue(ctx, agentProviderKey{}, p)
+}
+
+// agentProviderFromContext retrieves the per-agent provider override from the
+// context. Returns nil when no override is set.
+func agentProviderFromContext(ctx context.Context) model.Provider {
+	if p, ok := ctx.Value(agentProviderKey{}).(model.Provider); ok {
+		return p
+	}
+	return nil
 }
 
 // AgentStatus represents the current state of a background agent
@@ -467,6 +492,55 @@ func (am *AgentManager) SelectBestAgent(task string) *BackgroundAgent {
 	return bestAgent
 }
 
+// buildProviderForAgent constructs a model.Provider for the given provider name
+// and model without touching any shared orchestrator state.  Returns nil (no
+// override) if providerName or modelName is empty, or if the provider cannot be
+// resolved (the agent will fall back to the orchestrator's default provider).
+func buildProviderForAgent(providerName, modelName string) model.Provider {
+	if providerName == "" || modelName == "" {
+		return nil
+	}
+	def, err := model.LookupProvider(providerName)
+	if err != nil {
+		return nil
+	}
+	apiKey, err := model.ResolveAPIKey(def)
+	if err != nil {
+		return nil
+	}
+	resolvedModel := modelName
+	if resolvedModel == "" {
+		resolvedModel = def.DefaultModel
+	}
+	baseURL := model.ResolveBaseURL(def, "")
+	switch def.Protocol {
+	case "anthropic":
+		return anthropic.NewProvider(apiKey, resolvedModel, baseURL)
+	default:
+		return openai.NewProvider(apiKey, resolvedModel, baseURL)
+	}
+}
+
+// executeAgentWithModel runs the agent's agentic loop using its configured
+// model/provider override when one is set.  It never mutates the shared
+// orchestrator provider field; instead, the agent-specific provider is
+// propagated via the context so that callModelWithFallback can use it.
+func (o *Orchestrator) executeAgentWithModel(ctx context.Context, agent *BackgroundAgent, prompt string, runID string) (string, error) {
+	agentCfg := agent.GetConfig()
+
+	if agentCfg.Provider != "" && agentCfg.Model != "" {
+		agentProvider := buildProviderForAgent(agentCfg.Provider, agentCfg.Model)
+		if agentProvider != nil {
+			agent.AppendLog("info", fmt.Sprintf("using model %s/%s", agentCfg.Provider, agentCfg.Model))
+			ctx = withAgentProvider(ctx, agentProvider)
+		} else {
+			agent.AppendLog("warning", fmt.Sprintf("failed to build provider %s/%s, falling back to default", agentCfg.Provider, agentCfg.Model))
+		}
+	}
+
+	return o.executeAgentLoop(ctx, prompt, runID, agent)
+}
+
 // runAgent executes the agent's task using its own agentic loop
 func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent *BackgroundAgent) {
 	defer agent.cancel()
@@ -505,8 +579,8 @@ func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent 
 	// Attach agent ID to context so tool dispatch can route inter-agent calls
 	ctx = withAgentID(ctx, agent.ID)
 
-	// Execute the agentic loop
-	response, err := orch.executeAgentLoop(ctx, agentPrompt, run.ID, agent)
+	// Execute the agentic loop, applying any per-agent model override
+	response, err := orch.executeAgentWithModel(ctx, agent, agentPrompt, run.ID)
 
 	am.mu.Lock()
 	now := time.Now().UTC()
@@ -669,7 +743,8 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 			System:      systemPrompt,
 		}
 
-		agent.AppendLog("model_call", fmt.Sprintf("calling %s...", o.provider.Name()))
+		effectiveProvider := o.resolveProvider(ctx)
+		agent.AppendLog("model_call", fmt.Sprintf("calling %s...", effectiveProvider.Name()))
 		agent.IncrModelCall()
 
 		modelStart := time.Now()
@@ -685,7 +760,7 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 
 		modelName := resp.Model
 		if modelName == "" {
-			modelName = o.provider.Name()
+			modelName = effectiveProvider.Name()
 		}
 		agent.AppendLog("model_done", fmt.Sprintf("%s responded (%s, %d tok, %s)",
 			modelName, resp.StopReason, resp.Usage.TotalTokens, modelDur))

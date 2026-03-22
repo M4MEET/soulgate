@@ -4,7 +4,7 @@ import {
   MessageSquare, LayoutDashboard, Settings, Bot, Wrench,
   Brain, BookOpen, Shield, Plug, ChevronLeft, ChevronRight,
   Hexagon, Webhook, DollarSign, Clock, Palette, Sun, Moon,
-  FolderOpen, Terminal,
+  FolderOpen, Terminal, Users, Building2,
 } from 'lucide-react';
 import NotificationCenter, { type Notification } from './NotificationCenter';
 
@@ -23,7 +23,10 @@ export type ViewId =
   | 'canvas'
   | 'files'
   | 'terminal'
-  | 'settings';
+  | 'settings'
+  | 'users'
+  | 'teams'
+  | 'policies';
 
 const NAV_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
   { id: 'chat',       icon: MessageSquare,   label: 'Chat' },
@@ -41,6 +44,12 @@ const NAV_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
   { id: 'files',      icon: FolderOpen,      label: 'Files' },
   { id: 'terminal',   icon: Terminal,        label: 'Terminal' },
   { id: 'settings',   icon: Settings,        label: 'Settings' },
+];
+
+const ADMIN_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
+  { id: 'users',    icon: Users,     label: 'Users' },
+  { id: 'teams',    icon: Building2, label: 'Teams' },
+  { id: 'policies', icon: Shield,    label: 'Policies' },
 ];
 
 interface Props {
@@ -110,8 +119,59 @@ export default function Sidebar({
       </div>
 
       {/* Nav items */}
-      <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5 overflow-y-auto">
+      <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>
         {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
+          const active = view === id;
+          return (
+            <button
+              key={id}
+              onClick={() => onViewChange(id)}
+              title={collapsed ? label : undefined}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left group ${
+                active
+                  ? 'bg-indigo-500/15 text-indigo-400'
+                  : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
+              }`}
+            >
+              <Icon
+                size={17}
+                className={`flex-shrink-0 ${active ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`}
+              />
+              <AnimatePresence>
+                {!collapsed && (
+                  <motion.span
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -6 }}
+                    transition={{ duration: 0.12 }}
+                    className="whitespace-nowrap"
+                  >
+                    {label}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
+          );
+        })}
+
+        {/* Admin section separator */}
+        <div className="mt-2 mb-1">
+          {!collapsed ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex items-center gap-2 px-3 py-1"
+            >
+              <div className="flex-1 h-px bg-zinc-800" />
+              <span className="text-xs text-zinc-600 font-medium uppercase tracking-wider whitespace-nowrap">Admin</span>
+              <div className="flex-1 h-px bg-zinc-800" />
+            </motion.div>
+          ) : (
+            <div className="h-px bg-zinc-800 mx-2" />
+          )}
+        </div>
+
+        {ADMIN_ITEMS.map(({ id, icon: Icon, label }) => {
           const active = view === id;
           return (
             <button

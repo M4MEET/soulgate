@@ -369,6 +369,10 @@ export async function stopAgent(id: string): Promise<void> {
   await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/stop`, { method: 'POST' });
 }
 
+export async function deleteAgent(id: string): Promise<void> {
+  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export async function pauseAgent(id: string): Promise<void> {
   await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/pause`, { method: 'POST' });
 }
@@ -514,4 +518,434 @@ export async function toggleCronJob(id: string): Promise<CronJob> {
 export async function runCronJobNow(id: string): Promise<void> {
   const res = await fetch(`${BASE}/api/cron/${encodeURIComponent(id)}/run`, { method: 'POST' });
   if (!res.ok) throw new Error('Failed to trigger cron job');
+}
+
+// ── Enterprise: Users ──────────────────────────────────────────────────────
+
+export type UserRole = 'admin' | 'developer' | 'viewer' | 'operator';
+export type UserStatus = 'active' | 'inactive';
+
+export interface UserLimits {
+  max_tokens_day: number;
+  max_cost_day: number;
+  max_cost_month: number;
+  max_concurrent_agents: number;
+  allowed_models: string[];
+  allowed_tools: string[];
+}
+
+export interface UserSettings {
+  default_model: string;
+  default_provider: string;
+  thinking_level: 'none' | 'low' | 'medium' | 'high';
+  temperature: number;
+  streaming: boolean;
+  theme: 'dark' | 'light' | 'system';
+}
+
+export interface UserUsage {
+  tokens_today: number;
+  cost_today: number;
+  cost_month: number;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string;
+  role: UserRole;
+  team_id?: string;
+  team_name?: string;
+  status: UserStatus;
+  created_at: string;
+  last_active?: string;
+  settings?: UserSettings;
+  limits?: UserLimits;
+  usage?: UserUsage;
+  api_key_masked?: string;
+}
+
+export interface CreateUserPayload {
+  username: string;
+  display_name: string;
+  email: string;
+  role: UserRole;
+  team_id?: string;
+}
+
+// Demo data helpers
+function makeDemoUsers(): User[] {
+  const now = new Date().toISOString();
+  const teams = [
+    { id: 'team-1', name: 'Platform' },
+    { id: 'team-2', name: 'Security' },
+    { id: 'team-3', name: 'Data' },
+  ];
+  return [
+    {
+      id: 'u-1', username: 'alice', display_name: 'Alice Chen', email: 'alice@example.com',
+      role: 'admin', team_id: 'team-1', team_name: 'Platform', status: 'active',
+      created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
+      last_active: new Date(Date.now() - 5 * 60000).toISOString(),
+      api_key_masked: 'sg_****************************a1b2',
+      settings: { default_model: 'claude-opus-4-5', default_provider: 'anthropic', thinking_level: 'high', temperature: 0.7, streaming: true, theme: 'dark' },
+      limits: { max_tokens_day: 1000000, max_cost_day: 20, max_cost_month: 400, max_concurrent_agents: 10, allowed_models: ['claude-opus-4-5', 'gpt-4.1'], allowed_tools: ['read_file', 'write_file', 'exec', 'search'] },
+      usage: { tokens_today: 48200, cost_today: 1.24, cost_month: 18.50 },
+    },
+    {
+      id: 'u-2', username: 'bob', display_name: 'Bob Smith', email: 'bob@example.com',
+      role: 'developer', team_id: 'team-1', team_name: 'Platform', status: 'active',
+      created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+      last_active: new Date(Date.now() - 2 * 3600000).toISOString(),
+      api_key_masked: 'sg_****************************c3d4',
+      settings: { default_model: 'claude-sonnet-4-5', default_provider: 'anthropic', thinking_level: 'medium', temperature: 0.5, streaming: true, theme: 'dark' },
+      limits: { max_tokens_day: 200000, max_cost_day: 5, max_cost_month: 80, max_concurrent_agents: 3, allowed_models: ['claude-sonnet-4-5', 'gpt-4o'], allowed_tools: ['read_file', 'search'] },
+      usage: { tokens_today: 12400, cost_today: 0.31, cost_month: 4.20 },
+    },
+    {
+      id: 'u-3', username: 'carol', display_name: 'Carol Davis', email: 'carol@example.com',
+      role: 'operator', team_id: 'team-2', team_name: 'Security', status: 'active',
+      created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
+      last_active: new Date(Date.now() - 30 * 60000).toISOString(),
+      api_key_masked: 'sg_****************************e5f6',
+      settings: { default_model: 'claude-haiku-4-5', default_provider: 'anthropic', thinking_level: 'low', temperature: 0.3, streaming: false, theme: 'light' },
+      limits: { max_tokens_day: 100000, max_cost_day: 2, max_cost_month: 40, max_concurrent_agents: 2, allowed_models: ['claude-haiku-4-5'], allowed_tools: ['read_file'] },
+      usage: { tokens_today: 5100, cost_today: 0.08, cost_month: 1.90 },
+    },
+    {
+      id: 'u-4', username: 'dan', display_name: 'Dan Wilson', email: 'dan@example.com',
+      role: 'viewer', team_id: 'team-3', team_name: 'Data', status: 'inactive',
+      created_at: new Date(Date.now() - 120 * 86400000).toISOString(),
+      last_active: new Date(Date.now() - 7 * 86400000).toISOString(),
+      api_key_masked: 'sg_****************************g7h8',
+      settings: { default_model: 'gpt-4o-mini', default_provider: 'openai', thinking_level: 'none', temperature: 1.0, streaming: true, theme: 'system' },
+      limits: { max_tokens_day: 50000, max_cost_day: 1, max_cost_month: 20, max_concurrent_agents: 1, allowed_models: ['gpt-4o-mini'], allowed_tools: [] },
+      usage: { tokens_today: 0, cost_today: 0, cost_month: 0.42 },
+    },
+    {
+      id: 'u-5', username: 'eve', display_name: 'Eve Martinez', email: 'eve@example.com',
+      role: 'developer', team_id: 'team-3', team_name: 'Data', status: 'active',
+      created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+      last_active: new Date(Date.now() - 10 * 60000).toISOString(),
+      api_key_masked: 'sg_****************************i9j0',
+      settings: { default_model: 'gpt-4.1', default_provider: 'openai', thinking_level: 'medium', temperature: 0.8, streaming: true, theme: 'dark' },
+      limits: { max_tokens_day: 300000, max_cost_day: 8, max_cost_month: 150, max_concurrent_agents: 5, allowed_models: ['gpt-4.1', 'gpt-4o'], allowed_tools: ['read_file', 'write_file', 'search'] },
+      usage: { tokens_today: 31000, cost_today: 0.92, cost_month: 22.10 },
+    },
+  ];
+  void teams; void now;
+  return makeDemoUsers.cache ?? (makeDemoUsers.cache = []);
+}
+makeDemoUsers.cache = null as User[] | null;
+// Initialize cache
+(function() { makeDemoUsers.cache = makeDemoUsers(); })();
+
+export async function fetchUsers(): Promise<User[]> {
+  const data = await safeFetch<User[] | { users?: User[] }>(`${BASE}/api/users`, []);
+  if (Array.isArray(data)) return data.length ? data : makeDemoUsers.cache!;
+  const cast = data as { users?: User[] };
+  return cast.users?.length ? cast.users : makeDemoUsers.cache!;
+}
+
+export async function fetchCurrentUser(): Promise<User> {
+  const data = await safeFetch<User>(`${BASE}/api/users/me`, null as unknown as User);
+  return data ?? makeDemoUsers.cache![0];
+}
+
+export async function createUser(payload: CreateUserPayload): Promise<User> {
+  const res = await fetch(`${BASE}/api/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    // Return demo stub
+    const newUser: User = {
+      id: `u-${Date.now()}`,
+      username: payload.username,
+      display_name: payload.display_name,
+      email: payload.email,
+      role: payload.role,
+      team_id: payload.team_id,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      api_key_masked: 'sg_****************************new1',
+      settings: { default_model: 'claude-sonnet-4-5', default_provider: 'anthropic', thinking_level: 'medium', temperature: 0.7, streaming: true, theme: 'dark' },
+      limits: { max_tokens_day: 200000, max_cost_day: 5, max_cost_month: 80, max_concurrent_agents: 3, allowed_models: [], allowed_tools: [] },
+      usage: { tokens_today: 0, cost_today: 0, cost_month: 0 },
+    };
+    makeDemoUsers.cache = [...(makeDemoUsers.cache ?? []), newUser];
+    return newUser;
+  }
+  return res.json();
+}
+
+export async function updateUser(id: string, data: Partial<User>): Promise<void> {
+  await fetch(`${BASE}/api/users/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  // Update demo cache
+  if (makeDemoUsers.cache) {
+    makeDemoUsers.cache = makeDemoUsers.cache.map(u => u.id === id ? { ...u, ...data } : u);
+  }
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await fetch(`${BASE}/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (makeDemoUsers.cache) {
+    makeDemoUsers.cache = makeDemoUsers.cache.filter(u => u.id !== id);
+  }
+}
+
+export async function regenerateApiKey(id: string): Promise<string> {
+  const res = await fetch(`${BASE}/api/users/${encodeURIComponent(id)}/api-key`, { method: 'POST' });
+  if (!res.ok) return `sg_${'*'.repeat(28)}regen`;
+  const data = await res.json();
+  return (data as { api_key?: string }).api_key ?? `sg_${'*'.repeat(28)}regen`;
+}
+
+// ── Enterprise: Teams ─────────────────────────────────────────────────────
+
+export interface Team {
+  id: string;
+  name: string;
+  description?: string;
+  member_count: number;
+  active_agents: number;
+  total_cost_month: number;
+  created_at: string;
+  members?: User[];
+  limits?: {
+    max_cost_month: number;
+    max_concurrent_agents: number;
+    allowed_models: string[];
+  };
+}
+
+export interface CreateTeamPayload {
+  name: string;
+  description?: string;
+}
+
+function makeDemoTeams(): Team[] {
+  return [
+    {
+      id: 'team-1', name: 'Platform', description: 'Core platform engineering',
+      member_count: 2, active_agents: 3, total_cost_month: 22.70,
+      created_at: new Date(Date.now() - 180 * 86400000).toISOString(),
+      limits: { max_cost_month: 500, max_concurrent_agents: 20, allowed_models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'gpt-4.1'] },
+    },
+    {
+      id: 'team-2', name: 'Security', description: 'Security operations and auditing',
+      member_count: 1, active_agents: 1, total_cost_month: 1.90,
+      created_at: new Date(Date.now() - 150 * 86400000).toISOString(),
+      limits: { max_cost_month: 100, max_concurrent_agents: 5, allowed_models: ['claude-haiku-4-5'] },
+    },
+    {
+      id: 'team-3', name: 'Data', description: 'Data science and analytics',
+      member_count: 2, active_agents: 2, total_cost_month: 22.52,
+      created_at: new Date(Date.now() - 120 * 86400000).toISOString(),
+      limits: { max_cost_month: 300, max_concurrent_agents: 10, allowed_models: ['gpt-4.1', 'gpt-4o', 'gpt-4o-mini'] },
+    },
+  ];
+}
+
+makeDemoTeams.cache = null as Team[] | null;
+(function() { makeDemoTeams.cache = makeDemoTeams(); })();
+
+export async function fetchTeams(): Promise<Team[]> {
+  const data = await safeFetch<Team[] | { teams?: Team[] }>(`${BASE}/api/teams`, []);
+  if (Array.isArray(data)) return data.length ? data : makeDemoTeams.cache!;
+  const cast = data as { teams?: Team[] };
+  return cast.teams?.length ? cast.teams : makeDemoTeams.cache!;
+}
+
+export async function createTeam(payload: CreateTeamPayload): Promise<Team> {
+  const res = await fetch(`${BASE}/api/teams`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const newTeam: Team = {
+      id: `team-${Date.now()}`,
+      name: payload.name,
+      description: payload.description,
+      member_count: 0,
+      active_agents: 0,
+      total_cost_month: 0,
+      created_at: new Date().toISOString(),
+      limits: { max_cost_month: 100, max_concurrent_agents: 5, allowed_models: [] },
+    };
+    makeDemoTeams.cache = [...(makeDemoTeams.cache ?? []), newTeam];
+    return newTeam;
+  }
+  return res.json();
+}
+
+export async function deleteTeam(id: string): Promise<void> {
+  await fetch(`${BASE}/api/teams/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (makeDemoTeams.cache) {
+    makeDemoTeams.cache = makeDemoTeams.cache.filter(t => t.id !== id);
+  }
+}
+
+export async function addTeamMember(teamId: string, userId: string): Promise<void> {
+  await fetch(`${BASE}/api/teams/${encodeURIComponent(teamId)}/members`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId }),
+  });
+}
+
+export async function removeTeamMember(teamId: string, userId: string): Promise<void> {
+  await fetch(`${BASE}/api/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+}
+
+// ── Enterprise: Policies ──────────────────────────────────────────────────
+
+export type PolicyDecision = 'allow' | 'deny' | 'require_approval';
+export type PolicyScope = 'global' | 'team' | 'user' | 'agent';
+
+export interface PolicyRule {
+  id: string;
+  name: string;
+  scope: PolicyScope;
+  applies_to?: string; // team id, user id, or agent id
+  action: string;
+  resource: string;
+  decision: PolicyDecision;
+  priority: number;
+  enabled: boolean;
+  // Advanced conditions
+  time_restriction?: { start: string; end: string; days: string[] };
+  cost_limit?: { daily?: number; monthly?: number };
+  models?: string[];
+  pii_action?: 'allow' | 'block' | 'redact';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyTestRequest {
+  action: string;
+  resource: string;
+  user?: string;
+  scope?: PolicyScope;
+}
+
+export interface PolicyTestResult {
+  decision: PolicyDecision;
+  matched_rule?: PolicyRule;
+  all_matched: PolicyRule[];
+  reason: string;
+}
+
+function makeDemoPolicies(): PolicyRule[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: 'p-1', name: 'allow-workspace-reads', scope: 'global', applies_to: undefined,
+      action: 'files.read', resource: './**', decision: 'allow', priority: 10, enabled: true,
+      created_at: now, updated_at: now,
+    },
+    {
+      id: 'p-2', name: 'deny-parent-access', scope: 'global', applies_to: undefined,
+      action: 'files.*', resource: '../**', decision: 'deny', priority: 20, enabled: true,
+      created_at: now, updated_at: now,
+    },
+    {
+      id: 'p-3', name: 'require-exec-approval', scope: 'global', applies_to: undefined,
+      action: 'exec.*', resource: '*', decision: 'require_approval', priority: 30, enabled: true,
+      created_at: now, updated_at: now,
+    },
+    {
+      id: 'p-4', name: 'viewer-read-only', scope: 'user', applies_to: 'u-4',
+      action: 'files.*', resource: '*', decision: 'allow', priority: 5, enabled: true,
+      created_at: now, updated_at: now,
+    },
+    {
+      id: 'p-5', name: 'security-team-audit', scope: 'team', applies_to: 'team-2',
+      action: 'audit.*', resource: '*', decision: 'allow', priority: 15, enabled: true,
+      time_restriction: { start: '09:00', end: '18:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
+      created_at: now, updated_at: now,
+    },
+    {
+      id: 'p-6', name: 'block-pii-in-logs', scope: 'global', applies_to: undefined,
+      action: 'audit.write', resource: '*', decision: 'allow', priority: 25, enabled: true,
+      pii_action: 'redact',
+      created_at: now, updated_at: now,
+    },
+  ];
+}
+
+makeDemoPolicies.cache = null as PolicyRule[] | null;
+(function() { makeDemoPolicies.cache = makeDemoPolicies(); })();
+
+export async function fetchPolicies(): Promise<PolicyRule[]> {
+  const data = await safeFetch<PolicyRule[] | { policies?: PolicyRule[] }>(`${BASE}/api/policies`, []);
+  if (Array.isArray(data)) return data.length ? data : makeDemoPolicies.cache!;
+  const cast = data as { policies?: PolicyRule[] };
+  return cast.policies?.length ? cast.policies : makeDemoPolicies.cache!;
+}
+
+export async function createPolicy(rule: Omit<PolicyRule, 'id' | 'created_at' | 'updated_at'>): Promise<PolicyRule> {
+  const res = await fetch(`${BASE}/api/policies`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rule),
+  });
+  const now = new Date().toISOString();
+  if (!res.ok) {
+    const newRule: PolicyRule = { ...rule, id: `p-${Date.now()}`, created_at: now, updated_at: now };
+    makeDemoPolicies.cache = [...(makeDemoPolicies.cache ?? []), newRule];
+    return newRule;
+  }
+  return res.json();
+}
+
+export async function updatePolicy(id: string, data: Partial<PolicyRule>): Promise<void> {
+  await fetch(`${BASE}/api/policies/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (makeDemoPolicies.cache) {
+    makeDemoPolicies.cache = makeDemoPolicies.cache.map(p =>
+      p.id === id ? { ...p, ...data, updated_at: new Date().toISOString() } : p
+    );
+  }
+}
+
+export async function deletePolicy(id: string): Promise<void> {
+  await fetch(`${BASE}/api/policies/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (makeDemoPolicies.cache) {
+    makeDemoPolicies.cache = makeDemoPolicies.cache.filter(p => p.id !== id);
+  }
+}
+
+export async function testPolicy(req: PolicyTestRequest): Promise<PolicyTestResult> {
+  const data = await safeFetch<PolicyTestResult>(`${BASE}/api/policies/test`, null as unknown as PolicyTestResult);
+  if (data) return data;
+  // Local simulation against demo cache
+  const rules = (makeDemoPolicies.cache ?? [])
+    .filter(r => r.enabled)
+    .sort((a, b) => b.priority - a.priority);
+  for (const rule of rules) {
+    const actionMatch = rule.action === req.action || rule.action.endsWith('.*') && req.action.startsWith(rule.action.slice(0, -2));
+    const resourceMatch = rule.resource === '*' || rule.resource === req.resource || req.resource.startsWith(rule.resource.replace('**', ''));
+    if (actionMatch && resourceMatch) {
+      return { decision: rule.decision, matched_rule: rule, all_matched: [rule], reason: `Matched rule: ${rule.name}` };
+    }
+  }
+  return { decision: 'deny', matched_rule: undefined, all_matched: [], reason: 'No matching rule (default deny)' };
+}
+
+export async function exportPolicies(): Promise<string> {
+  const policies = makeDemoPolicies.cache ?? [];
+  return `version: "1"\npolicies:\n${policies.map(p =>
+    `  - name: "${p.name}"\n    action: "${p.action}"\n    resource: "${p.resource}"\n    decision: ${p.decision}\n    priority: ${p.priority}`
+  ).join('\n')}`;
 }

@@ -277,6 +277,29 @@ func (o *Orchestrator) checkOrRequestPermissionWithFallback(
 			primaryReason = result.Reason
 		}
 		if result.Decision.IsAllow() {
+			// Base engine allows — now consult the scoped engine as an
+			// additional, more-specific enforcement layer.
+			if o.scopedPolicyEngine != nil {
+				scopedResult, serr := o.scopedPolicyEngine.Evaluate(ctx, policy.ScopedRequest{
+					PolicyRequest: policy.PolicyRequest{
+						Action:   candidate,
+						Resource: resource,
+					},
+				})
+				if serr != nil {
+					reason := fmt.Sprintf("scoped policy evaluation error: %v", serr)
+					if i == 0 {
+						primaryReason = reason
+					}
+					return false, candidate, reason
+				}
+				if !scopedResult.Decision.IsAllow() {
+					if i == 0 {
+						primaryReason = scopedResult.Reason
+					}
+					continue
+				}
+			}
 			return true, candidate, ""
 		}
 	}

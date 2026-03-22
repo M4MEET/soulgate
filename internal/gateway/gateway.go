@@ -56,6 +56,9 @@ type Gateway struct {
 	apiAuth    *APIAuth
 	apiDevMode bool // bypass auth for localhost when true
 
+	// User management (optional — nil when UsersFile is not configured)
+	userManager *auth.UserManager
+
 	// Configuration
 	config    *Config
 	startedAt time.Time
@@ -135,6 +138,17 @@ type GatewayAPI struct {
 	// ExecCommand executes the given shell command inside the workspace and
 	// returns output and exit_code. The broker enforces policy on every call.
 	ExecCommand func(command string) (string, int, error)
+
+	// GetScopedPolicies returns all scoped policy rules.
+	// Each rule is serialised as a plain map for JSON transport.
+	GetScopedPolicies func() []map[string]interface{}
+
+	// AddScopedPolicy appends a new scoped rule to the engine and persists it.
+	// The rule is provided as a plain map matching the ScopedRule YAML/JSON schema.
+	AddScopedPolicy func(rule map[string]interface{}) error
+
+	// DeleteScopedPolicy removes a scoped rule by name and persists the change.
+	DeleteScopedPolicy func(name string) error
 }
 
 // Config holds Gateway configuration
@@ -175,6 +189,12 @@ type Config struct {
 	// Defaults to .soulgate/api_tokens.json in the workspace config dir.
 	// Only used when APIAuthEnabled is true.
 	APITokensFile string
+
+	// UsersFile is the directory passed to auth.NewUserManager for user/team
+	// persistence. When non-empty, the gateway enables the /api/users and
+	// /api/teams endpoints and wires user context into every authenticated
+	// request. Typically set to the workspace .soulgate config directory.
+	UsersFile string
 }
 
 // NewGateway creates a new Gateway
@@ -243,6 +263,16 @@ func NewGateway(config *Config) (*Gateway, error) {
 		apiDevMode = config.APIDevMode
 	}
 
+	// Initialise the user manager when a config directory is provided.
+	var userManager *auth.UserManager
+	if config.UsersFile != "" {
+		var umErr error
+		userManager, umErr = auth.NewUserManager(config.UsersFile)
+		if umErr != nil {
+			return nil, fmt.Errorf("init user manager: %w", umErr)
+		}
+	}
+
 	gw := &Gateway{
 		clients:        make(map[string]*Client),
 		agents:         make(map[string]*Client),
@@ -257,6 +287,7 @@ func NewGateway(config *Config) (*Gateway, error) {
 		authEnabled:    authEnabled,
 		apiAuth:        apiAuth,
 		apiDevMode:     apiDevMode,
+		userManager:    userManager,
 		config:         config,
 		startedAt:      time.Now(),
 		metrics:        newMetricsCollector(),
@@ -331,14 +362,24 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.HandleFunc("/health", g.handleHealth)
 	mux.HandleFunc("/api/health", g.handleHealth)
 
-	// apiHandler optionally wraps an http.HandlerFunc with API auth middleware.
+	// apiHandler optionally wraps an http.HandlerFunc with API auth middleware
+	// and, when a UserManager is configured, resolves the caller's User from
+	// their sg_user_ API key and stores it in the request context.
 	// Endpoints that should be public (health, ws) are registered directly above;
 	// all /api/* endpoints below are run through this helper.
 	apiHandler := func(h http.HandlerFunc) http.Handler {
+		// Build the chain from innermost to outermost.
+		// Execution order: userAuthMiddleware → apiAuthMiddleware → h
+		// (outer middleware runs first).
+		var base http.Handler = h
+		// 1. User context enrichment runs closest to the handler so it can
+		//    read the validated bearer token after apiAuthMiddleware passes it.
+		base = userAuthMiddleware(g.userManager, base)
+		// 2. Token validation / rate limiting is the outermost gate.
 		if g.apiAuth != nil {
-			return apiAuthMiddleware(g.apiAuth, g.apiDevMode, h)
+			base = apiAuthMiddleware(g.apiAuth, g.apiDevMode, base)
 		}
-		return h
+		return base
 	}
 
 	// REST API
@@ -358,11 +399,22 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/files", apiHandler(g.handleAPIFiles))
 	mux.Handle("/api/file", apiHandler(g.handleAPIFile))
 	mux.Handle("/api/exec", apiHandler(g.handleAPIExec))
+	mux.Handle("/api/policies", apiHandler(g.handleAPIPolicies))
+	mux.Handle("/api/policies/", apiHandler(g.handleAPIPolicies))
 
 	// Serve the HTTP chat API if a chat handler is configured
 	if g.config.OnChat != nil {
 		mux.Handle("/api/chat", apiHandler(g.handleAPIChat))
 		fmt.Println("HTTP API enabled: POST /api/chat")
+	}
+
+	// User and team management endpoints — active whenever a UserManager is configured.
+	if g.userManager != nil {
+		mux.Handle("/api/users", apiHandler(g.handleAPIUsers))
+		mux.Handle("/api/users/", apiHandler(g.handleAPIUserDetail))
+		mux.Handle("/api/teams", apiHandler(g.handleAPITeams))
+		mux.Handle("/api/teams/", apiHandler(g.handleAPITeamDetail))
+		fmt.Println("User management enabled: /api/users, /api/teams")
 	}
 
 	// Inbound webhooks — enabled whenever a webhook store is present
@@ -1475,6 +1527,69 @@ func (g *Gateway) handleAPIExec(w http.ResponseWriter, r *http.Request) {
 		"output":    output,
 		"exit_code": exitCode,
 	})
+}
+
+// handleAPIPolicies handles CRUD for scoped policy rules.
+//
+//	GET    /api/policies               — list all scoped rules
+//	POST   /api/policies               — add a new scoped rule (body: JSON ScopedRule)
+//	DELETE /api/policies/{name}        — remove a rule by name
+func (g *Gateway) handleAPIPolicies(w http.ResponseWriter, r *http.Request) {
+	api := g.config.API
+
+	// DELETE /api/policies/{name}
+	if r.Method == http.MethodDelete {
+		name := strings.TrimPrefix(r.URL.Path, "/api/policies/")
+		if name == "" {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "rule name required in path"})
+			return
+		}
+		if api == nil || api.DeleteScopedPolicy == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "scoped policy management not available",
+			})
+			return
+		}
+		if err := api.DeleteScopedPolicy(name); err != nil {
+			writeGatewayJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// POST /api/policies — add rule
+	if r.Method == http.MethodPost {
+		if api == nil || api.AddScopedPolicy == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "scoped policy management not available",
+			})
+			return
+		}
+		var rule map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if err := api.AddScopedPolicy(rule); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+		return
+	}
+
+	// GET /api/policies — list rules
+	if r.Method == http.MethodGet || r.Method == "" {
+		if api == nil || api.GetScopedPolicies == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"rules": []interface{}{}})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"rules": api.GetScopedPolicies()})
+		return
+	}
+
+	http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 }
 
 // GetClientCount returns the number of connected clients by role

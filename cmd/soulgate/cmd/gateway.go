@@ -16,6 +16,7 @@ import (
 	"github.com/M4MEET/soulgate/internal/config"
 	"github.com/M4MEET/soulgate/internal/core"
 	"github.com/M4MEET/soulgate/internal/gateway"
+	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/spf13/cobra"
 )
 
@@ -683,6 +684,145 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 				return "", 1, err
 			}
 			return result.Output, result.ExitCode, nil
+		},
+
+		// GetScopedPolicies returns all scoped policy rules as plain maps.
+		GetScopedPolicies: func() []map[string]interface{} {
+			se := orch.GetScopedPolicyEngine()
+			if se == nil {
+				return []map[string]interface{}{}
+			}
+			rules := se.GetAllRules()
+			out := make([]map[string]interface{}, 0, len(rules))
+			for _, r := range rules {
+				entry := map[string]interface{}{
+					"name":     r.Name,
+					"scope":    string(r.Scope),
+					"scope_id": r.ScopeID,
+					"action":   r.Action,
+					"resource": r.Resource,
+					"decision": string(r.Decision),
+					"priority": r.Priority,
+				}
+				if r.Description != "" {
+					entry["description"] = r.Description
+				}
+				if len(r.ModelRestriction) > 0 {
+					entry["model_restriction"] = r.ModelRestriction
+				}
+				if r.PIIAction != "" {
+					entry["pii_action"] = r.PIIAction
+				}
+				if r.TimeRestriction != nil {
+					entry["time_restriction"] = map[string]interface{}{
+						"allowed_days":  r.TimeRestriction.AllowedDays,
+						"allowed_hours": r.TimeRestriction.AllowedHours,
+						"timezone":      r.TimeRestriction.Timezone,
+					}
+				}
+				if r.CostLimit != nil {
+					entry["cost_limit"] = map[string]interface{}{
+						"max_per_day":   r.CostLimit.MaxPerDay,
+						"max_per_month": r.CostLimit.MaxPerMonth,
+						"action":        r.CostLimit.Action,
+					}
+				}
+				out = append(out, entry)
+			}
+			return out
+		},
+
+		// AddScopedPolicy converts a plain map into a ScopedRule and appends it
+		// to the live scoped engine, then persists the change to disk.
+		AddScopedPolicy: func(rule map[string]interface{}) error {
+			se := orch.GetScopedPolicyEngine()
+			if se == nil {
+				return fmt.Errorf("scoped policy engine not initialised")
+			}
+
+			getString := func(m map[string]interface{}, key string) string {
+				if v, ok := m[key].(string); ok {
+					return v
+				}
+				return ""
+			}
+			getInt := func(m map[string]interface{}, key string) int {
+				switch v := m[key].(type) {
+				case float64:
+					return int(v)
+				case int:
+					return v
+				}
+				return 0
+			}
+
+			sr := policy.ScopedRule{
+				PolicyRule: policy.PolicyRule{
+					Name:        getString(rule, "name"),
+					Description: getString(rule, "description"),
+					Action:      getString(rule, "action"),
+					Resource:    getString(rule, "resource"),
+					Decision:    policy.Decision(getString(rule, "decision")),
+					Priority:    getInt(rule, "priority"),
+				},
+				Scope:    policy.PolicyScope(getString(rule, "scope")),
+				ScopeID:  getString(rule, "scope_id"),
+				PIIAction: getString(rule, "pii_action"),
+			}
+
+			if mods, ok := rule["model_restriction"].([]interface{}); ok {
+				for _, m := range mods {
+					if s, ok := m.(string); ok {
+						sr.ModelRestriction = append(sr.ModelRestriction, s)
+					}
+				}
+			}
+
+			if tr, ok := rule["time_restriction"].(map[string]interface{}); ok {
+				restriction := &policy.TimeRestriction{
+					AllowedHours: getString(tr, "allowed_hours"),
+					Timezone:     getString(tr, "timezone"),
+				}
+				if days, ok := tr["allowed_days"].([]interface{}); ok {
+					for _, d := range days {
+						if s, ok := d.(string); ok {
+							restriction.AllowedDays = append(restriction.AllowedDays, s)
+						}
+					}
+				}
+				sr.TimeRestriction = restriction
+			}
+
+			if cl, ok := rule["cost_limit"].(map[string]interface{}); ok {
+				limit := &policy.CostLimit{
+					Action: getString(cl, "action"),
+				}
+				if v, ok := cl["max_per_day"].(float64); ok {
+					limit.MaxPerDay = v
+				}
+				if v, ok := cl["max_per_month"].(float64); ok {
+					limit.MaxPerMonth = v
+				}
+				sr.CostLimit = limit
+			}
+
+			if err := se.AddRule(sr); err != nil {
+				return err
+			}
+			return se.Save()
+		},
+
+		// DeleteScopedPolicy removes a scoped rule by name and persists the
+		// change to disk.
+		DeleteScopedPolicy: func(name string) error {
+			se := orch.GetScopedPolicyEngine()
+			if se == nil {
+				return fmt.Errorf("scoped policy engine not initialised")
+			}
+			if err := se.RemoveRule(name); err != nil {
+				return err
+			}
+			return se.Save()
 		},
 	}
 }

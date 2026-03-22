@@ -35,6 +35,7 @@ type Orchestrator struct {
 	session             *Session
 	provider            model.Provider
 	policyEngine        *policy.Engine
+	scopedPolicyEngine  *policy.ScopedEngine
 	fileBroker          *files.Broker
 	execBroker          *exec.Broker
 	netBroker           *net.Broker
@@ -63,6 +64,7 @@ type Orchestrator struct {
 	trustMode           bool                      // When true, bypass all permission checks
 	trustModeExpiry     *time.Time                // Auto-disable trust mode after this time
 	trustMu             sync.RWMutex              // Protects trust mode state
+	providerMu          sync.RWMutex              // Protects provider, actualModelName, and config model fields
 	conversationHistory []model.Message           // Persistent conversation history across runs
 	historyMu           sync.RWMutex              // Protects conversationHistory
 	costTracker         *CostTracker              // Tracks API cost per session/day/provider
@@ -87,6 +89,13 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	policyEngine, err := initializePolicyEngine(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
+	}
+
+	// Initialize scoped policy engine (hierarchical: global → team → user → agent).
+	// The scoped policy file lives next to the base policy file.
+	scopedPolicyEngine, err := policy.NewScopedEngine(workspace.Config.Policy.ScopedFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize scoped policy engine: %w", err)
 	}
 
 	// Initialize file broker
@@ -227,7 +236,8 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 		audit:             auditLogger,
 		session:           session,
 		provider:          provider,
-		policyEngine:      policyEngine,
+		policyEngine:       policyEngine,
+		scopedPolicyEngine: scopedPolicyEngine,
 		fileBroker:        fileBroker,
 		execBroker:        execBroker,
 		netBroker:         netBroker,
@@ -431,6 +441,13 @@ func (o *Orchestrator) GetAuditLogger() audit.Logger {
 // GetPolicyEngine returns the policy engine
 func (o *Orchestrator) GetPolicyEngine() *policy.Engine {
 	return o.policyEngine
+}
+
+// GetScopedPolicyEngine returns the hierarchical scoped policy engine.
+// The scoped engine layers on top of the base engine:
+// global → team → user → agent rules, with the most-specific scope winning.
+func (o *Orchestrator) GetScopedPolicyEngine() *policy.ScopedEngine {
+	return o.scopedPolicyEngine
 }
 
 // GetAllToolSchemas returns the full catalog of all available tool schemas.
