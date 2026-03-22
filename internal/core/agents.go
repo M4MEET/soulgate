@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/audit"
@@ -83,6 +84,35 @@ type AgentLogEntry struct {
 	Message string    `json:"message"`
 }
 
+// AgentConfig holds runtime configuration overrides for a background agent.
+// Zero values mean "use the orchestrator default".
+type AgentConfig struct {
+	Model          string   `json:"model"`           // model override (empty = use default)
+	Provider       string   `json:"provider"`        // provider override
+	AllowedTools   []string `json:"allowed_tools"`   // tool allowlist (empty = all)
+	MaxTokens      int      `json:"max_tokens"`      // token budget (0 = unlimited)
+	MaxCostUSD     float64  `json:"max_cost_usd"`    // cost limit (0 = unlimited)
+	ThinkingLevel  string   `json:"thinking_level"`  // off/low/medium/high
+	Temperature    float64  `json:"temperature"`     // 0.0–2.0
+	SystemPrompt   string   `json:"system_prompt"`   // custom instructions prepended to task
+	TimeoutSeconds int      `json:"timeout_seconds"` // max runtime in seconds (0 = use default)
+	AutoRestart    bool     `json:"auto_restart"`    // restart on crash
+}
+
+// AgentMetrics holds observable runtime counters for a background agent.
+// All numeric counters are updated atomically so they can be read without
+// holding any lock.
+type AgentMetrics struct {
+	TokensUsed     int64     `json:"tokens_used"`
+	CostUSD        float64   `json:"cost_usd"`
+	ToolCallCount  int64     `json:"tool_call_count"`
+	ModelCallCount int64     `json:"model_call_count"`
+	ErrorCount     int64     `json:"error_count"`
+	AvgResponseMs  float64   `json:"avg_response_ms"`
+	StartedAt      time.Time `json:"started_at"`
+	Duration       string    `json:"duration"`
+}
+
 // BackgroundAgent represents a task-specific agent running in the background
 type BackgroundAgent struct {
 	ID           string        `json:"id"`
@@ -97,11 +127,27 @@ type BackgroundAgent struct {
 	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
 	Result       string        `json:"result,omitempty"`
 	Error        string        `json:"error,omitempty"`
-	cancel       context.CancelFunc
-	logMu        sync.RWMutex
-	activityLog  []AgentLogEntry // ring buffer, max 200 entries
-	msgMu        sync.Mutex
-	inbox        []AgentMessage // pending messages from other agents
+
+	// Config holds runtime configuration overrides (protected by cfgMu).
+	Config AgentConfig
+
+	// Atomic metric counters — updated via the Incr*/Add* helpers.
+	tokensUsed     int64
+	costUSDMicros  int64 // stored as micro-dollars to allow atomic updates
+	toolCallCount  int64
+	modelCallCount int64
+	errorCount     int64
+
+	// Response-time tracking for AvgResponseMs (protected by metricsMu).
+	metricsMu      sync.Mutex
+	responseTimeMs []float64 // sliding window of recent response times
+
+	cfgMu       sync.RWMutex
+	cancel      context.CancelFunc
+	logMu       sync.RWMutex
+	activityLog []AgentLogEntry // ring buffer, max 200 entries
+	msgMu       sync.Mutex
+	inbox       []AgentMessage // pending messages from other agents
 }
 
 const maxAgentLogEntries = 200
@@ -141,6 +187,105 @@ func (a *BackgroundAgent) GetLogTail(n int) []AgentLogEntry {
 	out := make([]AgentLogEntry, n)
 	copy(out, a.activityLog[len(a.activityLog)-n:])
 	return out
+}
+
+// GetFullLog returns all entries in the agent's activity log (thread-safe).
+// Unlike GetLog it is guaranteed to return the full ring-buffer even if
+// the caller intends to iterate over every entry.
+func (a *BackgroundAgent) GetFullLog() []AgentLogEntry {
+	return a.GetLog()
+}
+
+// GetMetrics returns a snapshot of the agent's runtime metrics.
+func (a *BackgroundAgent) GetMetrics() AgentMetrics {
+	tokens := atomic.LoadInt64(&a.tokensUsed)
+	costMicros := atomic.LoadInt64(&a.costUSDMicros)
+	toolCalls := atomic.LoadInt64(&a.toolCallCount)
+	modelCalls := atomic.LoadInt64(&a.modelCallCount)
+	errors := atomic.LoadInt64(&a.errorCount)
+
+	a.metricsMu.Lock()
+	var avg float64
+	if n := len(a.responseTimeMs); n > 0 {
+		sum := 0.0
+		for _, v := range a.responseTimeMs {
+			sum += v
+		}
+		avg = sum / float64(n)
+	}
+	a.metricsMu.Unlock()
+
+	dur := ""
+	if !a.CreatedAt.IsZero() {
+		end := time.Now()
+		if a.CompletedAt != nil {
+			end = *a.CompletedAt
+		}
+		dur = end.Sub(a.CreatedAt).Round(time.Second).String()
+	}
+
+	return AgentMetrics{
+		TokensUsed:     tokens,
+		CostUSD:        float64(costMicros) / 1_000_000,
+		ToolCallCount:  toolCalls,
+		ModelCallCount: modelCalls,
+		ErrorCount:     errors,
+		AvgResponseMs:  avg,
+		StartedAt:      a.CreatedAt,
+		Duration:       dur,
+	}
+}
+
+// GetConfig returns a copy of the agent's current configuration (thread-safe).
+func (a *BackgroundAgent) GetConfig() AgentConfig {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	return a.Config
+}
+
+// SetConfig replaces the agent's configuration (thread-safe).
+func (a *BackgroundAgent) SetConfig(cfg AgentConfig) {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	a.Config = cfg
+}
+
+// IncrToolCall increments the tool-call counter atomically.
+func (a *BackgroundAgent) IncrToolCall() {
+	atomic.AddInt64(&a.toolCallCount, 1)
+}
+
+// IncrModelCall increments the model-call counter atomically.
+func (a *BackgroundAgent) IncrModelCall() {
+	atomic.AddInt64(&a.modelCallCount, 1)
+}
+
+// IncrError increments the error counter atomically.
+func (a *BackgroundAgent) IncrError() {
+	atomic.AddInt64(&a.errorCount, 1)
+}
+
+// AddTokens adds n to the total tokens-used counter atomically.
+func (a *BackgroundAgent) AddTokens(n int) {
+	atomic.AddInt64(&a.tokensUsed, int64(n))
+}
+
+// AddCost adds the given USD amount to the cumulative cost counter.
+// The value is stored internally as micro-dollars to enable atomic updates.
+func (a *BackgroundAgent) AddCost(usd float64) {
+	atomic.AddInt64(&a.costUSDMicros, int64(usd*1_000_000))
+}
+
+// recordResponseTime appends a response duration in milliseconds for the
+// running average.  Only the most recent 100 samples are retained.
+func (a *BackgroundAgent) recordResponseTime(ms float64) {
+	const maxSamples = 100
+	a.metricsMu.Lock()
+	defer a.metricsMu.Unlock()
+	a.responseTimeMs = append(a.responseTimeMs, ms)
+	if len(a.responseTimeMs) > maxSamples {
+		a.responseTimeMs = a.responseTimeMs[len(a.responseTimeMs)-maxSamples:]
+	}
 }
 
 // AgentManager tracks and manages background agents
@@ -525,15 +670,19 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 		}
 
 		agent.AppendLog("model_call", fmt.Sprintf("calling %s...", o.provider.Name()))
+		agent.IncrModelCall()
 
 		modelStart := time.Now()
 		resp, err := o.callModelWithFallback(ctx, tracker, req)
 		if err != nil {
 			agent.AppendLog("error", fmt.Sprintf("model error: %v", err))
+			agent.IncrError()
 			return "", fmt.Errorf("model provider error: %w", err)
 		}
 
 		modelDur := time.Since(modelStart).Round(time.Millisecond)
+		agent.recordResponseTime(float64(modelDur.Milliseconds()))
+
 		modelName := resp.Model
 		if modelName == "" {
 			modelName = o.provider.Name()
@@ -541,6 +690,7 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 		agent.AppendLog("model_done", fmt.Sprintf("%s responded (%s, %d tok, %s)",
 			modelName, resp.StopReason, resp.Usage.TotalTokens, modelDur))
 
+		agent.AddTokens(resp.Usage.TotalTokens)
 		if err := tracker.AddTokens(resp.Usage.TotalTokens); err != nil {
 			return "", err
 		}
@@ -573,6 +723,7 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 					argsSummary = argsSummary[:120] + "..."
 				}
 				agent.AppendLog("tool_start", fmt.Sprintf("%s %s", tc.Name, argsSummary))
+				agent.IncrToolCall()
 			}
 
 			toolResults := o.executeToolCallsParallel(ctx, runID, tracker, resp.ToolCalls)

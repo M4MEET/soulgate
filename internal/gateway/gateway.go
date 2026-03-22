@@ -110,6 +110,21 @@ type GatewayAPI struct {
 	// StopAgent cancels a running background agent by ID.
 	StopAgent func(id string) error
 
+	// GetAgentDetail returns full observability data for a single agent:
+	// identity, status, config, metrics, and the complete activity log.
+	GetAgentDetail func(id string) (map[string]interface{}, error)
+
+	// GetAgentLog returns the last N activity log entries for an agent.
+	// limit <= 0 should be treated as "return all".
+	GetAgentLog func(id string, limit int) ([]map[string]interface{}, error)
+
+	// SetAgentConfig applies configuration overrides to a live agent.
+	// The config map uses the same keys as AgentConfig JSON fields.
+	SetAgentConfig func(id string, config map[string]interface{}) error
+
+	// SendAgentMessage delivers a message to a running agent's inbox.
+	SendAgentMessage func(id string, message string) error
+
 	// ListFiles returns the directory listing at the given workspace-relative
 	// path. Each entry is a map with keys: name, is_dir, size.
 	ListFiles func(path string) ([]map[string]interface{}, error)
@@ -335,6 +350,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/config", apiHandler(g.handleAPIConfig))
 	mux.Handle("/api/tools", apiHandler(g.handleAPITools))
 	mux.Handle("/api/agents", apiHandler(g.handleAPIAgents))
+	mux.Handle("/api/agents/", apiHandler(g.handleAPIAgentDetail))
 	mux.Handle("/api/agent", apiHandler(g.handleAPIAgent))
 	mux.Handle("/api/memory", apiHandler(g.handleAPIMemory))
 	mux.Handle("/api/costs", apiHandler(g.handleAPICosts))
@@ -1250,6 +1266,172 @@ func (g *Gateway) handleAPIFile(w http.ResponseWriter, r *http.Request) {
 		"path":    path,
 		"content": content,
 	})
+}
+
+// handleAPIAgentDetail is the router for the /api/agents/{id} subtree.
+//
+// Routes dispatched:
+//   GET    /api/agents/{id}         → full agent detail (identity + metrics + config + log)
+//   GET    /api/agents/{id}/log     → last N log entries (?limit=N)
+//   POST   /api/agents/{id}/config  → update agent configuration
+//   POST   /api/agents/{id}/message → send a message to the agent
+//   DELETE /api/agents/{id}         → stop the agent
+func (g *Gateway) handleAPIAgentDetail(w http.ResponseWriter, r *http.Request) {
+	// Strip the leading "/api/agents/" prefix to get the remainder.
+	rest := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	rest = strings.Trim(rest, "/")
+
+	// Split on "/" to separate the agent ID from any sub-resource.
+	parts := strings.SplitN(rest, "/", 2)
+	id := parts[0]
+	subResource := ""
+	if len(parts) == 2 {
+		subResource = parts[1]
+	}
+
+	if id == "" {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "agent id is required"})
+		return
+	}
+
+	switch subResource {
+	case "":
+		g.handleAgentDetailRoot(w, r, id)
+	case "log":
+		g.handleAgentLog(w, r, id)
+	case "config":
+		g.handleAgentConfig(w, r, id)
+	case "message":
+		g.handleAgentMessage(w, r, id)
+	default:
+		writeGatewayJSON(w, http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("unknown sub-resource: %s", subResource),
+		})
+	}
+}
+
+// handleAgentDetailRoot handles GET /api/agents/{id}.
+func (g *Gateway) handleAgentDetailRoot(w http.ResponseWriter, r *http.Request, id string) {
+	switch r.Method {
+	case http.MethodGet:
+		if g.config.API == nil || g.config.API.GetAgentDetail == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "agent detail API not available",
+			})
+			return
+		}
+		detail, err := g.config.API.GetAgentDetail(id)
+		if err != nil {
+			writeGatewayJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, detail)
+
+	case http.MethodDelete:
+		if g.config.API == nil || g.config.API.StopAgent == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "agent stop not available",
+			})
+			return
+		}
+		if err := g.config.API.StopAgent(id); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "stopped", "id": id})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAgentLog handles GET /api/agents/{id}/log[?limit=N].
+func (g *Gateway) handleAgentLog(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetAgentLog == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent log API not available",
+		})
+		return
+	}
+
+	limit := 0 // 0 = return all
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := fmt.Sscanf(raw, "%d", &limit); n != 1 || err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit parameter"})
+			return
+		}
+	}
+
+	entries, err := g.config.API.GetAgentLog(id, limit)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+		"id":      id,
+		"entries": entries,
+		"count":   len(entries),
+	})
+}
+
+// handleAgentConfig handles POST /api/agents/{id}/config.
+func (g *Gateway) handleAgentConfig(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.SetAgentConfig == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent config update not available",
+		})
+		return
+	}
+
+	var cfg map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if err := g.config.API.SetAgentConfig(id, cfg); err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "updated", "id": id})
+}
+
+// handleAgentMessage handles POST /api/agents/{id}/message.
+func (g *Gateway) handleAgentMessage(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.SendAgentMessage == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent messaging not available",
+		})
+		return
+	}
+
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Message == "" {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
+		return
+	}
+	if err := g.config.API.SendAgentMessage(id, req.Message); err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "sent", "id": id})
 }
 
 // handleAPIExec handles POST /api/exec.

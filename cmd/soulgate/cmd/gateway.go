@@ -473,6 +473,158 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 			return orch.GetAgentManager().Stop(id)
 		},
 
+		// GetAgentDetail returns full observability data for a single agent.
+		GetAgentDetail: func(id string) (map[string]interface{}, error) {
+			a, ok := orch.GetAgentManager().Get(id)
+			if !ok {
+				return nil, fmt.Errorf("agent not found: %s", id)
+			}
+
+			metrics := a.GetMetrics()
+			cfg := a.GetConfig()
+
+			logEntries := a.GetFullLog()
+			logMaps := make([]map[string]interface{}, 0, len(logEntries))
+			for _, e := range logEntries {
+				logMaps = append(logMaps, map[string]interface{}{
+					"time":    e.Time.Format("2006-01-02T15:04:05.000Z"),
+					"kind":    e.Kind,
+					"message": e.Message,
+				})
+			}
+
+			detail := map[string]interface{}{
+				"id":           a.ID,
+				"name":         a.Name,
+				"task":         a.Task,
+				"status":       string(a.Status),
+				"role":         string(a.Role),
+				"capabilities": a.Capabilities,
+				"created_at":   a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+				"metrics": map[string]interface{}{
+					"tokens_used":      metrics.TokensUsed,
+					"cost_usd":         metrics.CostUSD,
+					"tool_call_count":  metrics.ToolCallCount,
+					"model_call_count": metrics.ModelCallCount,
+					"error_count":      metrics.ErrorCount,
+					"avg_response_ms":  metrics.AvgResponseMs,
+					"started_at":       metrics.StartedAt.Format("2006-01-02T15:04:05Z"),
+					"duration":         metrics.Duration,
+				},
+				"config": map[string]interface{}{
+					"model":           cfg.Model,
+					"provider":        cfg.Provider,
+					"allowed_tools":   cfg.AllowedTools,
+					"max_tokens":      cfg.MaxTokens,
+					"max_cost_usd":    cfg.MaxCostUSD,
+					"thinking_level":  cfg.ThinkingLevel,
+					"temperature":     cfg.Temperature,
+					"system_prompt":   cfg.SystemPrompt,
+					"timeout_seconds": cfg.TimeoutSeconds,
+					"auto_restart":    cfg.AutoRestart,
+				},
+				"activity_log": logMaps,
+				"log_count":    len(logMaps),
+			}
+			if a.CompletedAt != nil {
+				detail["completed_at"] = a.CompletedAt.Format("2006-01-02T15:04:05Z")
+			}
+			if a.Result != "" {
+				detail["result"] = a.Result
+			}
+			if a.Error != "" {
+				detail["error"] = a.Error
+			}
+			if a.ParentID != "" {
+				detail["parent_id"] = a.ParentID
+			}
+			if len(a.ChildIDs) > 0 {
+				detail["child_ids"] = a.ChildIDs
+			}
+			return detail, nil
+		},
+
+		// GetAgentLog returns the last N log entries for an agent.
+		GetAgentLog: func(id string, limit int) ([]map[string]interface{}, error) {
+			a, ok := orch.GetAgentManager().Get(id)
+			if !ok {
+				return nil, fmt.Errorf("agent not found: %s", id)
+			}
+			var entries []core.AgentLogEntry
+			if limit <= 0 {
+				entries = a.GetFullLog()
+			} else {
+				entries = a.GetLogTail(limit)
+			}
+			out := make([]map[string]interface{}, 0, len(entries))
+			for _, e := range entries {
+				out = append(out, map[string]interface{}{
+					"time":    e.Time.Format("2006-01-02T15:04:05.000Z"),
+					"kind":    e.Kind,
+					"message": e.Message,
+				})
+			}
+			return out, nil
+		},
+
+		// SetAgentConfig applies configuration overrides to a running agent.
+		// Only the fields present in the map are applied; unknown keys are ignored
+		// so partial updates work correctly.
+		SetAgentConfig: func(id string, config map[string]interface{}) error {
+			a, ok := orch.GetAgentManager().Get(id)
+			if !ok {
+				return fmt.Errorf("agent not found: %s", id)
+			}
+			cfg := a.GetConfig()
+			if v, ok := config["model"].(string); ok {
+				cfg.Model = v
+			}
+			if v, ok := config["provider"].(string); ok {
+				cfg.Provider = v
+			}
+			if v, ok := config["thinking_level"].(string); ok {
+				cfg.ThinkingLevel = v
+			}
+			if v, ok := config["system_prompt"].(string); ok {
+				cfg.SystemPrompt = v
+			}
+			if v, ok := config["auto_restart"].(bool); ok {
+				cfg.AutoRestart = v
+			}
+			if v, ok := config["max_tokens"].(float64); ok {
+				cfg.MaxTokens = int(v)
+			}
+			if v, ok := config["max_cost_usd"].(float64); ok {
+				cfg.MaxCostUSD = v
+			}
+			if v, ok := config["temperature"].(float64); ok {
+				cfg.Temperature = v
+			}
+			if v, ok := config["timeout_seconds"].(float64); ok {
+				cfg.TimeoutSeconds = int(v)
+			}
+			if raw, ok := config["allowed_tools"]; ok {
+				if arr, ok := raw.([]interface{}); ok {
+					tools := make([]string, 0, len(arr))
+					for _, item := range arr {
+						if s, ok := item.(string); ok {
+							tools = append(tools, s)
+						}
+					}
+					cfg.AllowedTools = tools
+				}
+			}
+			a.SetConfig(cfg)
+			return nil
+		},
+
+		// SendAgentMessage delivers a message to the agent's inbox.
+		// The sender is identified as "gateway-api" so the agent can distinguish
+		// API-originated messages from agent-to-agent communication.
+		SendAgentMessage: func(id string, message string) error {
+			return orch.GetAgentManager().SendMessage("gateway-api", id, message)
+		},
+
 		// ListFiles delegates to the FileBroker to list a workspace directory.
 		// The path is relative to the workspace root.
 		ListFiles: func(path string) ([]map[string]interface{}, error) {
