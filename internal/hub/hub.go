@@ -29,7 +29,7 @@ const (
 	defaultRegistryURL = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/registry.json"
 	hubCacheTTL        = 30 * time.Minute
 	hubInstalledFile   = "hub-installed.json"
-	rawBaseURL         = "https://raw.githubusercontent.com/M4MEET/soulgate-%ss/main/%s/"
+	rawBaseURL         = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/%ss/%s/"
 )
 
 // Package describes a single package in the remote registry.
