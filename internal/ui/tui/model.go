@@ -134,6 +134,8 @@ type (
 	}
 	// Keep lowercase alias for internal use
 	permissionRequestMsg = PermissionRequestMsg
+	// sessionAutoSaveMsg triggers a periodic session state persist
+	sessionAutoSaveMsg struct{}
 )
 
 // providerInfo holds provider information for selection
@@ -300,5 +302,5 @@ func (m *InteractiveChatModel) SetProgram(p *tea.Program) {
 
 // Init initializes the Bubble Tea model
 func (m InteractiveChatModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, sessionAutoSaveCmd())
 }

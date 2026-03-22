@@ -591,6 +591,11 @@ func (m InteractiveChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.watchingAgentID = ""
 		return m, nil
 
+	case sessionAutoSaveMsg:
+		// Periodic session auto-save (every 60s) so state survives crashes
+		m.SaveSession()
+		return m, sessionAutoSaveCmd()
+
 	case dependencyInstallCompleteMsg:
 		// Dependency installation completed; auto-advance for a smoother flow.
 		if m.ShowOnboarding && m.OnboardingState != nil {

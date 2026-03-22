@@ -133,6 +133,13 @@ func agentPollCmd(agentID string) tea.Cmd {
 	})
 }
 
+// sessionAutoSaveCmd fires every 60 seconds to persist session state.
+func sessionAutoSaveCmd() tea.Cmd {
+	return tea.Tick(60*time.Second, func(t time.Time) tea.Msg {
+		return sessionAutoSaveMsg{}
+	})
+}
+
 func (m *InteractiveChatModel) scheduleStreamFlush() tea.Cmd {
 	if m.streamFlushScheduled {
 		return nil
