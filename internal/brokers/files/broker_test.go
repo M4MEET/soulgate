@@ -52,8 +52,8 @@ func setupTestBroker(t *testing.T) (*Broker, string, func()) {
 	engine := policy.NewEngine(pol)
 
 	// Create audit logger
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 
 	// Create broker
@@ -224,8 +224,8 @@ func TestFileBrokerPolicyDeny(t *testing.T) {
 	engine := policy.NewEngine(pol)
 
 	// Create audit logger
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 	defer auditLogger.Close()
 
@@ -269,8 +269,8 @@ func TestFileBrokerAuditLog(t *testing.T) {
 	broker.ListDir(ctx, brokerCtx, ".")
 
 	// Query audit log
-	auditPath := filepath.Join(tmpDir, "audit.db")
-	auditLogger, err := audit.NewSQLiteLogger(auditPath)
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
 	require.NoError(t, err)
 	defer auditLogger.Close()
 
@@ -289,5 +289,100 @@ func TestFileBrokerAuditLog(t *testing.T) {
 		assert.Equal(t, "test-session", event.SessionID)
 		assert.Equal(t, "test-plugin", event.PluginID)
 		assert.Equal(t, audit.CategoryBroker, event.Category)
+	}
+}
+
+func TestFileBrokerNoPolicyEngine(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+	err := os.WriteFile(testFile, []byte("test content"), 0644)
+	require.NoError(t, err)
+
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+	auditLogger, err := audit.NewJSONLLogger(auditPath)
+	require.NoError(t, err)
+	defer auditLogger.Close()
+
+	broker, err := NewBroker(tmpDir, nil, auditLogger)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	brokerCtx := brokers.BrokerContext{
+		PluginID: "test-plugin",
+		RunID:    "test-run",
+	}
+
+	_, err = broker.ReadFile(ctx, brokerCtx, "test.txt")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "policy engine not configured")
+}
+
+func TestFileBrokerCoreProtection(t *testing.T) {
+	broker, tmpDir, cleanup := setupTestBroker(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	brokerCtx := brokers.BrokerContext{
+		PluginID: "test-plugin",
+		RunID:    "test-run",
+	}
+
+	// Create the core directories so paths resolve
+	for _, dir := range []string{"internal", "internal/core", "cmd"} {
+		os.MkdirAll(filepath.Join(tmpDir, dir), 0755)
+	}
+	// Create a core file so it exists for delete tests
+	os.WriteFile(filepath.Join(tmpDir, "internal/core/tools.go"), []byte("package core"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test"), 0644)
+
+	// Write to core directories should be blocked
+	coreWritePaths := []string{
+		"internal/core/tools.go",
+		"internal/model/new_file.go",
+		"cmd/soulgate/main.go",
+		"go.mod",
+		"go.sum",
+		"Makefile",
+	}
+
+	for _, path := range coreWritePaths {
+		err := broker.WriteFile(ctx, brokerCtx, path, []byte("hacked"))
+		assert.Error(t, err, "should block write to %s", path)
+		assert.Contains(t, err.Error(), "core protection", "error for %s should mention core protection", path)
+	}
+
+	// Delete from core directories should be blocked
+	coreDeletePaths := []string{
+		"internal/core/tools.go",
+		"internal",
+		"cmd",
+		"go.mod",
+	}
+
+	for _, path := range coreDeletePaths {
+		err := broker.DeleteFile(ctx, brokerCtx, path)
+		assert.Error(t, err, "should block delete of %s", path)
+		assert.Contains(t, err.Error(), "core protection", "error for %s should mention core protection", path)
+	}
+
+	// Read from core directories should still work (AI can introspect)
+	content, err := broker.ReadFile(ctx, brokerCtx, "internal/core/tools.go")
+	assert.NoError(t, err, "should allow reading core files")
+	assert.Equal(t, "package core", string(content))
+
+	// Write to safe extension paths should work
+	safePaths := []string{
+		"skills/myskill/SKILL.md",
+		"extensions/helper.sh",
+		"plugins/myplugin/manifest.yml",
+		".soulgate/config.yml",
+		"myproject/src/main.py",
+	}
+
+	for _, path := range safePaths {
+		dir := filepath.Dir(filepath.Join(tmpDir, path))
+		os.MkdirAll(dir, 0755)
+		err := broker.WriteFile(ctx, brokerCtx, path, []byte("safe content"))
+		assert.NoError(t, err, "should allow write to %s", path)
 	}
 }

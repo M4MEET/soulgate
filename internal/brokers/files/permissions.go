@@ -73,6 +73,45 @@ func isWithinWorkspace(workspaceRoot, targetPath string) bool {
 	return true
 }
 
+// protectedCoreDirs are directories the AI must not write to or delete from.
+// These contain the SoulGate core runtime — modifications could crash the system.
+// The AI can still READ these files (for introspection/bug reports).
+var protectedCoreDirs = []string{
+	"internal",
+	"cmd",
+}
+
+// protectedCoreFiles are specific files the AI must not write to or delete.
+var protectedCoreFiles = []string{
+	"go.mod",
+	"go.sum",
+	"Makefile",
+	"main.go",
+}
+
+// isCoreProtected checks if a relative path falls within the protected core.
+// Returns true if the path should be blocked from write/delete operations.
+func isCoreProtected(relPath string) bool {
+	// Normalize separators
+	normalized := filepath.ToSlash(relPath)
+
+	// Check protected directories
+	for _, dir := range protectedCoreDirs {
+		if normalized == dir || strings.HasPrefix(normalized, dir+"/") {
+			return true
+		}
+	}
+
+	// Check protected files (exact match on the base or relative path)
+	for _, file := range protectedCoreFiles {
+		if normalized == file {
+			return true
+		}
+	}
+
+	return false
+}
+
 // getRelativePath returns a path relative to workspace root
 func getRelativePath(workspaceRoot, absPath string) (string, error) {
 	// Get relative path for display/policy evaluation
