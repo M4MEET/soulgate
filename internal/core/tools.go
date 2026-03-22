@@ -103,12 +103,11 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 			Message:   fmt.Sprintf("iteration %d", tracker.iterations),
 		})
 
-		// Get active tools (refreshed each iteration so search_available_tools
-		// activations take effect immediately).
-		// Optimization: skip tools on first iteration if the message looks like
-		// simple chat (short, no action words). Saves ~400 tokens per casual message.
+		// Get active tools. Only skip tools for pure greetings (hi, hello, hey)
+		// to save tokens. Everything else gets full tool access — the AI should
+		// always be able to act, not just talk.
 		var tools []model.ToolSchema
-		if tracker.iterations == 1 && isCasualChat(cleanedPrompt) {
+		if tracker.iterations == 1 && isGreeting(cleanedPrompt) {
 			tools = nil
 		} else {
 			tools = o.getToolSchemas()
@@ -246,33 +245,25 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 	}
 }
 
-// isCasualChat returns true if the message looks like simple conversation
-// that doesn't need tools (greetings, questions, chitchat). This lets us
-// skip sending tool schemas entirely, saving ~400 tokens.
-func isCasualChat(msg string) bool {
-	msg = strings.TrimSpace(msg)
-
-	// Short messages are almost always casual
-	if len(msg) < 60 {
-		lower := strings.ToLower(msg)
-
-		// Quick check: contains action-oriented words → not casual
-		actionWords := []string{
-			"create", "build", "make", "write", "read", "delete", "run",
-			"execute", "install", "deploy", "fix", "search", "find",
-			"list", "show me", "open", "edit", "update", "fetch",
-			"download", "upload", "send", "start", "stop", "kill",
-			"file", "code", "script", "command", "project",
-			"play", "pause", "check", "show", "get", "set", "turn",
-			"connect", "switch", "launch", "restart", "status",
-			"git", "docker", "npm", "pip", "brew", "curl", "wget",
+// isGreeting returns true only for pure greetings — the only messages
+// where skipping tools is safe. Everything else gets full tool access
+// because an agentic AI should always be able to act, not just talk.
+func isGreeting(msg string) bool {
+	lower := strings.TrimSpace(strings.ToLower(msg))
+	// Only exact short greetings — nothing else
+	greetings := []string{
+		"hi", "hey", "hello", "yo", "sup", "howdy",
+		"good morning", "good afternoon", "good evening",
+		"hi there", "hey there", "hello there",
+		"what's up", "whats up",
+		"thanks", "thank you", "thx", "ty",
+		"ok", "okay", "cool", "nice", "great",
+		"bye", "goodbye", "see you", "later",
+	}
+	for _, g := range greetings {
+		if lower == g {
+			return true
 		}
-		for _, w := range actionWords {
-			if strings.Contains(lower, w) {
-				return false
-			}
-		}
-		return true
 	}
 	return false
 }
