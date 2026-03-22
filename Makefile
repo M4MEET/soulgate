@@ -22,9 +22,9 @@ test: test-unit test-integration
 # Run all tests (alias for compatibility)
 test-all: test
 
-# Run unit tests only
+# Run unit tests only (exclude stray go/ module cache dir)
 test-unit:
-	go test -v -race ./...
+	go test -v -race ./cmd/... ./internal/... ./plugins/...
 
 # Run integration tests
 test-integration:
@@ -93,7 +93,7 @@ test-cli:
 
 # Run tests with overall coverage report
 test-coverage:
-	go test -v -race -coverprofile=coverage.txt ./...
+	go test -v -race -coverprofile=coverage.txt ./cmd/... ./internal/... ./plugins/...
 	go tool cover -html=coverage.txt -o coverage.html
 	@echo "Coverage report: coverage.html"
 
@@ -111,7 +111,7 @@ test-coverage-all: test-audit test-policy test-config test-broker test-plugin te
 
 # Run all benchmarks
 bench:
-	go test -v -bench=. -benchmem ./...
+	go test -v -bench=. -benchmem ./cmd/... ./internal/... ./plugins/...
 
 # Benchmark Audit Agent
 bench-audit:
@@ -144,8 +144,8 @@ demo: build
 
 # Lint code
 lint:
-	go vet ./...
-	go fmt ./...
+	go vet ./cmd/... ./internal/... ./plugins/...
+	go fmt ./cmd/... ./internal/... ./plugins/...
 
 # Build example plugin
 build-plugin:
