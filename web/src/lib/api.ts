@@ -156,6 +156,19 @@ export interface ConfigData {
   policies?: { name: string; action: string; resource: string; decision: string; priority: number }[];
 }
 
+// ── Notification types ────────────────────────────────────────────────────────
+
+export interface InboxNotification {
+  id: string;
+  kind: string;
+  title: string;
+  detail?: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+  read: boolean;
+  pinned?: boolean;
+}
+
 // ── Safe fetch helper ─────────────────────────────────────────────────────────
 
 async function safeFetch<T>(url: string, fallback: T): Promise<T> {
@@ -371,6 +384,38 @@ export interface ModelInfo {
   provider?: string;
   context_length?: number;
 }
+
+// ── Persistent Notifications ──────────────────────────────────────────────────
+
+export async function fetchNotifications(): Promise<{ notifications: InboxNotification[]; unread: number }> {
+  return safeFetch(`${BASE}/api/notifications`, { notifications: [], unread: 0 });
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await fetch(`${BASE}/api/notifications/${encodeURIComponent(id)}`, { method: 'POST' });
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  await fetch(`${BASE}/api/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await fetch(`${BASE}/api/notifications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'mark_all_read' }),
+  });
+}
+
+export async function clearReadNotifications(): Promise<void> {
+  await fetch(`${BASE}/api/notifications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'clear_read' }),
+  });
+}
+
+// ── Provider & Model catalog endpoints ────────────────────────────────────────
 
 export async function fetchProviders(): Promise<string[]> {
   const data = await safeFetch<{ providers?: string[] }>(`${BASE}/api/providers`, {});

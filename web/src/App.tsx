@@ -65,9 +65,12 @@ export default function App() {
     toast.success(theme === 'dark' ? 'Light mode' : 'Dark mode');
   }, [theme]);
 
-  // Notification center
-  const { notifications, unreadCount, markAllRead, dismiss: dismissNotification } =
-    useNotifications(health, sessions, connected);
+  // Notification center (persistent, fetched from backend)
+  const {
+    notifications, unreadCount, markAllRead,
+    dismiss: dismissNotification, markRead: markNotificationRead,
+    clearRead: clearReadNotifications,
+  } = useNotifications();
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -151,6 +154,8 @@ export default function App() {
         unreadCount={unreadCount}
         onMarkAllRead={markAllRead}
         onDismissNotification={dismissNotification}
+        onMarkReadNotification={markNotificationRead}
+        onClearReadNotifications={clearReadNotifications}
       />
 
       {/* Main content */}

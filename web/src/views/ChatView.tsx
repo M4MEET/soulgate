@@ -926,15 +926,15 @@ function WelcomeScreen({ onSend }: { onSend: (t: string) => void }) {
         <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-500/20">
           <Sparkles size={40} className="text-white" />
         </div>
-        <h1 className="text-3xl font-bold text-zinc-100">SoulGate</h1>
-        <p className="text-zinc-500 mt-1">Your AI, everywhere.</p>
+        <h1 className="text-3xl font-bold text-zinc-100">⚡ SoulGate</h1>
+        <p className="text-zinc-500 mt-1">🌍 Your AI, everywhere.</p>
       </div>
       <div className="grid grid-cols-2 gap-3 max-w-md w-full">
         {[
-          { icon: Brain,         label: 'What can you do?',           prompt: 'What can you do?' },
-          { icon: Terminal,      label: 'List files',                  prompt: 'List files in the current directory' },
-          { icon: Globe,         label: 'Search the web',              prompt: 'Search the web for latest tech news' },
-          { icon: MessageSquare, label: 'System status',               prompt: 'Show system status' },
+          { icon: Brain,         label: '🧠 What can you do?',           prompt: 'What can you do?' },
+          { icon: Terminal,      label: '📂 List files',                  prompt: 'List files in the current directory' },
+          { icon: Globe,         label: '🔍 Search the web',              prompt: 'Search the web for latest tech news' },
+          { icon: MessageSquare, label: '📊 System status',               prompt: 'Show system status' },
         ].map(({ icon: Icon, label, prompt }) => (
           <button
             key={label}

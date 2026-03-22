@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Activity, MessageSquare, Bot, Monitor, Radio, RefreshCw,
+  Activity, MessageSquare, Bot, Radio, RefreshCw,
   ChevronRight, Clock, Hash, User, ArrowRight, Zap, Send,
   Globe, Filter
 } from 'lucide-react';
@@ -277,23 +277,56 @@ export default function ActivityView() {
           </button>
         </div>
 
-        {/* Connected clients summary */}
-        {connectors && (
-          <div className="px-4 py-2.5 border-b border-zinc-700/30 flex gap-3">
-            <div className="flex items-center gap-1.5">
-              <Radio size={11} className={connectors.channels.length > 0 ? 'text-emerald-400 animate-pulse' : 'text-zinc-600'} />
-              <span className="text-[11px] text-zinc-400">{connectors.channels.length} channel{connectors.channels.length !== 1 ? 's' : ''}</span>
+        {/* Connected clients summary — count WS channels + HTTP spawned connectors */}
+        {connectors && (() => {
+          const wsChannels = connectors.channels.length;
+          // Deduplicate: if a spawned connector's type matches a WS channel, don't double count
+          const wsTypes = new Set(connectors.channels.map(c => c.channel || c.metadata?.channel));
+          const uniqueHTTP = (connectors.spawned || []).filter(s => s.status === 'running' && !wsTypes.has(s.type)).length;
+          const channelCount = wsChannels + uniqueHTTP;
+
+          return (
+            <div className="px-4 py-2.5 border-b border-zinc-700/30">
+              <div className="flex gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Radio size={11} className={channelCount > 0 ? 'text-emerald-400 animate-pulse' : 'text-zinc-600'} />
+                  <span className="text-[11px] text-zinc-400">{channelCount} channel{channelCount !== 1 ? 's' : ''} connected</span>
+                </div>
+                {connectors.agents.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <Bot size={11} className="text-indigo-400" />
+                    <span className="text-[11px] text-zinc-400">{connectors.agents.length} agent{connectors.agents.length !== 1 ? 's' : ''}</span>
+                  </div>
+                )}
+              </div>
+              {/* Show active connectors inline */}
+              {channelCount > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {connectors.channels.map(c => {
+                    const ch = c.channel || c.metadata?.channel || 'unknown';
+                    const style = getChannelStyle(ch);
+                    const name = c.metadata?.bot_username ? `@${c.metadata.bot_username}` : ch;
+                    return (
+                      <span key={c.client_id} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${style.bg} ${style.text} border ${style.border}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${style.dot} animate-pulse`} />
+                        {name}
+                      </span>
+                    );
+                  })}
+                  {(connectors.spawned || []).filter(s => s.status === 'running' && !wsTypes.has(s.type)).map(s => {
+                    const style = getChannelStyle(s.type);
+                    return (
+                      <span key={`spawned-${s.type}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${style.bg} ${style.text} border ${style.border}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${style.dot} animate-pulse`} />
+                        {s.type}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1.5">
-              <Bot size={11} className="text-indigo-400" />
-              <span className="text-[11px] text-zinc-400">{connectors.agents.length} agent{connectors.agents.length !== 1 ? 's' : ''}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Monitor size={11} className="text-violet-400" />
-              <span className="text-[11px] text-zinc-400">{connectors.uis.length} UI{connectors.uis.length !== 1 ? 's' : ''}</span>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Channel filter */}
         {channels.length > 0 && (

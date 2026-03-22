@@ -1,124 +1,166 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bell, CheckCheck, X, Wifi, WifiOff, Bot, AlertTriangle, Info, Zap } from 'lucide-react';
-import type { HealthData, SessionData } from '../lib/api';
-import { formatRelativeTime } from '../lib/utils';
+import { Bell, CheckCheck, X, Wifi, WifiOff, Bot, AlertTriangle, Info, Zap, Trash2, Activity } from 'lucide-react';
+import {
+  fetchNotifications, markNotificationRead, deleteNotification,
+  markAllNotificationsRead, clearReadNotifications,
+  type InboxNotification,
+} from '../lib/api';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-type NotifKind = 'success' | 'error' | 'warning' | 'info' | 'agent' | 'connection';
-
-export interface Notification {
-  id: string;
-  kind: NotifKind;
-  title: string;
-  detail?: string;
-  timestamp: Date;
-  read: boolean;
-}
+// Re-export the type for consumers
+export type Notification = InboxNotification;
 
 // ── Icon per kind ─────────────────────────────────────────────────────────────
 
-const KIND_META: Record<NotifKind, { icon: React.ElementType; classes: string }> = {
+const KIND_META: Record<string, { icon: React.ElementType; classes: string }> = {
   success:    { icon: Zap,           classes: 'text-emerald-400 bg-emerald-500/10' },
   error:      { icon: AlertTriangle, classes: 'text-red-400 bg-red-500/10' },
   warning:    { icon: AlertTriangle, classes: 'text-yellow-400 bg-yellow-500/10' },
   info:       { icon: Info,          classes: 'text-sky-400 bg-sky-500/10' },
   agent:      { icon: Bot,           classes: 'text-violet-400 bg-violet-500/10' },
   connection: { icon: Wifi,          classes: 'text-indigo-400 bg-indigo-500/10' },
+  activity:   { icon: Activity,      classes: 'text-sky-400 bg-sky-500/10' },
 };
+const defaultKind = { icon: Info, classes: 'text-zinc-400 bg-zinc-500/10' };
 
-// ── Hook: feed notifications from health polling ───────────────────────────────
-
-let _notifId = 0;
-const nid = () => `n_${++_notifId}`;
-
-export function useNotifications(health: HealthData | null, sessions: SessionData[], connected: boolean) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const prevConnected = useRef<boolean | null>(null);
-  const prevSessionCount = useRef<number>(0);
-  const prevStatus = useRef<string | null>(null);
-  const prevModel = useRef<string | null>(null);
-
-  const push = useCallback((n: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
-    setNotifications(prev => [
-      { ...n, id: nid(), timestamp: new Date(), read: false },
-      ...prev.slice(0, 49), // cap at 50
-    ]);
-  }, []);
-
-  // Connection changes
-  useEffect(() => {
-    if (prevConnected.current === null) {
-      prevConnected.current = connected;
-      return;
-    }
-    if (prevConnected.current !== connected) {
-      push(connected
-        ? { kind: 'connection', title: 'Gateway connected', detail: 'SoulGate is reachable' }
-        : { kind: 'error',      title: 'Gateway disconnected', detail: 'Attempting to reconnect…' }
-      );
-      prevConnected.current = connected;
-    }
-  }, [connected, push]);
-
-  // New sessions
-  useEffect(() => {
-    const count = sessions.length;
-    if (prevSessionCount.current > 0 && count > prevSessionCount.current) {
-      const diff = count - prevSessionCount.current;
-      push({ kind: 'info', title: `${diff} new session${diff > 1 ? 's' : ''}`, detail: `Total active sessions: ${count}` });
-    }
-    prevSessionCount.current = count;
-  }, [sessions, push]);
-
-  // Health status changes
-  useEffect(() => {
-    if (!health) return;
-    if (prevStatus.current !== null && prevStatus.current !== health.status) {
-      push(health.status === 'ok'
-        ? { kind: 'success', title: 'Gateway status: OK', detail: 'All checks passed' }
-        : { kind: 'warning', title: `Gateway status: ${health.status}`, detail: health.checks?.find(c => c.status !== 'ok')?.detail }
-      );
-    }
-    prevStatus.current = health.status;
-  }, [health, push]);
-
-  // Model switch
-  useEffect(() => {
-    if (!health) return;
-    const model = health.model;
-    if (prevModel.current !== null && prevModel.current !== model) {
-      push({ kind: 'agent', title: 'Model switched', detail: `Now using ${model}` });
-    }
-    prevModel.current = model ?? null;
-  }, [health, push]);
-
-  const markAllRead = useCallback(() => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  }, []);
-
-  const dismiss = useCallback((id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  }, []);
-
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  return { notifications, unreadCount, markAllRead, dismiss };
+function relativeTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
 }
 
-// ── Dropdown panel ────────────────────────────────────────────────────────────
+// ── Hook: fetch persistent notifications from backend ─────────────────────────
+
+export function useNotifications() {
+  const [notifications, setNotifications] = useState<InboxNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchNotifications();
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unread || 0);
+    } catch {
+      // Silently fail
+    }
+  }, []);
+
+  // Poll every 3 seconds
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 3000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  const markAllRead = useCallback(async () => {
+    await markAllNotificationsRead();
+    refresh();
+  }, [refresh]);
+
+  const dismiss = useCallback(async (id: string) => {
+    await deleteNotification(id);
+    refresh();
+  }, [refresh]);
+
+  const markRead = useCallback(async (id: string) => {
+    await markNotificationRead(id);
+    refresh();
+  }, [refresh]);
+
+  const clearRead = useCallback(async () => {
+    await clearReadNotifications();
+    refresh();
+  }, [refresh]);
+
+  return { notifications, unreadCount, markAllRead, dismiss, markRead, clearRead, refresh };
+}
+
+// ── Detail view for a single notification ─────────────────────────────────────
+
+function NotificationDetail({ notification, onBack, onDismiss }: {
+  notification: InboxNotification;
+  onBack: () => void;
+  onDismiss: (id: string) => void;
+}) {
+  const meta = KIND_META[notification.kind] || defaultKind;
+  const Icon = meta.icon;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800">
+        <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 text-xs">Back</button>
+        <div className="flex-1" />
+        <button
+          onClick={() => onDismiss(notification.id)}
+          className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
+        >
+          Delete
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex items-start gap-3 mb-4">
+          <div className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${meta.classes}`}>
+            <Icon size={16} />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-zinc-200">{notification.title}</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">{relativeTime(notification.timestamp)}</p>
+          </div>
+        </div>
+        {notification.detail && (
+          <div className="bg-zinc-800/40 rounded-lg p-3 border border-zinc-700/30">
+            <p className="text-sm text-zinc-300 whitespace-pre-wrap">{notification.detail}</p>
+          </div>
+        )}
+        {notification.metadata && Object.keys(notification.metadata).length > 0 && (
+          <div className="mt-3 space-y-1">
+            {Object.entries(notification.metadata).map(([k, v]) => (
+              <div key={k} className="flex items-center gap-2 text-xs">
+                <span className="text-zinc-600 w-24">{k}</span>
+                <span className="text-zinc-400 font-mono">{String(v)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Notification Panel ────────────────────────────────────────────────────────
 
 interface PanelProps {
-  notifications: Notification[];
+  notifications: InboxNotification[];
   unreadCount: number;
   onMarkAllRead: () => void;
   onDismiss: (id: string) => void;
+  onMarkRead: (id: string) => void;
+  onClearRead: () => void;
   connected: boolean;
 }
 
-function NotificationPanel({ notifications, unreadCount, onMarkAllRead, onDismiss, connected }: PanelProps) {
+function NotificationPanel({ notifications, unreadCount, onMarkAllRead, onDismiss, onMarkRead, onClearRead, connected }: PanelProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const selected = selectedId ? notifications.find(n => n.id === selectedId) : null;
+
+  if (selected) {
+    return (
+      <div className="w-96 h-[28rem] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+        <NotificationDetail
+          notification={selected}
+          onBack={() => setSelectedId(null)}
+          onDismiss={(id) => { onDismiss(id); setSelectedId(null); }}
+        />
+      </div>
+    );
+  }
+
+  const readCount = notifications.filter(n => n.read).length;
+
   return (
-    <div className="w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+    <div className="w-96 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
@@ -129,42 +171,54 @@ function NotificationPanel({ notifications, unreadCount, onMarkAllRead, onDismis
           <span className="text-sm font-semibold text-zinc-200">Notifications</span>
           {unreadCount > 0 && (
             <span className="text-xs bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full font-medium">
-              {unreadCount}
+              {unreadCount} new
             </span>
           )}
+          <span className="text-[10px] text-zinc-600">{notifications.length} total</span>
         </div>
-        {unreadCount > 0 && (
-          <button
-            onClick={onMarkAllRead}
-            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-          >
-            <CheckCheck size={12} />
-            Mark all read
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {unreadCount > 0 && (
+            <button
+              onClick={onMarkAllRead}
+              className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors px-1.5 py-0.5 rounded hover:bg-zinc-800"
+              title="Mark all read"
+            >
+              <CheckCheck size={11} />
+            </button>
+          )}
+          {readCount > 0 && (
+            <button
+              onClick={onClearRead}
+              className="flex items-center gap-1 text-[10px] text-zinc-600 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-zinc-800"
+              title="Clear read notifications"
+            >
+              <Trash2 size={11} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* List */}
-      <div className="max-h-80 overflow-y-auto divide-y divide-zinc-800/60">
+      <div className="max-h-96 overflow-y-auto divide-y divide-zinc-800/60" style={{ scrollbarWidth: 'thin' }}>
         {notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
             <Bell size={20} className="text-zinc-700" />
             <p className="text-xs text-zinc-600">No notifications yet</p>
+            <p className="text-[10px] text-zinc-700">Events will appear here automatically</p>
           </div>
         ) : (
           notifications.map(n => {
-            const { icon: Icon, classes } = KIND_META[n.kind];
+            const meta = KIND_META[n.kind] || defaultKind;
+            const Icon = meta.icon;
             return (
               <div
                 key={n.id}
-                className={`flex items-start gap-3 px-4 py-3 transition-colors hover:bg-zinc-800/40 ${n.read ? 'opacity-60' : ''}`}
+                onClick={() => { onMarkRead(n.id); setSelectedId(n.id); }}
+                className={`flex items-start gap-3 px-4 py-3 transition-colors hover:bg-zinc-800/40 cursor-pointer ${n.read ? 'opacity-50' : ''}`}
               >
-                {/* Kind icon */}
-                <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${classes}`}>
+                <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${meta.classes}`}>
                   <Icon size={13} />
                 </div>
-
-                {/* Text */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-medium text-zinc-200 truncate">{n.title}</p>
@@ -175,12 +229,10 @@ function NotificationPanel({ notifications, unreadCount, onMarkAllRead, onDismis
                   {n.detail && (
                     <p className="text-xs text-zinc-500 mt-0.5 truncate">{n.detail}</p>
                   )}
-                  <p className="text-xs text-zinc-700 mt-1">{formatRelativeTime(n.timestamp)}</p>
+                  <p className="text-[10px] text-zinc-700 mt-1">{relativeTime(n.timestamp)}</p>
                 </div>
-
-                {/* Dismiss */}
                 <button
-                  onClick={() => onDismiss(n.id)}
+                  onClick={e => { e.stopPropagation(); onDismiss(n.id); }}
                   className="flex-shrink-0 p-0.5 rounded hover:bg-zinc-700 text-zinc-700 hover:text-zinc-400 transition-colors"
                 >
                   <X size={11} />
@@ -197,10 +249,12 @@ function NotificationPanel({ notifications, unreadCount, onMarkAllRead, onDismis
 // ── Bell button (exported for Sidebar) ────────────────────────────────────────
 
 interface BellProps {
-  notifications: Notification[];
+  notifications: InboxNotification[];
   unreadCount: number;
   onMarkAllRead: () => void;
   onDismiss: (id: string) => void;
+  onMarkRead: (id: string) => void;
+  onClearRead: () => void;
   connected: boolean;
   collapsed?: boolean;
 }
@@ -210,6 +264,8 @@ export default function NotificationCenter({
   unreadCount,
   onMarkAllRead,
   onDismiss,
+  onMarkRead,
+  onClearRead,
   connected,
   collapsed = false,
 }: BellProps) {
@@ -218,7 +274,6 @@ export default function NotificationCenter({
   const btnRef = useRef<HTMLButtonElement>(null);
   const [panelPos, setPanelPos] = useState({ left: 0, bottom: 0 });
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -228,14 +283,12 @@ export default function NotificationCenter({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  // Position the panel relative to the button using fixed positioning
-  // so it's not clipped by the sidebar's overflow-hidden
   const handleOpen = () => {
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
       setPanelPos({
         left: rect.right + 8,
-        bottom: window.innerHeight - rect.bottom,
+        bottom: Math.max(8, window.innerHeight - rect.bottom),
       });
     }
     setOpen(o => !o);
@@ -263,15 +316,14 @@ export default function NotificationCenter({
       </button>
 
       {open && (
-        <div
-          className="fixed z-50"
-          style={{ left: panelPos.left, bottom: panelPos.bottom }}
-        >
+        <div className="fixed z-50" style={{ left: panelPos.left, bottom: panelPos.bottom }}>
           <NotificationPanel
             notifications={notifications}
             unreadCount={unreadCount}
             onMarkAllRead={() => { onMarkAllRead(); }}
             onDismiss={onDismiss}
+            onMarkRead={onMarkRead}
+            onClearRead={onClearRead}
             connected={connected}
           />
         </div>

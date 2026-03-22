@@ -66,6 +66,8 @@ interface Props {
   unreadCount: number;
   onMarkAllRead: () => void;
   onDismissNotification: (id: string) => void;
+  onMarkReadNotification: (id: string) => void;
+  onClearReadNotifications: () => void;
 }
 
 export default function Sidebar({
@@ -80,6 +82,8 @@ export default function Sidebar({
   unreadCount,
   onMarkAllRead,
   onDismissNotification,
+  onMarkReadNotification,
+  onClearReadNotifications,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -216,6 +220,8 @@ export default function Sidebar({
           unreadCount={unreadCount}
           onMarkAllRead={onMarkAllRead}
           onDismiss={onDismissNotification}
+          onMarkRead={onMarkReadNotification}
+          onClearRead={onClearReadNotifications}
           connected={connected}
           collapsed={collapsed}
         />

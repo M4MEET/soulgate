@@ -103,7 +103,7 @@ export default function ChatMessage({ message }: { message: Message }) {
       <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0 mt-0.5 ${
         isUser ? 'bg-blue-600 text-white' : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
       }`}>
-        {isUser ? '👤' : '✦'}
+        {isUser ? '👤' : '🤖'}
       </div>
 
       {/* Content */}
@@ -111,7 +111,7 @@ export default function ChatMessage({ message }: { message: Message }) {
         {/* Header */}
         <div className={`flex items-center gap-2 mb-1 ${isUser ? 'flex-row-reverse' : ''}`}>
           <span className={`text-xs font-semibold ${isUser ? 'text-blue-400' : 'text-emerald-400'}`}>
-            {isUser ? 'You' : 'SoulGate'}
+            {isUser ? '💬 You' : '🤖 SoulGate'}
           </span>
           <span className="text-xs text-zinc-600">
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -140,7 +140,7 @@ export default function ChatMessage({ message }: { message: Message }) {
                 <span className="w-2.5 h-2.5 rounded-full bg-zinc-600 group-hover:bg-zinc-500 transition-colors" />
               )}
               <span className={`text-xs font-medium transition-colors ${message.streaming ? 'text-indigo-300' : 'text-zinc-500 group-hover:text-zinc-300'}`}>
-                {message.streaming ? 'Thinking...' : `Thought process · ${message.thinkingLog.length} steps`}
+                {message.streaming ? '🧠 Thinking...' : `🧠 Thought process · ${message.thinkingLog.length} steps`}
               </span>
               {message.streaming && (
                 <span className="ml-auto flex gap-0.5">
@@ -400,7 +400,7 @@ export default function ChatMessage({ message }: { message: Message }) {
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
-              <span className="text-xs text-zinc-500">Thinking...</span>
+              <span className="text-xs text-zinc-500">🧠 Thinking...</span>
             </div>
           )}
           {message.streaming && message.content && (
