@@ -19,13 +19,29 @@ type ToolRegistry struct {
 	activeTools map[string]struct{}           // tools currently exposed to model
 }
 
-// alwaysOnTools are sent on every API call. Keep this minimal to save tokens.
-// The model can discover all other tools via search_available_tools.
+// alwaysOnTools are sent on every API call. These are the tools users expect
+// to work immediately without the model having to search for them first.
+// Less common tools (pdf, voice, canvas, sandbox, etc.) are discovered via
+// search_available_tools to save tokens.
 var alwaysOnTools = map[string]bool{
 	"search_available_tools": true,
-	"files_read":             true,
-	"files_write":            true,
-	"exec_command":           true,
+	// File operations
+	"files_read":  true,
+	"files_write": true,
+	"files_list":  true,
+	// Shell execution — covers app launching, system commands, etc.
+	"exec_command":   true,
+	"process_start":  true,
+	// Web access
+	"web_search": true,
+	"web_fetch":  true,
+	// Memory
+	"memory_write":  true,
+	"memory_get":    true,
+	"memory_search": true,
+	// Agents
+	"agent_create": true,
+	"agent_list":   true,
 }
 
 // NewToolRegistry creates a new empty registry.
