@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -180,6 +181,21 @@ type GatewayAPI struct {
 	// RunHeartbeatNow triggers an immediate heartbeat run outside the normal
 	// ticker schedule. Returns the raw AI response or an error.
 	RunHeartbeatNow func() (string, error)
+
+	// GetThreads returns all persisted chat threads.
+	GetThreads func() ([]map[string]interface{}, error)
+
+	// SaveThread persists a single chat thread (insert or update by id).
+	SaveThread func(thread map[string]interface{}) error
+
+	// DeleteThread removes a chat thread by its id.
+	DeleteThread func(id string) error
+
+	// SpawnConnector starts a connector process in the background.
+	// connectorType is e.g. "telegram", "discord", etc.
+	// config is a map of credentials (e.g. {"token": "bot123..."}).
+	// Returns a status message or error.
+	SpawnConnector func(connectorType string, config map[string]string) (string, error)
 }
 
 // Config holds Gateway configuration
@@ -417,6 +433,9 @@ func (g *Gateway) Start(ctx context.Context) error {
 	// REST API
 	mux.Handle("/api/status", apiHandler(g.handleAPIStatus))
 	mux.Handle("/api/sessions", apiHandler(g.handleAPISessions))
+	mux.Handle("/api/sessions/", apiHandler(g.handleAPISessionDetail))
+	mux.Handle("/api/connectors", apiHandler(g.handleAPIConnectors))
+	mux.Handle("/api/activity", apiHandler(g.handleAPIActivity))
 
 	// Rich web-UI endpoints — always registered; handlers degrade gracefully
 	// when the corresponding GatewayAPI callbacks are not wired up.
@@ -437,6 +456,8 @@ func (g *Gateway) Start(ctx context.Context) error {
 	mux.Handle("/api/approvals/", apiHandler(g.handleAPIApprovals))
 	mux.Handle("/api/heartbeat", apiHandler(g.handleAPIHeartbeat))
 	mux.Handle("/api/heartbeat/run", apiHandler(g.handleAPIHeartbeatRun))
+	mux.Handle("/api/threads", apiHandler(g.handleAPIThreads))
+	mux.Handle("/api/threads/", apiHandler(g.handleAPIThreads))
 
 	// Serve the HTTP chat API if a chat handler is configured
 	if g.config.OnChat != nil {
@@ -653,6 +674,244 @@ func (g *Gateway) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": snapshots}) //nolint:errcheck
+}
+
+// handleAPISessionDetail returns messages for a specific session.
+// GET /api/sessions/{id} → session messages
+func (g *Gateway) handleAPISessionDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract session ID from path: /api/sessions/{id}
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	sessionID = strings.TrimSuffix(sessionID, "/")
+	if sessionID == "" {
+		http.Error(w, `{"error":"session ID required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Read session entries from storage
+	if g.sessionStorage == nil {
+		http.Error(w, `{"error":"session storage not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	entries, err := g.sessionStorage.ReadSession(sessionID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	// Get session metadata from in-memory state
+	g.sessionMux.RLock()
+	sess := g.sessions[sessionID]
+	var meta map[string]interface{}
+	if sess != nil {
+		meta = map[string]interface{}{
+			"id":             sess.ID,
+			"conversation_id": sess.ConversationID,
+			"channel":        sess.Channel,
+			"state":          sess.GetState(),
+			"message_count":  sess.GetMessageCount(),
+			"assigned_agent": sess.GetAssignedAgent(),
+			"created_at":     sess.CreatedAt.UTC().Format(time.RFC3339),
+			"last_activity":  sess.UpdatedAt.UTC().Format(time.RFC3339),
+		}
+	}
+	g.sessionMux.RUnlock()
+
+	// Convert entries to JSON-friendly format
+	messages := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		messages = append(messages, map[string]interface{}{
+			"ts":   e.Timestamp,
+			"type": e.Type,
+			"data": e.Data,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"session_id": sessionID,
+		"meta":       meta,
+		"messages":   messages,
+	}) //nolint:errcheck
+}
+
+// handleAPIConnectors returns the status of all connected clients grouped by channel.
+// GET  /api/connectors → connector status
+// POST /api/connectors → spawn a connector process
+func (g *Gateway) handleAPIConnectors(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		g.handleAPIConnectorsGet(w, r)
+	case http.MethodPost:
+		g.handleAPIConnectorsPost(w, r)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (g *Gateway) handleAPIConnectorsGet(w http.ResponseWriter, _ *http.Request) {
+	// Gather connected channel clients
+	g.roleMux.RLock()
+	channelClients := make([]map[string]interface{}, 0, len(g.channels))
+	for _, c := range g.channels {
+		channelClients = append(channelClients, map[string]interface{}{
+			"client_id": c.ID(),
+			"channel":   c.metadata["channel"],
+			"metadata":  c.metadata,
+		})
+	}
+
+	agentClients := make([]map[string]interface{}, 0, len(g.agents))
+	for _, c := range g.agents {
+		agentClients = append(agentClients, map[string]interface{}{
+			"client_id": c.ID(),
+			"metadata":  c.metadata,
+		})
+	}
+
+	uiClients := make([]map[string]interface{}, 0, len(g.uis))
+	for _, c := range g.uis {
+		uiClients = append(uiClients, map[string]interface{}{
+			"client_id": c.ID(),
+		})
+	}
+	g.roleMux.RUnlock()
+
+	// Count sessions per channel
+	g.sessionMux.RLock()
+	channelSessions := make(map[string]int)
+	for _, s := range g.sessions {
+		channelSessions[s.Channel]++
+	}
+	g.sessionMux.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"channels":            channelClients,
+		"agents":              agentClients,
+		"uis":                 uiClients,
+		"sessions_by_channel": channelSessions,
+	}) //nolint:errcheck
+}
+
+func (g *Gateway) handleAPIConnectorsPost(w http.ResponseWriter, r *http.Request) {
+	if g.config.API == nil || g.config.API.SpawnConnector == nil {
+		http.Error(w, `{"error":"connector spawning not available"}`, http.StatusNotImplemented)
+		return
+	}
+
+	var body struct {
+		Type   string            `json:"type"`
+		Config map[string]string `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Type == "" {
+		http.Error(w, `{"error":"type is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	msg, err := g.config.API.SpawnConnector(body.Type, body.Config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "spawned",
+		"message": msg,
+	}) //nolint:errcheck
+}
+
+// handleAPIActivity returns a unified activity feed across all sessions.
+// GET /api/activity?limit=50&channel=telegram → recent activity
+func (g *Gateway) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+		if limit > 200 {
+			limit = 200
+		}
+	}
+	channelFilter := r.URL.Query().Get("channel")
+
+	if g.sessionStorage == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"activity": []interface{}{}}) //nolint:errcheck
+		return
+	}
+
+	// List all sessions and gather recent entries
+	sessionIDs, err := g.sessionStorage.ListSessions()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	type activityEntry struct {
+		SessionID string      `json:"session_id"`
+		Channel   string      `json:"channel"`
+		Timestamp int64       `json:"ts"`
+		Type      string      `json:"type"`
+		Data      interface{} `json:"data"`
+	}
+
+	var allEntries []activityEntry
+	for _, sid := range sessionIDs {
+		// Apply channel filter
+		if channelFilter != "" && !strings.HasPrefix(sid, channelFilter+":") && !strings.HasPrefix(sid, channelFilter) {
+			continue
+		}
+
+		// Extract channel from session ID (format: channel:conversationID)
+		channel := sid
+		if idx := strings.Index(sid, ":"); idx > 0 {
+			channel = sid[:idx]
+		}
+
+		entries, err := g.sessionStorage.ReadSession(sid)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			allEntries = append(allEntries, activityEntry{
+				SessionID: sid,
+				Channel:   channel,
+				Timestamp: e.Timestamp,
+				Type:      e.Type,
+				Data:      e.Data,
+			})
+		}
+	}
+
+	// Sort by timestamp descending (most recent first)
+	sort.Slice(allEntries, func(i, j int) bool {
+		return allEntries[i].Timestamp > allEntries[j].Timestamp
+	})
+
+	// Limit results
+	if len(allEntries) > limit {
+		allEntries = allEntries[:limit]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"activity": allEntries}) //nolint:errcheck
 }
 
 // Register registers a new client
@@ -1812,6 +2071,83 @@ func (g *Gateway) handleAPIHeartbeatRun(w http.ResponseWriter, r *http.Request) 
 	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
 		"response": response,
 	})
+}
+
+// handleAPIThreads handles CRUD for web UI chat threads.
+//
+// GET    /api/threads        — return all stored threads
+// POST   /api/threads        — save/update one thread (full JSON object)
+// DELETE /api/threads/{id}   — delete a thread by id
+func (g *Gateway) handleAPIThreads(w http.ResponseWriter, r *http.Request) {
+	api := g.config.API
+
+	switch r.Method {
+	case http.MethodGet:
+		if api == nil || api.GetThreads == nil {
+			writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+				"threads":   []interface{}{},
+				"available": false,
+			})
+			return
+		}
+		threads, err := api.GetThreads()
+		if err != nil {
+			writeGatewayJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if threads == nil {
+			threads = []map[string]interface{}{}
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{
+			"threads": threads,
+			"count":   len(threads),
+		})
+
+	case http.MethodPost:
+		if api == nil || api.SaveThread == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "thread storage not available",
+			})
+			return
+		}
+		var thread map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&thread); err != nil {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if _, ok := thread["id"]; !ok {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "thread.id is required"})
+			return
+		}
+		if err := api.SaveThread(thread); err != nil {
+			writeGatewayJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+
+	case http.MethodDelete:
+		if api == nil || api.DeleteThread == nil {
+			writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "thread storage not available",
+			})
+			return
+		}
+		// Extract id from path: /api/threads/{id}
+		id := strings.TrimPrefix(r.URL.Path, "/api/threads/")
+		id = strings.TrimSuffix(id, "/")
+		if id == "" {
+			writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": "thread id required"})
+			return
+		}
+		if err := api.DeleteThread(id); err != nil {
+			writeGatewayJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
 }
 
 // GetClientCount returns the number of connected clients by role

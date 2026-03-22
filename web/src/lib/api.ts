@@ -184,6 +184,52 @@ export async function fetchSessions(): Promise<SessionData[]> {
   return data.sessions || [];
 }
 
+// ── Session detail & activity ────────────────────────────────────────────────
+
+export interface SessionMessage {
+  ts: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export interface SessionDetail {
+  session_id: string;
+  meta: {
+    id: string;
+    conversation_id: string;
+    channel: string;
+    state: string;
+    message_count: number;
+    assigned_agent: string;
+    created_at: string;
+    last_activity: string;
+  } | null;
+  messages: SessionMessage[];
+}
+
+export interface ActivityEntry {
+  session_id: string;
+  channel: string;
+  ts: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export async function fetchSessionDetail(sessionId: string): Promise<SessionDetail> {
+  return safeFetch<SessionDetail>(`${BASE}/api/sessions/${encodeURIComponent(sessionId)}`, {
+    session_id: sessionId,
+    meta: null,
+    messages: [],
+  });
+}
+
+export async function fetchActivity(limit = 50, channel?: string): Promise<ActivityEntry[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (channel) params.set('channel', channel);
+  const data = await safeFetch<{ activity?: ActivityEntry[] }>(`${BASE}/api/activity?${params}`, {});
+  return data.activity || [];
+}
+
 export async function sendChat(message: string): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/api/chat`, {
     method: 'POST',
@@ -264,6 +310,42 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
     }
     // thinking events are ignored in string mode
   }
+}
+
+// ── Connector endpoints ───────────────────────────────────────────────────────
+
+export interface ConnectorClient {
+  client_id: string;
+  channel: string;
+  metadata: Record<string, string>;
+}
+
+export interface ConnectorsData {
+  channels: ConnectorClient[];
+  agents: { client_id: string; metadata: Record<string, string> }[];
+  uis: { client_id: string }[];
+  sessions_by_channel: Record<string, number>;
+}
+
+export async function fetchConnectors(): Promise<ConnectorsData> {
+  return safeFetch<ConnectorsData>(`${BASE}/api/connectors`, {
+    channels: [],
+    agents: [],
+    uis: [],
+    sessions_by_channel: {},
+  });
+}
+
+export async function spawnConnector(
+  type: string,
+  config: Record<string, string>,
+): Promise<{ status: string; message: string; error?: string }> {
+  const res = await fetch(`${BASE}/api/connectors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, config }),
+  });
+  return res.json();
 }
 
 // ── Optional endpoints (404-safe) ────────────────────────────────────────────
@@ -976,4 +1058,54 @@ export async function exportPolicies(): Promise<string> {
   return `version: "1"\npolicies:\n${policies.map(p =>
     `  - name: "${p.name}"\n    action: "${p.action}"\n    resource: "${p.resource}"\n    decision: ${p.decision}\n    priority: ${p.priority}`
   ).join('\n')}`;
+}
+
+// ── Thread persistence API ─────────────────────────────────────────────────
+// These endpoints back the web UI's chat thread sidebar so threads survive
+// browser clears, device changes, and server restarts.
+
+// ChatThread mirrors the shape used by ChatView so the API layer stays type-safe.
+export interface ChatThread {
+  id: string;
+  title: string;
+  messages: unknown[];
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+  archived: boolean;
+  pinned: boolean;
+  tags: string[];
+  tokenCount: number;
+  costTotal: number;
+}
+
+export async function fetchThreads(): Promise<ChatThread[]> {
+  try {
+    const res = await fetch(`${BASE}/api/threads`);
+    if (!res.ok) return [];
+    const data = await res.json() as { threads?: ChatThread[] };
+    return data.threads ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveThread(thread: ChatThread): Promise<void> {
+  try {
+    await fetch(`${BASE}/api/threads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(thread),
+    });
+  } catch {
+    // Best-effort — localStorage remains the authoritative offline cache.
+  }
+}
+
+export async function deleteThread(id: string): Promise<void> {
+  try {
+    await fetch(`${BASE}/api/threads/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch {
+    // Best-effort.
+  }
 }

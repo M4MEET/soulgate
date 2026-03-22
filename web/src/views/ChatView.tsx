@@ -7,7 +7,7 @@ import {
 } from 'react';
 import ChatMessage, { type Message } from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
-import { streamChatSSE } from '../lib/api';
+import { streamChatSSE, fetchThreads, saveThread, deleteThread as apiDeleteThread } from '../lib/api';
 import {
   MessageSquare,
   Sparkles,
@@ -73,11 +73,26 @@ interface ChatThread {
 
 const STORAGE_KEY = 'soulgate-threads';
 
+// Per-thread debounce timers for server sync.  Keyed by thread id.
+const _serverSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function saveThreads(threads: ChatThread[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(threads));
   } catch {
     // Storage quota exceeded or unavailable — fail silently
+  }
+  // Debounced best-effort server sync per thread.
+  // Uses a 1 s delay so rapid successive updates (streaming messages) are
+  // coalesced into a single network request per thread.
+  for (const thread of threads) {
+    const existing = _serverSyncTimers.get(thread.id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      _serverSyncTimers.delete(thread.id);
+      saveThread(thread as unknown as import('../lib/api').ChatThread).catch(() => {});
+    }, 1000);
+    _serverSyncTimers.set(thread.id, timer);
   }
 }
 
@@ -91,6 +106,20 @@ function loadThreads(): ChatThread[] {
   } catch {
     return [];
   }
+}
+
+// mergeThreads combines server and local threads: server wins on conflict
+// (same id, different updatedAt) since server is authoritative across devices.
+function mergeThreads(local: ChatThread[], server: ChatThread[]): ChatThread[] {
+  const byId = new Map<string, ChatThread>();
+  for (const t of local) byId.set(t.id, t);
+  for (const t of server) {
+    const existing = byId.get(t.id);
+    if (!existing || t.updatedAt >= existing.updatedAt) {
+      byId.set(t.id, t);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function hydrateMessages(messages: Message[]): Message[] {
@@ -892,10 +921,33 @@ export default function ChatView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Persist threads whenever they change
+  // Persist threads whenever they change (localStorage + server).
   useEffect(() => {
     saveThreads(threads);
   }, [threads]);
+
+  // On mount: fetch server threads and merge with localStorage copy.
+  // Server wins on conflicts so threads survive browser clears and device changes.
+  useEffect(() => {
+    fetchThreads().then(serverThreads => {
+      if (serverThreads.length === 0) return;
+      setThreads(prev => {
+        const merged = mergeThreads(prev, serverThreads as unknown as ChatThread[]);
+        // Persist the merged set back to localStorage.
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        } catch { /* ignore */ }
+        return merged;
+      });
+      setActiveId(prev => {
+        if (prev) return prev;
+        const first = serverThreads
+          .filter(t => !(t as unknown as ChatThread).archived)
+          .sort((a, b) => ((b as unknown as ChatThread).updatedAt > (a as unknown as ChatThread).updatedAt ? 1 : -1))[0];
+        return (first as unknown as ChatThread)?.id ?? null;
+      });
+    }).catch(() => { /* server unavailable — localStorage remains source of truth */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeThread = threads.find(t => t.id === activeId) ?? null;
 
@@ -991,12 +1043,15 @@ export default function ChatView() {
 
   const confirmDelete = useCallback(() => {
     if (!confirmDeleteId) return;
-    setThreads(prev => prev.filter(t => t.id !== confirmDeleteId));
-    if (activeId === confirmDeleteId) {
-      const next = threads.find(t => t.id !== confirmDeleteId && !t.archived);
+    const idToDelete = confirmDeleteId;
+    setThreads(prev => prev.filter(t => t.id !== idToDelete));
+    if (activeId === idToDelete) {
+      const next = threads.find(t => t.id !== idToDelete && !t.archived);
       setActiveId(next?.id ?? null);
     }
     setConfirmDeleteId(null);
+    // Remove from server (best-effort, non-blocking).
+    apiDeleteThread(idToDelete).catch(() => {});
     toast.success('Thread deleted');
   }, [confirmDeleteId, activeId, threads]);
 

@@ -4,13 +4,14 @@ import {
   MessageSquare, LayoutDashboard, Settings, Bot, Wrench,
   Brain, BookOpen, Shield, Plug, ChevronLeft, ChevronRight,
   Hexagon, Webhook, DollarSign, Clock, Palette, Sun, Moon,
-  FolderOpen, Terminal, Users, Building2,
+  FolderOpen, Terminal, Users, Building2, Activity,
 } from 'lucide-react';
 import NotificationCenter, { type Notification } from './NotificationCenter';
 
 export type ViewId =
   | 'chat'
   | 'dashboard'
+  | 'activity'
   | 'agents'
   | 'tools'
   | 'memory'
@@ -31,6 +32,7 @@ export type ViewId =
 const NAV_ITEMS: { id: ViewId; icon: React.ElementType; label: string }[] = [
   { id: 'chat',       icon: MessageSquare,   label: 'Chat' },
   { id: 'dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
+  { id: 'activity',   icon: Activity,        label: 'Activity' },
   { id: 'agents',     icon: Bot,             label: 'Agents' },
   { id: 'tools',      icon: Wrench,          label: 'Tools' },
   { id: 'memory',     icon: Brain,           label: 'Memory' },

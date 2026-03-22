@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,123 @@ import (
 	"github.com/M4MEET/soulgate/internal/policy"
 	"github.com/spf13/cobra"
 )
+
+// maxStoredThreads is the cap on how many threads are retained in the JSON
+// file.  When exceeded the oldest threads (by updatedAt) are evicted first.
+const maxStoredThreads = 100
+
+// threadStore provides thread-safe CRUD for chat threads persisted to a single
+// JSON file at .soulgate/web_threads.json.
+type threadStore struct {
+	path string
+	mu   sync.RWMutex
+}
+
+func newThreadStore(path string) *threadStore {
+	return &threadStore{path: path}
+}
+
+// load reads all threads from disk. Returns an empty slice when the file does
+// not yet exist.
+func (s *threadStore) load() ([]map[string]interface{}, error) {
+	data, err := os.ReadFile(s.path)
+	if os.IsNotExist(err) {
+		return []map[string]interface{}{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read threads file: %w", err)
+	}
+	var threads []map[string]interface{}
+	if err := json.Unmarshal(data, &threads); err != nil {
+		// File is corrupt — start fresh rather than crashing.
+		return []map[string]interface{}{}, nil
+	}
+	return threads, nil
+}
+
+// persist writes the slice to disk atomically using a temp-file rename.
+// Caller must hold s.mu (write).
+func (s *threadStore) persist(threads []map[string]interface{}) error {
+	data, err := json.Marshal(threads)
+	if err != nil {
+		return fmt.Errorf("marshal threads: %w", err)
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write threads tmp: %w", err)
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		os.Remove(tmp) //nolint:errcheck
+		return fmt.Errorf("rename threads file: %w", err)
+	}
+	return nil
+}
+
+// Get returns all threads ordered as stored (callers may sort on their end).
+func (s *threadStore) Get() ([]map[string]interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.load()
+}
+
+// Save inserts or replaces a thread identified by its "id" field.
+// If the resulting collection exceeds maxStoredThreads the oldest entry
+// (smallest "updatedAt" ISO string) is dropped.
+func (s *threadStore) Save(thread map[string]interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	threads, err := s.load()
+	if err != nil {
+		return err
+	}
+
+	id, _ := thread["id"].(string)
+	found := false
+	for i, t := range threads {
+		if tid, _ := t["id"].(string); tid == id {
+			threads[i] = thread
+			found = true
+			break
+		}
+	}
+	if !found {
+		threads = append(threads, thread)
+	}
+
+	// Enforce cap: evict oldest by updatedAt when over limit.
+	for len(threads) > maxStoredThreads {
+		oldest := 0
+		for i := 1; i < len(threads); i++ {
+			a, _ := threads[oldest]["updatedAt"].(string)
+			b, _ := threads[i]["updatedAt"].(string)
+			if b < a {
+				oldest = i
+			}
+		}
+		threads = append(threads[:oldest], threads[oldest+1:]...)
+	}
+
+	return s.persist(threads)
+}
+
+// Delete removes the thread with the given id. Returns nil if not found.
+func (s *threadStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	threads, err := s.load()
+	if err != nil {
+		return err
+	}
+	filtered := threads[:0]
+	for _, t := range threads {
+		if tid, _ := t["id"].(string); tid != id {
+			filtered = append(filtered, t)
+		}
+	}
+	return s.persist(filtered)
+}
 
 var gatewayCmd = &cobra.Command{
 	Use:   "gateway",
@@ -105,6 +224,9 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 		log.Fatalf("Failed to initialize orchestrator: %v", err)
 	}
 	defer orch.Close()
+
+	// Thread store — persists web UI chat threads across restarts.
+	threads := newThreadStore(filepath.Join(workspace.ConfigDir, "web_threads.json"))
 
 	provider, modelName := orch.GetCurrentProvider()
 	fmt.Printf("   Provider: %s (%s)\n", provider, modelName)
@@ -274,7 +396,7 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 			}
 			return result.Response, nil
 		},
-		API: buildGatewayAPI(orch, workspace),
+		API: buildGatewayAPI(orch, workspace, threads),
 	}
 
 	gw, err := gateway.NewGateway(gwConfig)
@@ -298,7 +420,7 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 // buildGatewayAPI constructs the GatewayAPI callbacks that wire the gateway's
 // rich REST endpoints to the live orchestrator.  All callbacks are designed to
 // be safe for concurrent HTTP requests.
-func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.GatewayAPI {
+func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadStore) *gateway.GatewayAPI {
 	return &gateway.GatewayAPI{
 
 		// GetConfig returns a sanitised configuration snapshot.
@@ -954,5 +1076,94 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace) *gateway.Gat
 		RunHeartbeatNow: func() (string, error) {
 			return orch.GetHeartbeat().RunNow()
 		},
+
+		// GetThreads returns all persisted web UI chat threads.
+		GetThreads: func() ([]map[string]interface{}, error) {
+			return ts.Get()
+		},
+
+		// SaveThread inserts or updates a single chat thread.
+		SaveThread: func(thread map[string]interface{}) error {
+			return ts.Save(thread)
+		},
+
+		// DeleteThread removes a chat thread by id.
+		DeleteThread: func(id string) error {
+			return ts.Delete(id)
+		},
+
+		// SpawnConnector starts a connector process in the background.
+		// The connector runs as a child process of the gateway.
+		SpawnConnector: func(connectorType string, cfg map[string]string) (string, error) {
+			return spawnConnectorProcess(connectorType, cfg, gatewayPort)
+		},
 	}
+}
+
+// spawnConnectorProcess launches a connector as a background process.
+// It locates the soulgate binary and runs `soulgate connector <type>` with
+// the appropriate environment variables set.
+func spawnConnectorProcess(connectorType string, cfg map[string]string, port int) (string, error) {
+	// Find the soulgate binary
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("cannot find soulgate binary: %w", err)
+	}
+
+	gatewayWS := fmt.Sprintf("ws://localhost:%d/ws", port)
+
+	// Build command args
+	args := []string{"connector", connectorType, "--gateway", gatewayWS}
+
+	// Build environment: inherit current env + add connector-specific vars
+	env := os.Environ()
+
+	switch connectorType {
+	case "telegram":
+		token := cfg["token"]
+		if token == "" {
+			return "", fmt.Errorf("telegram connector requires 'token' (bot token)")
+		}
+		env = append(env, "TELEGRAM_BOT_TOKEN="+token)
+
+	case "discord":
+		token := cfg["token"]
+		if token == "" {
+			return "", fmt.Errorf("discord connector requires 'token' (bot token)")
+		}
+		env = append(env, "DISCORD_BOT_TOKEN="+token)
+
+	case "slack":
+		appToken := cfg["app_token"]
+		botToken := cfg["bot_token"]
+		if appToken == "" || botToken == "" {
+			return "", fmt.Errorf("slack connector requires 'app_token' and 'bot_token'")
+		}
+		env = append(env, "SLACK_APP_TOKEN="+appToken, "SLACK_BOT_TOKEN="+botToken)
+
+	default:
+		// For other connectors, pass all config as env vars with
+		// SOULGATE_CONNECTOR_ prefix
+		for k, v := range cfg {
+			envKey := "SOULGATE_CONNECTOR_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
+			env = append(env, envKey+"="+v)
+		}
+	}
+
+	// Start as a background process
+	cmd := exec.Command(exe, args...)
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start %s connector: %w", connectorType, err)
+	}
+
+	// Detach — don't wait for the process
+	go func() {
+		_ = cmd.Wait()
+	}()
+
+	return fmt.Sprintf("%s connector started (pid %d)", connectorType, cmd.Process.Pid), nil
 }

@@ -25,6 +25,7 @@ import TerminalView from './views/TerminalView';
 import UsersView from './views/UsersView';
 import TeamsView from './views/TeamsView';
 import PoliciesView from './views/PoliciesView';
+import ActivityView from './views/ActivityView';
 
 // ── Theme persistence ─────────────────────────────────────────────────────────
 
@@ -171,6 +172,7 @@ export default function App() {
           {view === 'sessions'   && <SessionsView sessions={sessions} />}
           {view === 'audit'      && <AuditView />}
           {view === 'connectors' && <ConnectorsView />}
+          {view === 'activity'   && <ActivityView />}
           {view === 'webhooks'   && <WebhookView />}
           {view === 'costs'      && <CostView />}
           {view === 'cron'       && <CronView />}
