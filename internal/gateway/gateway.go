@@ -2,12 +2,14 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/M4MEET/soulgate/internal/auth"
+	"github.com/M4MEET/soulgate/internal/gateway/webui"
 	"github.com/M4MEET/soulgate/internal/protocol"
 	"github.com/M4MEET/soulgate/internal/session"
 	"github.com/google/uuid"
@@ -50,15 +52,38 @@ type Gateway struct {
 	authEnabled    bool
 
 	// Configuration
-	config *Config
+	config    *Config
+	startedAt time.Time
+
+	// Webhook and notification subsystems (optional — nil until LoadWebhooks called)
+	webhookStore      *WebhookStore
+	notificationStore *NotificationStore
+
+	// Health monitoring
+	monitor *healthMonitor
 }
+
+// ChatHandler processes a chat message and returns a response.
+// This allows the gateway to serve an HTTP /api/chat endpoint without
+// importing the core package directly.
+type ChatHandler func(ctx context.Context, message string) (string, error)
 
 // Config holds Gateway configuration
 type Config struct {
 	Address     string
 	Port        int
-	SessionsDir string // Directory for session JSONL files
-	AuthEnabled bool   // Enable authentication (default: false for backward compatibility)
+	SessionsDir string      // Directory for session JSONL files
+	AuthEnabled bool        // Enable authentication (default: false for backward compatibility)
+	OnChat      ChatHandler // If set, gateway serves POST /api/chat
+
+	// Metadata surfaced on the /api/status endpoint and the web UI.
+	Provider string // e.g., "anthropic", "openai"
+	Model    string // e.g., "claude-opus-4-5"
+
+	// Webhook and notification config files (optional).
+	// When non-empty Start() will load them automatically before serving.
+	WebhooksFile      string // Path to .soulgate/webhooks.json
+	NotificationsFile string // Path to .soulgate/notifications.json
 }
 
 // NewGateway creates a new Gateway
@@ -106,7 +131,7 @@ func NewGateway(config *Config) (*Gateway, error) {
 		}()
 	}
 
-	return &Gateway{
+	gw := &Gateway{
 		clients:        make(map[string]*Client),
 		agents:         make(map[string]*Client),
 		channels:       make(map[string]*Client),
@@ -119,20 +144,97 @@ func NewGateway(config *Config) (*Gateway, error) {
 		pairingManager: pairingManager,
 		authEnabled:    authEnabled,
 		config:         config,
-	}, nil
+		startedAt:      time.Now(),
+	}
+	gw.monitor = newHealthMonitor(gw)
+	return gw, nil
+}
+
+// LoadWebhooks initialises the inbound webhook subsystem from a JSON config file.
+// Call this before Start() to enable the /webhook/{name} routes.
+func (g *Gateway) LoadWebhooks(path string) error {
+	s := newWebhookStore(path)
+	if err := s.load(); err != nil {
+		return fmt.Errorf("load webhooks: %w", err)
+	}
+	g.webhookStore = s
+	return nil
+}
+
+// LoadNotifications initialises the outbound notification subsystem from a JSON
+// config file. Call this before Start() to enable event-driven notifications.
+func (g *Gateway) LoadNotifications(path string) error {
+	s := newNotificationStore(path)
+	if err := s.load(); err != nil {
+		return fmt.Errorf("load notifications: %w", err)
+	}
+	g.notificationStore = s
+	return nil
+}
+
+// WebhookStore returns the underlying webhook store so callers (e.g. CLI) can
+// read and mutate the persisted webhook list. Returns nil if LoadWebhooks has
+// not been called.
+func (g *Gateway) WebhookStore() *WebhookStore {
+	return g.webhookStore
+}
+
+// NotificationStore returns the underlying notification store so callers can
+// read and mutate the persisted notification list. Returns nil if
+// LoadNotifications has not been called.
+func (g *Gateway) NotificationStore() *NotificationStore {
+	return g.notificationStore
 }
 
 // Start starts the Gateway server
 func (g *Gateway) Start(ctx context.Context) error {
-	http.HandleFunc("/ws", g.handleWebSocket)
-	http.HandleFunc("/health", g.handleHealth)
+	// Auto-load webhook and notification configs from paths specified in Config.
+	if g.config.WebhooksFile != "" && g.webhookStore == nil {
+		if err := g.LoadWebhooks(g.config.WebhooksFile); err != nil {
+			// Non-fatal: log but continue without webhooks.
+			fmt.Printf("Warning: could not load webhooks: %v\n", err)
+		}
+	}
+	if g.config.NotificationsFile != "" && g.notificationStore == nil {
+		if err := g.LoadNotifications(g.config.NotificationsFile); err != nil {
+			fmt.Printf("Warning: could not load notifications: %v\n", err)
+		}
+	}
+
+	mux := http.NewServeMux()
+
+	// WebSocket endpoint
+	mux.HandleFunc("/ws", g.handleWebSocket)
+
+	// Health endpoints
+	mux.HandleFunc("/health", g.handleHealth)
+	mux.HandleFunc("/api/health", g.handleHealth)
+
+	// REST API
+	mux.HandleFunc("/api/status", g.handleAPIStatus)
+	mux.HandleFunc("/api/sessions", g.handleAPISessions)
+
+	// Serve the HTTP chat API if a chat handler is configured
+	if g.config.OnChat != nil {
+		mux.HandleFunc("/api/chat", g.handleAPIChat)
+		fmt.Println("HTTP API enabled: POST /api/chat")
+	}
+
+	// Inbound webhooks — enabled whenever a webhook store is present
+	if g.webhookStore != nil {
+		mux.HandleFunc("/webhook/", g.handleWebhook)
+		fmt.Println("Webhooks enabled: POST /webhook/{name}")
+	}
+
+	// Web UI — served at /  (index.html, app.js, style.css via embed.FS)
+	mux.Handle("/", http.FileServer(http.FS(webui.Assets)))
 
 	addr := fmt.Sprintf("%s:%d", g.config.Address, g.config.Port)
-	fmt.Printf("🚀 Gateway listening on ws://%s/ws\n", addr)
+	fmt.Printf("Gateway listening on http://%s  (WebSocket: ws://%s/ws)\n", addr, addr)
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: nil,
+		Handler: corsMiddleware(mux),
 	}
 
 	// Shutdown handler
@@ -141,7 +243,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 		fmt.Println("Shutting down Gateway...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		server.Shutdown(shutdownCtx)
+		server.Shutdown(shutdownCtx) //nolint:errcheck
 	}()
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -218,18 +320,99 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go client.Start(context.Background())
 }
 
-// handleHealth handles health check requests
-func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
+// handleAPIStatus returns a rich JSON status payload consumed by the web UI.
+func (g *Gateway) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
 	g.clientsMux.RLock()
-	clientCount := len(g.clients)
+	totalClients := len(g.clients)
 	g.clientsMux.RUnlock()
+
+	g.roleMux.RLock()
+	agentCount   := len(g.agents)
+	channelCount := len(g.channels)
+	uiCount      := len(g.uis)
+	nodeCount    := len(g.nodes)
+
+	// Build per-role client maps so the UI can render individual client rows.
+	agentIDs   := clientIDs(g.agents)
+	channelIDs := clientIDs(g.channels)
+	uiIDs      := clientIDs(g.uis)
+	nodeIDs    := clientIDs(g.nodes)
+	g.roleMux.RUnlock()
 
 	g.sessionMux.RLock()
 	sessionCount := len(g.sessions)
 	g.sessionMux.RUnlock()
 
+	uptimeSeconds := int64(time.Since(g.startedAt).Seconds())
+
+	port := g.config.Port
+	if port == 0 {
+		port = 8080
+	}
+
+	payload := map[string]interface{}{
+		"status":          "healthy",
+		"clients":         totalClients,
+		"sessions":        sessionCount,
+		"agents":          agentCount,
+		"channels":        channelCount,
+		"uis":             uiCount,
+		"nodes":           nodeCount,
+		"agent_clients":   agentIDs,
+		"channel_clients": channelIDs,
+		"ui_clients":      uiIDs,
+		"node_clients":    nodeIDs,
+		"provider":        g.config.Provider,
+		"model":           g.config.Model,
+		"port":            port,
+		"uptime_seconds":  uptimeSeconds,
+		"started_at":      g.startedAt.UTC().Format(time.RFC3339),
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"healthy","clients":%d,"sessions":%d}`, clientCount, sessionCount)
+	json.NewEncoder(w).Encode(payload) //nolint:errcheck
+}
+
+// clientIDs returns a map of clientID -> empty struct for JSON serialisation as
+// a plain object. The web UI iterates Object.entries() to show individual rows.
+func clientIDs(m map[string]*Client) map[string]struct{} {
+	out := make(map[string]struct{}, len(m))
+	for id := range m {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+// handleAPISessions returns the list of active gateway sessions as JSON.
+func (g *Gateway) handleAPISessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	g.sessionMux.RLock()
+	snapshots := make([]map[string]interface{}, 0, len(g.sessions))
+	for _, s := range g.sessions {
+		snapshots = append(snapshots, map[string]interface{}{
+			"id":             s.ID,
+			"conversation_id": s.ConversationID,
+			"channel":        s.Channel,
+			"state":          s.GetState(),
+			"message_count":  s.GetMessageCount(),
+			"assigned_agent": s.GetAssignedAgent(),
+			"created_at":     s.CreatedAt.UTC().Format(time.RFC3339),
+			"updated_at":     s.UpdatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	g.sessionMux.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": snapshots}) //nolint:errcheck
 }
 
 // Register registers a new client
@@ -556,6 +739,75 @@ func (g *Gateway) GetOrCreateSession(conversationID, channel string) *Session {
 	}
 
 	return session
+}
+
+// handleAPIChat handles HTTP POST /api/chat — runs the orchestrator directly
+func (g *Gateway) handleAPIChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Message string `json:"message"`
+		UserID  string `json:"user_id,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Message == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "message is required"})
+		return
+	}
+
+	fmt.Printf("📨 /api/chat: %q\n", req.Message)
+
+	g.Notify("message.received", map[string]interface{}{
+		"source":  "api",
+		"message": req.Message,
+		"user_id": req.UserID,
+	})
+
+	response, err := g.config.OnChat(r.Context(), req.Message)
+	if err != nil {
+		fmt.Printf("❌ Chat error: %v\n", err)
+		g.Notify("error", map[string]interface{}{
+			"source": "api",
+			"error":  err.Error(),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("AI error: %v", err)})
+		return
+	}
+
+	fmt.Printf("✅ Response: %d chars\n", len(response))
+	g.Notify("agent.completed", map[string]interface{}{
+		"source":   "api",
+		"message":  req.Message,
+		"response": response,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"response": response})
+}
+
+// corsMiddleware adds CORS headers for cross-origin API access
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // GetClientCount returns the number of connected clients by role
