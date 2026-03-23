@@ -907,7 +907,10 @@ func (am *AgentManager) standbyLoop(ctx context.Context, orch *Orchestrator, age
 			}
 			prompt := sb.String()
 
-			agent.AppendLog("message_received", fmt.Sprintf("received %d message(s), waking up", len(msgs)))
+			// Log each message individually so the activity shows who said what
+			for _, m := range msgs {
+				agent.AppendLog("message_received", fmt.Sprintf("[%s]: %s", m.FromName, m.Message))
+			}
 
 			// Transition to running
 			am.mu.Lock()
