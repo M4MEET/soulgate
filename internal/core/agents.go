@@ -1234,11 +1234,21 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 			})
 		}
 
+		// Use agent config overrides, falling back to workspace defaults
+		agentTemp := o.workspace.Config.Model.OpenAI.Temperature
+		agentMaxTok := o.workspace.Config.Model.OpenAI.MaxTokens
+		if ac := agent.GetConfig(); ac.Temperature > 0 {
+			agentTemp = ac.Temperature
+		}
+		if ac := agent.GetConfig(); ac.MaxTokens > 0 {
+			agentMaxTok = ac.MaxTokens
+		}
+
 		req := model.CompletionRequest{
 			Messages:    messages,
 			Tools:       tools,
-			MaxTokens:   o.workspace.Config.Model.OpenAI.MaxTokens,
-			Temperature: o.workspace.Config.Model.OpenAI.Temperature,
+			MaxTokens:   agentMaxTok,
+			Temperature: agentTemp,
 			System:      systemPrompt,
 		}
 
