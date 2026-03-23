@@ -663,6 +663,12 @@ export async function restartAgent(id: string): Promise<{ new_id: string; old_id
   return res.json();
 }
 
+export async function activateStandby(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/standby`, { method: 'POST' });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to activate standby');
+  return res.json();
+}
+
 export async function fetchMemory(): Promise<MemoryEntry[]> {
   const data = await safeFetch<{ entries?: MemoryEntry[] } | MemoryEntry[]>(`${BASE}/api/memory`, []);
   if (Array.isArray(data)) return data;

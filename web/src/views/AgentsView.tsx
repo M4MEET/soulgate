@@ -14,7 +14,7 @@ import {
 import {
   fetchAgents, createAgent, fetchAgentDetail, fetchAgentLog,
   fetchAgentMessages, updateAgentConfig, sendAgentMessage,
-  stopAgent, pauseAgent, restartAgent, deleteAgent, fetchTools,
+  stopAgent, pauseAgent, restartAgent, activateStandby, deleteAgent, fetchTools,
   fetchProviders, fetchProviderModels,
   type AgentData, type AgentDetailData, type AgentConfig,
   type AgentLogEntry, type AgentMessage, type ModelInfo,
@@ -333,6 +333,15 @@ function AgentCard({
             <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-violet-500/10 text-violet-400 text-xs">
               <Radio size={11} className="animate-pulse" /> Listening
             </span>
+          )}
+          {isStopped && (
+            <button onClick={async (e) => {
+              e.stopPropagation();
+              try { await activateStandby(agent.id); toast.success('Agent entering standby'); onRefresh(); }
+              catch (err) { toast.error(err instanceof Error ? err.message : 'Standby failed'); }
+            }} className="flex items-center gap-1 px-2 py-1 rounded-md bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 text-xs transition-all" title="Activate Standby">
+              <Radio size={11} /> Standby
+            </button>
           )}
           {isAlive && (
             <button onClick={handleStop} className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs transition-all" title="Stop">

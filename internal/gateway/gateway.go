@@ -169,6 +169,12 @@ type GatewayAPI struct {
 	// RestartAgent stops and re-creates an agent with the same config.
 	RestartAgent func(id string) (map[string]interface{}, error)
 
+	// ActivateStandby puts an agent into standby (listening) mode.
+	ActivateStandby func(id string) (map[string]interface{}, error)
+
+	// DeleteAgent permanently removes an agent from the manager.
+	DeleteAgent func(id string) error
+
 	// ListFiles returns the directory listing at the given workspace-relative
 	// path. Each entry is a map with keys: name, is_dir, size.
 	ListFiles func(path string) ([]map[string]interface{}, error)
@@ -2440,6 +2446,10 @@ func (g *Gateway) handleAPIAgentDetail(w http.ResponseWriter, r *http.Request) {
 		g.handleAgentMessages(w, r, id)
 	case "restart":
 		g.handleAgentRestart(w, r, id)
+	case "standby":
+		g.handleAgentStandby(w, r, id)
+	case "delete":
+		g.handleAgentDelete(w, r, id)
 	default:
 		writeGatewayJSON(w, http.StatusNotFound, map[string]string{
 			"error": fmt.Sprintf("unknown sub-resource: %s", subResource),
@@ -2607,6 +2617,42 @@ func (g *Gateway) handleAgentRestart(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	writeGatewayJSON(w, http.StatusOK, result)
+}
+
+// handleAgentStandby puts an agent into standby (listening) mode.
+func (g *Gateway) handleAgentStandby(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.ActivateStandby == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "standby activation not available",
+		})
+		return
+	}
+	result, err := g.config.API.ActivateStandby(id)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, result)
+}
+
+func (g *Gateway) handleAgentDelete(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.DeleteAgent == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent delete not available"})
+		return
+	}
+	if err := g.config.API.DeleteAgent(id); err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
 }
 
 // handleAPIExec handles POST /api/exec.

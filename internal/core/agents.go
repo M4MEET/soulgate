@@ -1053,6 +1053,43 @@ func (am *AgentManager) Restart(orch *Orchestrator, id string) (*BackgroundAgent
 	return old, nil
 }
 
+// ActivateStandby puts a stopped/completed/failed agent into standby mode.
+// It rewrites the task to be standby-friendly and restarts the agent.
+func (am *AgentManager) ActivateStandby(orch *Orchestrator, id string) (*BackgroundAgent, error) {
+	am.mu.Lock()
+	agent, ok := am.agents[id]
+	if !ok {
+		am.mu.Unlock()
+		return nil, fmt.Errorf("agent not found: %s", id)
+	}
+
+	// Stop if currently running
+	if agent.Status == AgentRunning || agent.Status == AgentStandby {
+		if agent.cancel != nil {
+			agent.cancel()
+		}
+	}
+
+	// Update task to standby-friendly if it doesn't already suggest standby
+	if !isStandbyTask(agent.Task, "") {
+		agent.Task = fmt.Sprintf("Standby: %s. Be ready to assist and respond to messages.", agent.Task)
+	}
+
+	agent.Status = AgentRunning
+	agent.Result = ""
+	agent.Error = ""
+	agent.CompletedAt = nil
+	agent.CreatedAt = time.Now().UTC()
+	am.saveState()
+	am.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour) // long-lived
+	agent.cancel = cancel
+	go am.runAgent(ctx, orch, agent)
+
+	return agent, nil
+}
+
 // Delete permanently removes an agent from the manager.
 // Running agents are stopped first.
 func (am *AgentManager) Delete(id string) error {

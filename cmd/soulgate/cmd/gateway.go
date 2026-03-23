@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/M4MEET/soulgate/internal/audit"
 	"github.com/M4MEET/soulgate/internal/brokers"
@@ -404,6 +406,36 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 	gw, err := gateway.NewGateway(gwConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create gateway: %w", err)
+	}
+
+	// Auto-spawn saved connectors from config
+	if len(workspace.Config.Connectors) > 0 {
+		// Spawn after a short delay so the gateway is listening
+		go func() {
+			// Wait for the gateway to start listening
+			for i := 0; i < 20; i++ {
+				_, err := http.Get(fmt.Sprintf("http://localhost:%d/api/health", gatewayPort))
+				if err == nil {
+					break
+				}
+				time.Sleep(250 * time.Millisecond)
+			}
+			for connType, connCfg := range workspace.Config.Connectors {
+				msg, err := spawnConnectorProcess(connType, connCfg, gatewayPort)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: auto-start %s connector: %v\n", connType, err)
+				} else {
+					fmt.Printf("   Auto-started: %s\n", msg)
+					// Track the spawned connector
+					if pidIdx := strings.Index(msg, "(pid "); pidIdx >= 0 {
+						var pid int
+						if _, scanErr := fmt.Sscanf(msg[pidIdx:], "(pid %d)", &pid); scanErr == nil && pid > 0 {
+							gw.TrackConnector(connType, pid)
+						}
+					}
+				}
+			}
+		}()
 	}
 
 	// Setup signal handling
@@ -864,6 +896,25 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 			}, nil
 		},
 
+		// ActivateStandby puts an agent into standby listening mode.
+		ActivateStandby: func(id string) (map[string]interface{}, error) {
+			agent, err := orch.GetAgentManager().ActivateStandby(orch, id)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{
+				"status": "standby_activated",
+				"id":     agent.ID,
+				"name":   agent.Name,
+				"task":   agent.Task,
+			}, nil
+		},
+
+		// DeleteAgent permanently removes an agent.
+		DeleteAgent: func(id string) error {
+			return orch.GetAgentManager().Delete(id)
+		},
+
 		// ListFiles delegates to the FileBroker to list a workspace directory.
 		// The path is relative to the workspace root.
 		ListFiles: func(path string) ([]map[string]interface{}, error) {
@@ -1251,8 +1302,16 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 		},
 
 		// SpawnConnector starts a connector process in the background.
-		// The connector runs as a child process of the gateway.
+		// Saves credentials to config so connectors auto-start on next boot.
 		SpawnConnector: func(connectorType string, cfg map[string]string) (string, error) {
+			// Persist credentials
+			if ws.Config.Connectors == nil {
+				ws.Config.Connectors = make(map[string]map[string]string)
+			}
+			ws.Config.Connectors[connectorType] = cfg
+			configPath := filepath.Join(ws.ConfigDir, "config.yml")
+			_ = ws.Config.Save(configPath)
+
 			return spawnConnectorProcess(connectorType, cfg, gatewayPort)
 		},
 
