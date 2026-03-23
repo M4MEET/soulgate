@@ -64,6 +64,7 @@ type AgentStatus string
 
 const (
 	AgentRunning   AgentStatus = "running"
+	AgentStandby   AgentStatus = "standby"
 	AgentCompleted AgentStatus = "completed"
 	AgentFailed    AgentStatus = "failed"
 	AgentStopped   AgentStatus = "stopped"
@@ -178,6 +179,8 @@ type BackgroundAgent struct {
 	logDir      string          // directory for JSONL activity logs
 	msgMu       sync.Mutex
 	inbox       []AgentMessage // pending messages from other agents
+	memMu       sync.Mutex
+	memory      *AgentMemory   // per-agent private memory (lazy init)
 }
 
 const maxAgentLogEntries = 200
@@ -813,31 +816,152 @@ func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent 
 	// Execute the agentic loop, applying any per-agent model override
 	response, err := orch.executeAgentWithModel(ctx, agent, agentPrompt, run.ID)
 
-	am.mu.Lock()
-	now := time.Now().UTC()
-	agent.CompletedAt = &now
-
 	if err != nil {
+		am.mu.Lock()
+		now := time.Now().UTC()
+		agent.CompletedAt = &now
 		agent.Status = AgentFailed
 		agent.Error = err.Error()
 		run.SetError(err)
-	} else {
-		agent.Status = AgentCompleted
+		am.saveState()
+		am.mu.Unlock()
+
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer auditCancel()
+		orch.audit.Log(auditCtx, audit.NewEvent("agent_complete", audit.CategoryRun).
+			WithSessionID(orch.session.ID).
+			WithRunID(run.ID).
+			WithMetadata("agent_id", agent.ID).
+			WithMetadata("status", "failed"))
+		return
+	}
+
+	// Check if this should become a standby agent
+	if isStandbyTask(agent.Task, response) {
+		am.mu.Lock()
+		agent.Status = AgentStandby
 		agent.Result = response
 		run.SetResult(response)
+		am.saveState()
+		am.mu.Unlock()
+
+		agent.AppendLog("status", "entering standby mode — listening for messages")
+
+		orch.audit.Log(ctx, audit.NewEvent("agent_standby", audit.CategoryRun).
+			WithSessionID(orch.session.ID).
+			WithRunID(run.ID).
+			WithMetadata("agent_id", agent.ID))
+
+		// Enter standby listen loop
+		am.standbyLoop(ctx, orch, agent)
+		return
 	}
+
+	// Normal completion
+	am.mu.Lock()
+	now := time.Now().UTC()
+	agent.CompletedAt = &now
+	agent.Status = AgentCompleted
+	agent.Result = response
+	run.SetResult(response)
 	am.saveState()
 	am.mu.Unlock()
 
-	// Log agent completion
-	auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
+	auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer auditCancel()
 	orch.audit.Log(auditCtx, audit.NewEvent("agent_complete", audit.CategoryRun).
 		WithSessionID(orch.session.ID).
 		WithRunID(run.ID).
 		WithMetadata("agent_id", agent.ID).
-		WithMetadata("status", string(agent.Status)))
+		WithMetadata("status", "completed"))
+}
+
+// standbyLoop keeps the agent alive, polling for inbox messages.
+// When a message arrives, it runs a new agentic loop to handle it, then
+// goes back to standby. The agent's conversation history is preserved across
+// activations so each task builds on prior context.
+func (am *AgentManager) standbyLoop(ctx context.Context, orch *Orchestrator, agent *BackgroundAgent) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			am.mu.Lock()
+			now := time.Now().UTC()
+			agent.Status = AgentStopped
+			agent.CompletedAt = &now
+			am.saveState()
+			am.mu.Unlock()
+			return
+		case <-ticker.C:
+			msgs := agent.drainInbox()
+			if len(msgs) == 0 {
+				continue
+			}
+
+			// Combine all pending messages into one prompt
+			var sb strings.Builder
+			for _, m := range msgs {
+				sb.WriteString(fmt.Sprintf("[From %s]: %s\n", m.FromName, m.Message))
+			}
+			prompt := sb.String()
+
+			agent.AppendLog("message_received", fmt.Sprintf("received %d message(s), waking up", len(msgs)))
+
+			// Transition to running
+			am.mu.Lock()
+			agent.Status = AgentRunning
+			am.saveState()
+			am.mu.Unlock()
+
+			// Create a new run for this activation
+			run := orch.session.CreateRun(fmt.Sprintf("[agent:%s] standby activation", agent.Name))
+			run.Start()
+
+			agentCtx := withAgentID(ctx, agent.ID)
+			response, err := orch.executeAgentWithModel(agentCtx, agent, prompt, run.ID)
+
+			if err != nil {
+				agent.AppendLog("error", fmt.Sprintf("standby activation error: %v", err))
+				agent.IncrError()
+				run.SetError(err)
+
+				// Check auto-restart or go back to standby
+				cfg := agent.GetConfig()
+				if cfg.AutoRestart {
+					agent.AppendLog("status", "error during activation, returning to standby (auto-restart)")
+				} else {
+					am.mu.Lock()
+					now := time.Now().UTC()
+					agent.Status = AgentFailed
+					agent.CompletedAt = &now
+					agent.Error = err.Error()
+					am.saveState()
+					am.mu.Unlock()
+					return
+				}
+			} else {
+				agent.AppendLog("text", fmt.Sprintf("activation complete: %s", truncate(response, 200)))
+				run.SetResult(response)
+			}
+
+			// Back to standby
+			am.mu.Lock()
+			agent.Status = AgentStandby
+			am.saveState()
+			am.mu.Unlock()
+
+			agent.AppendLog("status", "returning to standby")
+		}
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 // List returns all agents
@@ -893,25 +1017,55 @@ func (am *AgentManager) Restart(orch *Orchestrator, id string) (*BackgroundAgent
 	}
 
 	// Capture config before stopping
-	name := old.Name
 	task := old.Task
 	role := old.Role
-	parentID := old.ParentID
 	cfg := old.GetConfig()
 
 	// Stop if running
 	if old.Status == AgentRunning && old.cancel != nil {
 		old.cancel()
-		now := time.Now().UTC()
-		old.Status = AgentStopped
-		old.CompletedAt = &now
 	}
+
+	// Reset the existing agent in-place instead of creating a new one.
+	// This avoids duplicate agents piling up on each restart.
+	old.Status = AgentRunning
+	old.Result = ""
+	old.Error = ""
+	old.CompletedAt = nil
+	old.CreatedAt = time.Now().UTC()
+	old.SetConfig(cfg)
+	am.saveState()
 	am.mu.Unlock()
 
-	// Create new agent with same params
-	newAgent := am.Create(orch, name, task, role, parentID)
-	newAgent.SetConfig(cfg)
-	return newAgent, nil
+	// Run the agent in a goroutine with a fresh context
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	old.cancel = cancel
+	_ = task
+	_ = role
+	go am.runAgent(ctx, orch, old)
+
+	return old, nil
+}
+
+// Delete permanently removes an agent from the manager.
+// Running agents are stopped first.
+func (am *AgentManager) Delete(id string) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	agent, ok := am.agents[id]
+	if !ok {
+		return fmt.Errorf("agent not found: %s", id)
+	}
+
+	// Stop if running
+	if agent.Status == AgentRunning && agent.cancel != nil {
+		agent.cancel()
+	}
+
+	delete(am.agents, id)
+	am.saveState()
+	return nil
 }
 
 // GetMessages returns the pending messages in an agent's inbox without draining them.

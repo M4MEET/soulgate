@@ -111,6 +111,15 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 	case "agent_message":
 		return o.handleAgentMessage(ctx, toolCall.Input)
 
+	case "agent_memory_write":
+		return o.handleAgentMemoryWrite(ctx, toolCall.Input)
+	case "agent_memory_read":
+		return o.handleAgentMemoryRead(ctx, toolCall.Input)
+	case "agent_memory_delete":
+		return o.handleAgentMemoryDelete(ctx, toolCall.Input)
+	case "agent_memory_list":
+		return o.handleAgentMemoryList(ctx, toolCall.Input)
+
 	case "skill_create":
 		return o.handleSkillCreate(ctx, toolCall.Input)
 	case "skill_list":
@@ -518,6 +527,48 @@ func (e *llmTaskExecutor) Complete(ctx context.Context, prompt string, jsonMode 
 		return "", err
 	}
 	return resp.Message.Content, nil
+}
+
+// ── Agent memory handlers ────────────────────────────────────────────────────
+
+func (o *Orchestrator) handleAgentMemoryWrite(_ context.Context, input json.RawMessage) (string, error) {
+	var p struct{ AgentID, Key, Value string }
+	if err := json.Unmarshal(input, &p); err != nil { return "", err }
+	a, ok := o.agentManager.Get(p.AgentID)
+	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
+	a.GetOrCreateMemory(o.workspace.ConfigDir).Set(p.Key, p.Value)
+	return fmt.Sprintf("Stored '%s' in %s memory", p.Key, p.AgentID), nil
+}
+
+func (o *Orchestrator) handleAgentMemoryRead(_ context.Context, input json.RawMessage) (string, error) {
+	var p struct{ AgentID, Key string }
+	if err := json.Unmarshal(input, &p); err != nil { return "", err }
+	a, ok := o.agentManager.Get(p.AgentID)
+	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
+	val, found := a.GetOrCreateMemory(o.workspace.ConfigDir).Get(p.Key)
+	if !found { return fmt.Sprintf("Key '%s' not found", p.Key), nil }
+	return val, nil
+}
+
+func (o *Orchestrator) handleAgentMemoryDelete(_ context.Context, input json.RawMessage) (string, error) {
+	var p struct{ AgentID, Key string }
+	if err := json.Unmarshal(input, &p); err != nil { return "", err }
+	a, ok := o.agentManager.Get(p.AgentID)
+	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
+	a.GetOrCreateMemory(o.workspace.ConfigDir).Delete(p.Key)
+	return fmt.Sprintf("Deleted '%s' from %s memory", p.Key, p.AgentID), nil
+}
+
+func (o *Orchestrator) handleAgentMemoryList(_ context.Context, input json.RawMessage) (string, error) {
+	var p struct{ AgentID string }
+	if err := json.Unmarshal(input, &p); err != nil { return "", err }
+	a, ok := o.agentManager.Get(p.AgentID)
+	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
+	entries := a.GetOrCreateMemory(o.workspace.ConfigDir).List()
+	if len(entries) == 0 { return "No entries", nil }
+	var sb strings.Builder
+	for _, e := range entries { sb.WriteString(fmt.Sprintf("%s = %s\n", e.Key, e.Value)) }
+	return sb.String(), nil
 }
 
 // ── Skill self-modification handlers ─────────────────────────────────────────
@@ -1407,4 +1458,92 @@ func (o *Orchestrator) handleSoulGateConfigure(ctx context.Context, brokerCtx br
 	default:
 		return "", fmt.Errorf("unknown action: %s (available: set_provider, set_model, add_policy_rule, remove_policy_rule, set_execution_limit, reload_config, reload_plugins)", params.Action)
 	}
+}
+
+// ── Agent Memory handlers ────────────────────────────────────────────────────
+
+func (o *Orchestrator) resolveAgentMemory(ctx context.Context) (*AgentMemory, error) {
+	agentID := agentIDFromContext(ctx)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_memory tools can only be used by agents")
+	}
+	agent, ok := o.agentManager.Get(agentID)
+	if !ok {
+		return nil, fmt.Errorf("agent %s not found", agentID)
+	}
+	return agent.GetOrCreateMemory(o.workspace.ConfigDir), nil
+}
+
+func (o *Orchestrator) handleAgentMemoryWrite(ctx context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Key == "" || params.Value == "" {
+		return "", fmt.Errorf("key and value are required")
+	}
+	mem, err := o.resolveAgentMemory(ctx)
+	if err != nil {
+		return "", err
+	}
+	mem.Set(params.Key, params.Value)
+	return fmt.Sprintf("Saved to agent memory: %s", params.Key), nil
+}
+
+func (o *Orchestrator) handleAgentMemoryRead(ctx context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Key == "" {
+		return "", fmt.Errorf("key is required")
+	}
+	mem, err := o.resolveAgentMemory(ctx)
+	if err != nil {
+		return "", err
+	}
+	val, ok := mem.Get(params.Key)
+	if !ok {
+		return fmt.Sprintf("Key '%s' not found in agent memory", params.Key), nil
+	}
+	result, _ := json.Marshal(map[string]string{"key": params.Key, "value": val})
+	return string(result), nil
+}
+
+func (o *Orchestrator) handleAgentMemoryDelete(ctx context.Context, input json.RawMessage) (string, error) {
+	var params struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if params.Key == "" {
+		return "", fmt.Errorf("key is required")
+	}
+	mem, err := o.resolveAgentMemory(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !mem.Delete(params.Key) {
+		return fmt.Sprintf("Key '%s' not found", params.Key), nil
+	}
+	return fmt.Sprintf("Deleted from agent memory: %s", params.Key), nil
+}
+
+func (o *Orchestrator) handleAgentMemoryList(ctx context.Context, _ json.RawMessage) (string, error) {
+	mem, err := o.resolveAgentMemory(ctx)
+	if err != nil {
+		return "", err
+	}
+	entries := mem.List()
+	if len(entries) == 0 {
+		return "Agent memory is empty", nil
+	}
+	result, _ := json.Marshal(map[string]interface{}{"entries": entries, "count": len(entries)})
+	return string(result), nil
 }

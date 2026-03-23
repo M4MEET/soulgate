@@ -70,6 +70,14 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 		}
 	}
 
+	// Check for @agent mentions — route to standby agent instead of main loop
+	if mention, rest := parseAgentMention(cleanedPrompt); mention != "" {
+		if routed := o.routeToStandbyAgent(mention, rest); routed {
+			return fmt.Sprintf("Message routed to @%s", mention), nil
+		}
+		// Agent not found or not in standby — fall through to normal processing
+	}
+
 	// Seed conversation with prior history (if any) plus the new user message
 	userMsg := model.Message{
 		Role:    model.RoleUser,
