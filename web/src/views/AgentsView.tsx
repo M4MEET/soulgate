@@ -717,12 +717,21 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
             </label>
             <select
               value={cfg.model}
-              onChange={e => setCfg(c => ({ ...c, model: e.target.value }))}
+              onChange={e => {
+                // Strip provider prefix (e.g. "openai/gpt-4o" → "gpt-4o")
+                let model = e.target.value;
+                if (model.includes('/')) model = model.split('/').slice(1).join('/');
+                setCfg(c => ({ ...c, model }));
+              }}
               className="w-full px-2 py-1.5 rounded bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500/60"
             >
               <option value="">Select model...</option>
               {(liveModels.length > 0
-                ? liveModels.map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)
+                ? liveModels.map(m => {
+                    // Strip provider prefix for the stored value
+                    const modelId = m.id.includes('/') ? m.id.split('/').slice(1).join('/') : m.id;
+                    return <option key={m.id} value={modelId}>{m.name || modelId}</option>;
+                  })
                 : MODELS.map(m => <option key={m} value={m}>{m}</option>)
               )}
             </select>
