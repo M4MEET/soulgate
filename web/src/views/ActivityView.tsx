@@ -421,86 +421,101 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
             const isStatus = entry.type === 'status';
             const isApproval = entry.message?.toLowerCase().includes('approval') || entry.message?.toLowerCase().includes('permission');
 
-            // Skip "agent finished" noise
-            if (isText && entry.message === 'agent finished') {
+            // Filter noise
+            if (isText && (
+              entry.message === 'agent finished' ||
+              entry.message?.startsWith('activation complete:') ||
+              entry.message?.match(/^(Got it|I understand|I'll be ready|Let me|Here's how)/) // skip setup chatter
+            )) {
               return null;
             }
-            // Skip activation complete duplicates
-            if (isText && entry.message?.startsWith('activation complete:')) {
+            // Skip repeated standby status
+            if (isStatus && entry.message?.includes('standby')) {
               return null;
             }
 
-            // Determine which agent this entry belongs to
+            // Agent identity
             const me = (entry as MergedLogEntry);
             const entryAgentId = me.agentId || agentId;
             const entryAgentName = me.agentName || agent?.name || 'Agent';
-            const isCurrentAgent = entryAgentId === agentId;
 
-            // Agent color palette for multi-agent conversations
+            // Color per agent
             const agentColors = [
-              { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', bubble: 'bg-zinc-800/60 border-zinc-700/30' },
-              { text: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', bubble: 'bg-pink-900/15 border-pink-500/20' },
-              { text: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', bubble: 'bg-cyan-900/15 border-cyan-500/20' },
-              { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', bubble: 'bg-amber-900/15 border-amber-500/20' },
+              { text: 'text-emerald-400', bubble: 'bg-emerald-900/15 border-emerald-500/20' },
+              { text: 'text-pink-400', bubble: 'bg-pink-900/15 border-pink-500/20' },
+              { text: 'text-cyan-400', bubble: 'bg-cyan-900/15 border-cyan-500/20' },
+              { text: 'text-amber-400', bubble: 'bg-amber-900/15 border-amber-500/20' },
             ];
             const agentIdx = aliveAgents.findIndex(a => a.id === entryAgentId);
             const aColor = agentColors[agentIdx >= 0 ? agentIdx % agentColors.length : 0];
 
+            // Clean message text — strip "Summary:" boilerplate and meta prefixes
+            const cleanMessage = (msg: string) => {
+              let cleaned = msg;
+              // Remove "Summary:\n- ..." sections
+              cleaned = cleaned.replace(/\n\nSummary:[\s\S]*$/, '').replace(/\nSummary of actions[\s\S]*$/, '');
+              // Remove meta prefixes like "[Roast to Boyfriend Nice]" or "Message to X (via agent_message):"
+              cleaned = cleaned.replace(/^\[.*?\]\n?/, '').replace(/^Message to .+?\(via agent_message\):\n?/, '');
+              return cleaned.trim();
+            };
+
             if (isMsg) {
-              // Incoming message — right-aligned bubble
               const sender = entry.message?.match(/\[([^\]]+)\]/)?.[1] || 'User';
               const msgText = entry.message?.replace(/^\[[^\]]+\]:\s*/, '') || entry.message;
-              // If sender is another agent, show with their color
-              const senderAgent = aliveAgents.find(a => a.name === sender || a.id === sender);
-              const senderColor = senderAgent
-                ? agentColors[aliveAgents.indexOf(senderAgent) % agentColors.length]
-                : null;
+              const isFromAgent = aliveAgents.some(a => a.name === sender);
 
               return (
                 <div key={gi} className="flex justify-end">
-                  <div className={`max-w-[80%] rounded-xl px-3 py-2 ${senderColor ? senderColor.bubble : 'bg-blue-600/15 border-blue-500/20'} border`}>
+                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 border ${isFromAgent ? 'bg-indigo-900/15 border-indigo-500/20' : 'bg-blue-600/15 border-blue-500/20'}`}>
                     <div className="flex items-center gap-1.5 mb-1">
-                      {senderColor ? <Bot size={10} className={senderColor.text} /> : <User size={10} className="text-blue-400" />}
-                      <span className={`text-[10px] font-medium ${senderColor ? senderColor.text : 'text-blue-400'}`}>{sender}</span>
+                      {isFromAgent ? <Bot size={10} className="text-indigo-400" /> : <User size={10} className="text-blue-400" />}
+                      <span className={`text-[10px] font-medium ${isFromAgent ? 'text-indigo-400' : 'text-blue-400'}`}>{sender}</span>
                       <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
                     </div>
-                    <div className="text-xs text-zinc-200 break-words">{msgText}</div>
-                    {!isCurrentAgent && <div className="text-[9px] text-zinc-600 mt-1">in {entryAgentName}'s inbox</div>}
+                    <div className="text-[13px] text-zinc-100 break-words leading-relaxed">{msgText}</div>
                   </div>
                 </div>
               );
             }
 
             if (isText) {
-              // Agent response — left-aligned, colored per agent
+              const cleaned = cleanMessage(entry.message || '');
+              if (!cleaned) return null;
+
               return (
-                <div key={gi} className={`flex ${isCurrentAgent ? 'justify-start' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-xl px-3 py-2 ${aColor.bubble} border`}>
+                <div key={gi} className="flex justify-start">
+                  <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 border ${aColor.bubble}`}>
                     <div className="flex items-center gap-1.5 mb-1">
                       <Bot size={10} className={aColor.text} />
                       <span className={`text-[10px] font-medium ${aColor.text}`}>{entryAgentName}</span>
                       <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
                     </div>
-                    <div className="text-xs text-zinc-200 break-words whitespace-pre-wrap">{entry.message}</div>
+                    <div className="text-[13px] text-zinc-100 break-words whitespace-pre-wrap leading-relaxed">{cleaned}</div>
                   </div>
                 </div>
               );
             }
 
             if (isError) {
+              // Compact collapsible error
+              const shortErr = entry.message?.split('\n')[0]?.slice(0, 80) || 'Error';
               return (
-                <div key={gi} className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/15">
-                  <AlertCircle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
-                  <div className="text-xs text-red-300 break-words flex-1">{entry.message}</div>
-                  <span className="text-[9px] text-zinc-600 flex-shrink-0">{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                </div>
+                <details key={gi} className="group">
+                  <summary className="flex items-center gap-1.5 px-2 py-1 rounded-lg cursor-pointer hover:bg-red-500/5 text-[10px] text-red-400/70 list-none">
+                    <AlertCircle size={10} className="flex-shrink-0" />
+                    <span className="truncate">{shortErr}</span>
+                    <span className="text-[9px] text-zinc-700 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                  </summary>
+                  <div className="ml-4 px-2 py-1.5 mt-0.5 rounded bg-red-500/5 border border-red-500/10 text-[10px] text-red-300/80 break-words font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                    {entry.message}
+                  </div>
+                </details>
               );
             }
 
             if (isStatus) {
               return (
-                <div key={gi} className="flex items-center justify-center gap-1.5 py-1 text-[10px] text-zinc-600">
-                  <Activity size={9} />
+                <div key={gi} className="flex items-center justify-center gap-1.5 py-0.5 text-[9px] text-zinc-700">
                   <span>{entry.message}</span>
                 </div>
               );
