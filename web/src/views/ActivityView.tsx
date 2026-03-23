@@ -324,11 +324,7 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
               isStandby ? 'bg-violet-500/15 text-violet-400' : isRunning ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'
             }`}>{agent?.status}</span>
           </div>
-          <div className="text-[10px] text-zinc-500 truncate">
-            {aliveAgents.length > 1
-              ? `Merged view: ${aliveAgents.map(a => a.name).join(' + ')}`
-              : agent?.task}
-          </div>
+          <div className="text-[10px] text-zinc-500 truncate">{agent?.role} &middot; {agent?.id}</div>
         </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-zinc-600">{entries.length} entries</span>
@@ -460,16 +456,16 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
             };
 
             if (isMsg) {
+              // Incoming message to this agent — show on right (like user messages in chat)
               const sender = entry.message?.match(/\[([^\]]+)\]/)?.[1] || 'User';
               const msgText = entry.message?.replace(/^\[[^\]]+\]:\s*/, '') || entry.message;
-              const isFromAgent = aliveAgents.some(a => a.name === sender);
 
               return (
                 <div key={gi} className="flex justify-end">
-                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 border ${isFromAgent ? 'bg-indigo-900/15 border-indigo-500/20' : 'bg-blue-600/15 border-blue-500/20'}`}>
+                  <div className="max-w-[80%] rounded-2xl px-3.5 py-2.5 border bg-blue-600/15 border-blue-500/20">
                     <div className="flex items-center gap-1.5 mb-1">
-                      {isFromAgent ? <Bot size={10} className="text-indigo-400" /> : <User size={10} className="text-blue-400" />}
-                      <span className={`text-[10px] font-medium ${isFromAgent ? 'text-indigo-400' : 'text-blue-400'}`}>{sender}</span>
+                      <User size={10} className="text-blue-400" />
+                      <span className="text-[10px] font-medium text-blue-400">{sender}</span>
                       <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
                     </div>
                     <div className="text-[13px] text-zinc-100 break-words leading-relaxed">{msgText}</div>
@@ -479,6 +475,7 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
             }
 
             if (isText) {
+              // Agent's own response — show on left (like bot messages in chat)
               const cleaned = cleanMessage(entry.message || '');
               if (!cleaned) return null;
 
