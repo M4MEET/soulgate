@@ -1059,8 +1059,9 @@ func (am *AgentManager) Restart(orch *Orchestrator, id string) (*BackgroundAgent
 	return old, nil
 }
 
-// ActivateStandby puts a stopped/completed/failed agent into standby mode.
-// It rewrites the task to be standby-friendly and restarts the agent.
+// ActivateStandby puts an agent directly into standby listening mode
+// without running any initial prompt. The agent immediately starts
+// polling its inbox for messages.
 func (am *AgentManager) ActivateStandby(orch *Orchestrator, id string) (*BackgroundAgent, error) {
 	am.mu.Lock()
 	agent, ok := am.agents[id]
@@ -1076,22 +1077,18 @@ func (am *AgentManager) ActivateStandby(orch *Orchestrator, id string) (*Backgro
 		}
 	}
 
-	// Update task to standby-friendly if it doesn't already suggest standby
-	if !isStandbyTask(agent.Task, "") {
-		agent.Task = fmt.Sprintf("Standby: %s. Be ready to assist and respond to messages.", agent.Task)
-	}
-
-	agent.Status = AgentRunning
-	agent.Result = ""
+	agent.Status = AgentStandby
 	agent.Error = ""
 	agent.CompletedAt = nil
-	agent.CreatedAt = time.Now().UTC()
 	am.saveState()
 	am.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour) // long-lived
+	agent.AppendLog("status", "activated standby mode — listening for messages")
+
+	// Go directly to standby loop — no initial agentic run
+	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
 	agent.cancel = cancel
-	go am.runAgent(ctx, orch, agent)
+	go am.standbyLoop(ctx, orch, agent)
 
 	return agent, nil
 }

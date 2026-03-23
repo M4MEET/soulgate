@@ -845,14 +845,64 @@ export default function ActivityView() {
 
             {/* Activity feed — chat-style layout */}
             <div className="flex-1 overflow-y-auto px-4 py-3" style={{ scrollbarWidth: 'thin' }}>
-              {activity.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 text-zinc-500 text-sm gap-3">
-                  <Activity size={28} className="text-zinc-600" />
-                  <span>{loading ? 'Loading activity...' : 'No activity yet'}</span>
-                  <span className="text-xs text-zinc-600">Messages from all connectors will appear here in real-time</span>
-                </div>
-              ) : (
+              {/* Agent activity entries mixed in */}
+              {(() => {
+                // Build agent activity items for the feed
+                const aliveAgents = agents.filter(a => a.status === 'running' || a.status === 'standby');
+                const agentFeedItems = aliveAgents.map(a => ({
+                  type: 'agent' as const,
+                  agentId: a.id,
+                  agentName: a.name,
+                  status: a.status,
+                  lastActivity: a.last_activity,
+                }));
+
+                const hasActivity = activity.length > 0 || agentFeedItems.length > 0;
+
+                if (!hasActivity) {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-48 text-zinc-500 text-sm gap-3">
+                      <Activity size={28} className="text-zinc-600" />
+                      <span>{loading ? 'Loading activity...' : 'No activity yet'}</span>
+                      <span className="text-xs text-zinc-600">Messages from connectors and agents appear here</span>
+                    </div>
+                  );
+                }
+
+                return (
                 <div className="space-y-1">
+                  {/* Agent status cards at top */}
+                  {agentFeedItems.length > 0 && (
+                    <div className="space-y-1 mb-3">
+                      {agentFeedItems.map(a => (
+                        <button
+                          key={a.agentId}
+                          onClick={() => { setSelectedAgent(a.agentId); setSelectedSession(null); }}
+                          className="w-full text-left flex gap-3 py-2 px-3 rounded-lg hover:bg-zinc-800/30 transition-all group"
+                        >
+                          <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center border ${
+                            a.status === 'standby' ? 'bg-violet-500/10 text-violet-400 border-violet-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          }`}>
+                            <Bot size={14} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`text-xs font-semibold ${a.status === 'standby' ? 'text-violet-400' : 'text-emerald-400'}`}>{a.agentName}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                a.status === 'standby' ? 'bg-violet-500/10 text-violet-400' : 'bg-emerald-500/10 text-emerald-400'
+                              }`}>{a.status}</span>
+                            </div>
+                            <div className="text-[12px] text-zinc-500">
+                              {a.status === 'running' ? 'Processing...' : 'Listening for messages'}
+                            </div>
+                          </div>
+                          <ChevronRight size={12} className="text-zinc-800 group-hover:text-zinc-500 mt-2.5 flex-shrink-0 transition-colors" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Connector activity */}
                   {activity.map((entry, i) => {
                     const style = getChannelStyle(entry.channel);
                     const data = entry.data as Record<string, unknown>;
@@ -918,7 +968,8 @@ export default function ActivityView() {
                     );
                   })}
                 </div>
-              )}
+                );
+              })()}
             </div>
           </>
         )}
