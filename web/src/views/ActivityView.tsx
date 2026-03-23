@@ -532,6 +532,41 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
             return null;
           });
         })()}
+
+        {/* Typing indicators for agents currently processing */}
+        {(() => {
+          const typingAgents = agents.filter(a => a.status === 'running');
+          if (typingAgents.length === 0) return null;
+
+          const agentColors = [
+            { text: 'text-emerald-400', dot: 'bg-emerald-400' },
+            { text: 'text-pink-400', dot: 'bg-pink-400' },
+            { text: 'text-cyan-400', dot: 'bg-cyan-400' },
+            { text: 'text-amber-400', dot: 'bg-amber-400' },
+          ];
+
+          return typingAgents.map(a => {
+            const idx = aliveAgents.findIndex(x => x.id === a.id);
+            const color = agentColors[idx >= 0 ? idx % agentColors.length : 0];
+            const isOther = a.id !== agentId;
+
+            return (
+              <div key={`typing-${a.id}`} className={`flex ${isOther ? 'justify-end' : 'justify-start'}`}>
+                <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-zinc-800/40 border border-zinc-700/20">
+                  <Bot size={10} className={color.text} />
+                  <span className={`text-[10px] font-medium ${color.text}`}>{a.name}</span>
+                  <span className="flex items-center gap-1">
+                    <span className={`w-1.5 h-1.5 rounded-full ${color.dot} animate-bounce`} style={{ animationDelay: '0ms' }} />
+                    <span className={`w-1.5 h-1.5 rounded-full ${color.dot} animate-bounce`} style={{ animationDelay: '150ms' }} />
+                    <span className={`w-1.5 h-1.5 rounded-full ${color.dot} animate-bounce`} style={{ animationDelay: '300ms' }} />
+                  </span>
+                  <span className="text-[10px] text-zinc-600">typing...</span>
+                </div>
+              </div>
+            );
+          });
+        })()}
+
         <div ref={bottomRef} />
       </div>
 
