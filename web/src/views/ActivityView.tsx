@@ -375,21 +375,15 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
 
           return groups.map((group, gi) => {
             if (group.type === 'thinking') {
-              // Collapsible thinking block
-              const summary = group.entries.map(e => {
-                if (e.type === 'model_done') return e.message?.split(' responded ')[0] || 'model';
-                if (e.type === 'tool_start') return e.message?.split(' ')[0] || 'tool';
-                return null;
-              }).filter(Boolean);
-              const label = summary.length > 0 ? summary.join(' → ') : `${group.entries.length} steps`;
-
+              // Minimal thinking indicator — just a tiny dot, expandable
               return (
-                <details key={gi} className="group">
-                  <summary className="flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer hover:bg-zinc-800/40 text-zinc-600 text-[10px] list-none">
-                    <ChevronRight size={10} className="group-open:rotate-90 transition-transform flex-shrink-0" />
-                    <Cpu size={10} className="text-violet-400/50 flex-shrink-0" />
-                    <span className="truncate">{label}</span>
-                    <span className="ml-auto text-zinc-700">{group.entries.length} steps</span>
+                <details key={gi} className="group flex justify-center">
+                  <summary className="flex items-center justify-center gap-1 py-0.5 cursor-pointer list-none text-zinc-700 hover:text-zinc-500">
+                    <span className="flex gap-0.5">
+                      <span className="w-1 h-1 rounded-full bg-zinc-700" />
+                      <span className="w-1 h-1 rounded-full bg-zinc-700" />
+                      <span className="w-1 h-1 rounded-full bg-zinc-700" />
+                    </span>
                   </summary>
                   <div className="ml-4 pl-2 border-l border-zinc-800 space-y-0.5 mt-1 mb-1">
                     {group.entries.map((entry, ei) => {
@@ -421,14 +415,13 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
             if (isText && (
               entry.message === 'agent finished' ||
               entry.message?.startsWith('activation complete:') ||
-              entry.message?.match(/^(Got it|I understand|I'll be ready|Let me|Here's how)/) // skip setup chatter
+              entry.message?.match(/^(Got it|I understand|I'll be ready|I'm ready|Let me|Here's how)/)
             )) {
               return null;
             }
-            // Skip repeated standby status
-            if (isStatus && entry.message?.includes('standby')) {
-              return null;
-            }
+            if (isStatus) return null; // hide all status lines
+            // Hide standalone errors (they're in thinking blocks)
+            if (isError && entry.message?.includes('standby activation error')) return null;
 
             // Agent identity
             const me = (entry as MergedLogEntry);
@@ -475,13 +468,15 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
             }
 
             if (isText) {
-              // Agent's own response — show on left (like bot messages in chat)
               const cleaned = cleanMessage(entry.message || '');
               if (!cleaned) return null;
 
+              // Current agent → left, other agents → right (like a conversation)
+              const isOtherAgent = entryAgentId !== agentId;
+
               return (
-                <div key={gi} className="flex justify-start">
-                  <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 border ${aColor.bubble}`}>
+                <div key={gi} className={`flex ${isOtherAgent ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 border ${aColor.bubble}`}>
                     <div className="flex items-center gap-1.5 mb-1">
                       <Bot size={10} className={aColor.text} />
                       <span className={`text-[10px] font-medium ${aColor.text}`}>{entryAgentName}</span>
