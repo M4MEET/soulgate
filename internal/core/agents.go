@@ -792,10 +792,13 @@ func (am *AgentManager) runAgent(ctx context.Context, orch *Orchestrator, agent 
 	}
 
 	agentPrompt := fmt.Sprintf(
-		"%s%s\n\nYour name is '%s' and your specific task is:\n\n%s\n\n"+
+		"%s%s\n\nYour name is '%s' (ID: %s) and your specific task is:\n\n%s\n\n"+
+			"You can communicate with other agents using agent_message (send a message to another agent's inbox) "+
+			"and agent_list (see all agents and their status). When asked to send a message to another agent, "+
+			"always use agent_message — don't just describe what they're doing.\n\n"+
 			"Complete this task thoroughly, then provide a clear summary of what you did and the results. "+
 			"Be concise but complete.",
-		roleDirective, parentClause, agent.Name, agent.Task,
+		roleDirective, parentClause, agent.Name, agent.ID, agent.Task,
 	)
 
 	// Create a dedicated run for this agent
@@ -1125,9 +1128,15 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 		for _, c := range agent.Capabilities {
 			capSet[c] = true
 		}
-		// Sub-agents always get inter-agent communication tools
+		// All agents always get inter-agent communication + discovery tools
 		capSet["agent_delegate"] = true
 		capSet["agent_message"] = true
+		capSet["agent_list"] = true
+		capSet["agent_create"] = true
+		capSet["agent_memory_write"] = true
+		capSet["agent_memory_read"] = true
+		capSet["agent_memory_list"] = true
+		capSet["search_available_tools"] = true
 	}
 
 	filtered := make([]model.ToolSchema, 0, len(tools))
