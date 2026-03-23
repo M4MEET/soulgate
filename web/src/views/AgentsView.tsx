@@ -26,6 +26,7 @@ import toast from 'react-hot-toast';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string; icon: React.ElementType }> = {
   running:   { label: 'Running',   color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', dot: 'bg-emerald-400',  icon: Activity },
+  standby:   { label: 'Standby',   color: 'text-violet-400 bg-violet-500/10 border-violet-500/20',    dot: 'bg-violet-400',   icon: Radio },
   completed: { label: 'Completed', color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',            dot: 'bg-sky-400',      icon: CheckCircle },
   stopped:   { label: 'Stopped',   color: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',         dot: 'bg-zinc-400',     icon: Square },
   failed:    { label: 'Failed',    color: 'text-red-400 bg-red-500/10 border-red-500/20',            dot: 'bg-red-400',      icon: AlertCircle },
@@ -200,7 +201,7 @@ function StatusBadge({ status }: { status: string }) {
   const Icon = cfg.icon;
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium ${cfg.color}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${status === 'running' ? 'animate-pulse' : ''}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${status === 'running' || status === 'standby' ? 'animate-pulse' : ''}`} />
       <Icon size={10} />
       {cfg.label}
     </span>
@@ -286,7 +287,9 @@ function AgentCard({
   agent, onClick, onDelete, onRefresh,
 }: { agent: AgentData; onClick: () => void; onDelete: () => void; onRefresh: () => void }) {
   const isRunning = agent.status === 'running';
-  const isStopped = agent.status === 'stopped' || agent.status === 'error' || agent.status === 'completed';
+  const isStandby = agent.status === 'standby';
+  const isAlive = isRunning || isStandby;
+  const isStopped = agent.status === 'stopped' || agent.status === 'error' || agent.status === 'completed' || agent.status === 'failed';
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -326,12 +329,17 @@ function AgentCard({
           <span>{agent.last_activity ? formatRelativeTime(agent.last_activity) : 'just created'}</span>
         </div>
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-          {isRunning && (
+          {isStandby && (
+            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-violet-500/10 text-violet-400 text-xs">
+              <Radio size={11} className="animate-pulse" /> Listening
+            </span>
+          )}
+          {isAlive && (
             <button onClick={handleStop} className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs transition-all" title="Stop">
               <Square size={11} /> Stop
             </button>
           )}
-          {(isRunning || isStopped) && (
+          {(isAlive || isStopped) && (
             <button onClick={handleRestart} className="flex items-center gap-1 px-2 py-1 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs transition-all" title="Restart">
               <RefreshCw size={11} /> Restart
             </button>

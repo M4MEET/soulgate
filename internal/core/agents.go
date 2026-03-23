@@ -537,8 +537,8 @@ func (am *AgentManager) loadState() {
 			agent.logMu.Unlock()
 		}
 
-		// Running agents that were interrupted are marked as stopped
-		if agent.Status == AgentRunning {
+		// Running/standby agents that were interrupted are marked as stopped
+		if agent.Status == AgentRunning || agent.Status == AgentStandby {
 			agent.Status = AgentStopped
 			now := time.Now()
 			agent.CompletedAt = &now
