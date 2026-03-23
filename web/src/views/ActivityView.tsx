@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Activity, MessageSquare, Bot, Radio, RefreshCw,
-  ChevronRight, Clock, Hash, User, ArrowRight, Zap, Send,
+  ChevronRight, Clock, User, Zap, Send,
   Globe, Filter
 } from 'lucide-react';
 import {
@@ -133,11 +134,11 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
 
             return (
               <div key={i} className={`flex ${isResponse ? 'justify-start' : isIncoming ? 'justify-end' : 'justify-center'}`}>
-                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                <div className={`rounded-xl px-3 py-2 text-sm ${
                   isIncoming
-                    ? 'bg-blue-600/20 border border-blue-500/20 text-blue-100'
+                    ? 'max-w-[75%] bg-blue-600/20 border border-blue-500/20 text-blue-100'
                     : isResponse
-                    ? 'bg-zinc-800/60 border border-zinc-700/40 text-zinc-200'
+                    ? 'max-w-[90%] bg-zinc-800/60 border border-zinc-700/40 text-zinc-200'
                     : isTool
                     ? 'bg-amber-500/5 border border-amber-500/10 text-amber-200 text-xs font-mono w-full'
                     : 'bg-zinc-800/30 border border-zinc-700/20 text-zinc-400 text-xs w-full'
@@ -162,8 +163,12 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
                       <span className="text-[10px] text-amber-400">{msg.type}: {String(data.tool_name || data.tool || '')}</span>
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap break-words">
-                    {String(data.text || data.result || data.error || JSON.stringify(data).slice(0, 300))}
+                  <div className="whitespace-pre-wrap break-words prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1 prose-ul:my-1 prose-li:my-0.5 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-zinc-900 prose-pre:rounded-lg prose-strong:text-zinc-100">
+                    {isResponse ? (
+                      <ReactMarkdown>{String(data.text || data.result || data.error || '')}</ReactMarkdown>
+                    ) : (
+                      String(data.text || data.result || data.error || JSON.stringify(data).slice(0, 300))
+                    )}
                   </div>
                   <div className="text-[10px] text-zinc-600 mt-1 text-right">{formatTs(msg.ts)}</div>
                 </div>
@@ -261,7 +266,7 @@ export default function ActivityView() {
   ).sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-1 h-full overflow-hidden">
       {/* Left panel -- Connectors & Sessions */}
       <div className="w-80 flex-shrink-0 border-r border-zinc-700/40 flex flex-col bg-zinc-900/30 overflow-hidden">
         {/* Header */}
@@ -423,16 +428,13 @@ export default function ActivityView() {
               )}
             </div>
 
-            {/* Activity feed */}
-            <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
+            {/* Activity feed — chat-style layout */}
+            <div className="flex-1 overflow-y-auto px-4 py-3" style={{ scrollbarWidth: 'thin' }}>
               {activity.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-48 text-zinc-500 text-sm gap-3">
                   <Activity size={28} className="text-zinc-600" />
                   <span>{loading ? 'Loading activity...' : 'No activity yet'}</span>
                   <span className="text-xs text-zinc-600">Messages from all connectors will appear here in real-time</span>
-                  {!loading && connectors && connectors.channels.length === 0 && (
-                    <span className="text-xs text-amber-500/70 mt-1">No connectors active -- connect one first</span>
-                  )}
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -441,49 +443,63 @@ export default function ActivityView() {
                     const data = entry.data as Record<string, unknown>;
                     const isMessage = entry.type === 'event.message' || entry.type === 'message';
                     const isResponse = entry.type === 'cmd.channel.send' || entry.type === 'response';
-                    const isTool = entry.type.includes('tool');
+                    const text = String(data.text || data.result || data.error || '').slice(0, 200);
+                    const senderName = String((data.sender as any)?.username || (data.sender as any)?.name || '');
+                    const channelLabel = entry.channel?.charAt(0).toUpperCase() + entry.channel?.slice(1);
 
-                    let icon = <Hash size={12} />;
-                    let label = entry.type;
-                    let preview = '';
-
-                    if (isMessage) {
-                      icon = <ArrowRight size={12} className="text-blue-400" />;
-                      label = String((data.sender as any)?.username || (data.sender as any)?.name || 'user');
-                      preview = String(data.text || '').slice(0, 120);
-                    } else if (isResponse) {
-                      icon = <Send size={12} className="text-emerald-400" />;
-                      label = 'SoulGate';
-                      preview = String(data.text || '').slice(0, 120);
-                    } else if (isTool) {
-                      icon = <Zap size={12} className="text-amber-400" />;
-                      label = String(data.tool_name || entry.type);
-                      preview = String(data.result || data.error || '').slice(0, 80);
-                    }
+                    // Show date separator when date changes
+                    const prevEntry = i > 0 ? activity[i - 1] : null;
+                    const curDate = new Date(entry.ts * 1000).toLocaleDateString();
+                    const prevDate = prevEntry ? new Date(prevEntry.ts * 1000).toLocaleDateString() : '';
+                    const showDateSep = curDate !== prevDate;
 
                     return (
-                      <button
-                        key={`${entry.ts}-${i}`}
-                        onClick={() => setSelectedSession(entry.session_id)}
-                        className={`w-full text-left flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-zinc-800/40 transition-all group ${
-                          i === 0 ? 'bg-zinc-800/20' : ''
-                        }`}
-                      >
-                        <div className="mt-0.5">{icon}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${style.bg} ${style.text} capitalize font-medium`}>
-                              {entry.channel}
-                            </span>
-                            <span className="text-xs text-zinc-300 font-medium">{label}</span>
-                            <span className="ml-auto text-[10px] text-zinc-600">{formatTs(entry.ts)}</span>
+                      <div key={`${entry.ts}-${i}`}>
+                        {showDateSep && (
+                          <div className="flex items-center gap-3 my-3">
+                            <div className="flex-1 h-px bg-zinc-800" />
+                            <span className="text-[10px] text-zinc-600 font-medium">{curDate}</span>
+                            <div className="flex-1 h-px bg-zinc-800" />
                           </div>
-                          {preview && (
-                            <div className="text-xs text-zinc-500 mt-0.5 truncate">{preview}</div>
-                          )}
-                        </div>
-                        <ChevronRight size={12} className="text-zinc-700 group-hover:text-zinc-500 mt-1.5 flex-shrink-0" />
-                      </button>
+                        )}
+                        <button
+                          onClick={() => setSelectedSession(entry.session_id)}
+                          className={`w-full text-left flex gap-3 py-2 px-3 rounded-lg hover:bg-zinc-800/30 transition-all group ${
+                            isResponse ? '' : ''
+                          }`}
+                        >
+                          {/* Avatar / icon */}
+                          <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold ${
+                            isResponse
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : isMessage
+                              ? `${style.bg} ${style.text} border ${style.border}`
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {isResponse ? <Bot size={14} /> : isMessage ? <User size={14} /> : <Zap size={14} />}
+                          </div>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`text-xs font-semibold ${isResponse ? 'text-emerald-400' : isMessage ? 'text-zinc-200' : 'text-amber-400'}`}>
+                                {isResponse ? 'SoulGate' : isMessage ? (senderName || 'User') : 'Tool'}
+                              </span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded ${style.bg} ${style.text} font-medium`}>
+                                {channelLabel}
+                              </span>
+                              <span className="ml-auto text-[10px] text-zinc-600 tabular-nums">{formatTs(entry.ts)}</span>
+                            </div>
+                            {text && (
+                              <div className={`text-[13px] leading-relaxed ${isResponse ? 'text-zinc-400' : 'text-zinc-300'} line-clamp-2`}>
+                                {text}
+                              </div>
+                            )}
+                          </div>
+
+                          <ChevronRight size={12} className="text-zinc-800 group-hover:text-zinc-500 mt-2.5 flex-shrink-0 transition-colors" />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
