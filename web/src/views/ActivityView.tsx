@@ -314,8 +314,8 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
         </div>
       </div>
 
-      {/* Activity log */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-1" style={{ scrollbarWidth: 'thin' }}>
+      {/* Activity log — chat-style with collapsible thinking */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ scrollbarWidth: 'thin' }}>
         {loading && (
           <div className="flex items-center gap-2 text-zinc-500 text-sm py-4">
             <Activity size={14} className="animate-spin" /> Loading...
@@ -324,41 +324,156 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
         {!loading && entries.length === 0 && (
           <div className="text-center py-8 text-zinc-600 text-sm">No activity yet</div>
         )}
-        {entries.map((entry, i) => {
-          const cfg = LOG_ICONS[entry.type] || { color: 'text-zinc-500', bg: 'bg-zinc-500/10', icon: Clock };
-          const Icon = cfg.icon;
-          const isMsg = entry.type === 'message_received';
-          const isApproval = entry.message?.toLowerCase().includes('approval') || entry.message?.toLowerCase().includes('permission');
+        {(() => {
+          // Group entries into: visible messages + collapsible thinking blocks
+          const groups: { type: 'message' | 'thinking'; entries: typeof entries }[] = [];
+          let thinkingBuf: typeof entries = [];
 
-          return (
-            <div key={i} className={`flex items-start gap-2 py-1.5 px-2 rounded-lg transition-colors ${
-              isMsg ? 'bg-blue-500/5 border border-blue-500/15' :
-              isApproval ? 'bg-amber-500/5 border border-amber-500/15' :
-              'hover:bg-zinc-800/40'
-            }`}>
-              <span className={`mt-0.5 p-1 rounded-md ${cfg.bg} flex-shrink-0`}>
-                <Icon size={10} className={cfg.color} />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-medium ${cfg.color}`}>{entry.type}</span>
-                  <span className="text-[10px] text-zinc-600">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+          const flushThinking = () => {
+            if (thinkingBuf.length > 0) {
+              groups.push({ type: 'thinking', entries: [...thinkingBuf] });
+              thinkingBuf = [];
+            }
+          };
+
+          for (const entry of entries) {
+            const isVisible = entry.type === 'text' || entry.type === 'message_received' || entry.type === 'status' || entry.type === 'error';
+            if (isVisible) {
+              flushThinking();
+              groups.push({ type: 'message', entries: [entry] });
+            } else {
+              thinkingBuf.push(entry);
+            }
+          }
+          flushThinking();
+
+          return groups.map((group, gi) => {
+            if (group.type === 'thinking') {
+              // Collapsible thinking block
+              const summary = group.entries.map(e => {
+                if (e.type === 'model_done') return e.message?.split(' responded ')[0] || 'model';
+                if (e.type === 'tool_start') return e.message?.split(' ')[0] || 'tool';
+                return null;
+              }).filter(Boolean);
+              const label = summary.length > 0 ? summary.join(' → ') : `${group.entries.length} steps`;
+
+              return (
+                <details key={gi} className="group">
+                  <summary className="flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer hover:bg-zinc-800/40 text-zinc-600 text-[10px] list-none">
+                    <ChevronRight size={10} className="group-open:rotate-90 transition-transform flex-shrink-0" />
+                    <Cpu size={10} className="text-violet-400/50 flex-shrink-0" />
+                    <span className="truncate">{label}</span>
+                    <span className="ml-auto text-zinc-700">{group.entries.length} steps</span>
+                  </summary>
+                  <div className="ml-4 pl-2 border-l border-zinc-800 space-y-0.5 mt-1 mb-1">
+                    {group.entries.map((entry, ei) => {
+                      const cfg = LOG_ICONS[entry.type] || { color: 'text-zinc-500', bg: 'bg-zinc-500/10', icon: Clock };
+                      const Icon = cfg.icon;
+                      return (
+                        <div key={ei} className="flex items-start gap-1.5 py-0.5 px-1 text-[10px]">
+                          <Icon size={9} className={`${cfg.color} mt-0.5 flex-shrink-0 opacity-60`} />
+                          <span className={`${cfg.color} opacity-60`}>{entry.type}</span>
+                          <span className="text-zinc-600">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                          <span className="text-zinc-500 truncate flex-1">{entry.message}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            }
+
+            // Visible message entry
+            const entry = group.entries[0];
+            const isMsg = entry.type === 'message_received';
+            const isText = entry.type === 'text';
+            const isError = entry.type === 'error';
+            const isStatus = entry.type === 'status';
+            const isApproval = entry.message?.toLowerCase().includes('approval') || entry.message?.toLowerCase().includes('permission');
+
+            // Skip "agent finished" noise
+            if (isText && entry.message === 'agent finished') {
+              return null;
+            }
+            // Skip activation complete duplicates
+            if (isText && entry.message?.startsWith('activation complete:')) {
+              return null;
+            }
+
+            if (isMsg) {
+              // Incoming message — chat bubble style (right-aligned like user)
+              return (
+                <div key={gi} className="flex justify-end">
+                  <div className="max-w-[80%] rounded-xl px-3 py-2 bg-blue-600/15 border border-blue-500/20">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <User size={10} className="text-blue-400" />
+                      <span className="text-[10px] text-blue-400 font-medium">
+                        {entry.message?.match(/\[([^\]]+)\]/)?.[1] || 'User'}
+                      </span>
+                      <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="text-xs text-blue-100 break-words">
+                      {entry.message?.replace(/^\[[^\]]+\]:\s*/, '') || entry.message}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs text-zinc-300 mt-0.5 break-words">{entry.message}</div>
-                {isApproval && (
-                  <div className="flex gap-2 mt-1.5">
-                    <button className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-[10px] font-medium">
+              );
+            }
+
+            if (isText) {
+              // Agent response — chat bubble style (left-aligned)
+              return (
+                <div key={gi} className="flex justify-start">
+                  <div className="max-w-[85%] rounded-xl px-3 py-2 bg-zinc-800/60 border border-zinc-700/30">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Bot size={10} className="text-emerald-400" />
+                      <span className="text-[10px] text-emerald-400 font-medium">{agent?.name || 'Agent'}</span>
+                      <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="text-xs text-zinc-200 break-words whitespace-pre-wrap">{entry.message}</div>
+                  </div>
+                </div>
+              );
+            }
+
+            if (isError) {
+              return (
+                <div key={gi} className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/15">
+                  <AlertCircle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-red-300 break-words flex-1">{entry.message}</div>
+                  <span className="text-[9px] text-zinc-600 flex-shrink-0">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                </div>
+              );
+            }
+
+            if (isStatus) {
+              return (
+                <div key={gi} className="flex items-center justify-center gap-1.5 py-1 text-[10px] text-zinc-600">
+                  <Activity size={9} />
+                  <span>{entry.message}</span>
+                </div>
+              );
+            }
+
+            if (isApproval) {
+              return (
+                <div key={gi} className="px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                  <div className="text-xs text-amber-200 break-words mb-2">{entry.message}</div>
+                  <div className="flex gap-2">
+                    <button className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-[10px] font-medium">
                       <CheckCircle size={10} /> Approve
                     </button>
-                    <button className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] font-medium">
+                    <button className="flex items-center gap-1 px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] font-medium">
                       <Square size={10} /> Deny
                     </button>
                   </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                </div>
+              );
+            }
+
+            return null;
+          });
+        })()}
         <div ref={bottomRef} />
       </div>
 
