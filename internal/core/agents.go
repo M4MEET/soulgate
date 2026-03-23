@@ -114,16 +114,18 @@ type AgentLogEntry struct {
 // AgentConfig holds runtime configuration overrides for a background agent.
 // Zero values mean "use the orchestrator default".
 type AgentConfig struct {
-	Model          string   `json:"model"`           // model override (empty = use default)
-	Provider       string   `json:"provider"`        // provider override
-	AllowedTools   []string `json:"allowed_tools"`   // tool allowlist (empty = all)
-	MaxTokens      int      `json:"max_tokens"`      // token budget (0 = unlimited)
-	MaxCostUSD     float64  `json:"max_cost_usd"`    // cost limit (0 = unlimited)
-	ThinkingLevel  string   `json:"thinking_level"`  // off/low/medium/high
-	Temperature    float64  `json:"temperature"`     // 0.0–2.0
-	SystemPrompt   string   `json:"system_prompt"`   // custom instructions prepended to task
-	TimeoutSeconds int      `json:"timeout_seconds"` // max runtime in seconds (0 = use default)
-	AutoRestart    bool     `json:"auto_restart"`    // restart on crash
+	Model          string   `json:"model"`            // model override (empty = use default)
+	Provider       string   `json:"provider"`         // provider override
+	AllowedTools   []string `json:"allowed_tools"`    // tool allowlist (empty = all)
+	MaxTokens      int      `json:"max_tokens"`       // token budget (0 = unlimited)
+	MaxCostUSD     float64  `json:"max_cost_usd"`     // cost limit (0 = unlimited)
+	ThinkingLevel  string   `json:"thinking_level"`   // off/low/medium/high
+	Temperature    float64  `json:"temperature"`      // 0.0–2.0
+	SystemPrompt   string   `json:"system_prompt"`    // custom instructions prepended to task
+	TimeoutSeconds int      `json:"timeout_seconds"`  // max runtime in seconds (0 = use default)
+	AutoRestart    bool     `json:"auto_restart"`     // restart on crash
+	ScheduleEnabled bool   `json:"schedule_enabled"` // enable cron scheduling
+	ScheduleCron   string   `json:"schedule_cron"`    // cron expression (e.g. "0 9 * * 1-5")
 }
 
 // AgentMetrics holds observable runtime counters for a background agent.
@@ -878,6 +880,54 @@ func (am *AgentManager) Stop(id string) error {
 	agent.CompletedAt = &now
 	am.saveState()
 	return nil
+}
+
+// Restart stops a running agent and re-creates it with the same task/role/config.
+// Returns the new agent (with a new ID).
+func (am *AgentManager) Restart(orch *Orchestrator, id string) (*BackgroundAgent, error) {
+	am.mu.Lock()
+	old, ok := am.agents[id]
+	if !ok {
+		am.mu.Unlock()
+		return nil, fmt.Errorf("agent not found: %s", id)
+	}
+
+	// Capture config before stopping
+	name := old.Name
+	task := old.Task
+	role := old.Role
+	parentID := old.ParentID
+	cfg := old.GetConfig()
+
+	// Stop if running
+	if old.Status == AgentRunning && old.cancel != nil {
+		old.cancel()
+		now := time.Now().UTC()
+		old.Status = AgentStopped
+		old.CompletedAt = &now
+	}
+	am.mu.Unlock()
+
+	// Create new agent with same params
+	newAgent := am.Create(orch, name, task, role, parentID)
+	newAgent.SetConfig(cfg)
+	return newAgent, nil
+}
+
+// GetMessages returns the pending messages in an agent's inbox without draining them.
+func (am *AgentManager) GetMessages(id string) ([]AgentMessage, error) {
+	am.mu.RLock()
+	agent, ok := am.agents[id]
+	am.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("agent not found: %s", id)
+	}
+
+	agent.msgMu.Lock()
+	defer agent.msgMu.Unlock()
+	out := make([]AgentMessage, len(agent.inbox))
+	copy(out, agent.inbox)
+	return out, nil
 }
 
 // executeAgentLoop is like executeAgenticLoop but for background agents.

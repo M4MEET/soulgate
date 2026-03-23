@@ -14,7 +14,7 @@ import {
 import {
   fetchAgents, createAgent, fetchAgentDetail, fetchAgentLog,
   fetchAgentMessages, updateAgentConfig, sendAgentMessage,
-  stopAgent, pauseAgent, fetchTools,
+  stopAgent, pauseAgent, restartAgent, fetchTools,
   type AgentData, type AgentDetailData, type AgentConfig,
   type AgentLogEntry, type AgentMessage,
 } from '../lib/api';
@@ -525,7 +525,7 @@ function ActivityTab({ agentId }: { agentId: string }) {
 
 // ── Detail Page: Configuration Tab ──────────────────────────────────────────
 
-function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSaved: () => void }) {
+function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSaved: () => void; }) {
   // Normalize null fields to safe defaults
   const safeConfig: AgentConfig = {
     model: detail.config?.model || '',
@@ -852,7 +852,15 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
             <Square size={13} /> Stop
           </button>
           <button
-            onClick={() => toast.success('Agent restarted')}
+            onClick={async () => {
+              try {
+                const result = await restartAgent(detail.id);
+                toast.success(`Agent restarted (new ID: ${result.new_id})`);
+                onSaved();
+              } catch (err: unknown) {
+                toast.error(err instanceof Error ? err.message : 'Restart failed');
+              }
+            }}
             className="py-2.5 rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-400 text-xs font-medium hover:bg-sky-600/30 transition-all flex items-center justify-center gap-1.5"
           >
             <RefreshCw size={13} /> Restart

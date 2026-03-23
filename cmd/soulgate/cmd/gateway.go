@@ -717,8 +717,10 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 					"thinking_level":  cfg.ThinkingLevel,
 					"temperature":     cfg.Temperature,
 					"system_prompt":   cfg.SystemPrompt,
-					"timeout_seconds": cfg.TimeoutSeconds,
-					"auto_restart":    cfg.AutoRestart,
+					"timeout_seconds":  cfg.TimeoutSeconds,
+					"auto_restart":     cfg.AutoRestart,
+					"schedule_enabled": cfg.ScheduleEnabled,
+					"schedule_cron":    cfg.ScheduleCron,
 				},
 				"activity_log": logMaps,
 				"log_count":    len(logMaps),
@@ -811,6 +813,12 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 					cfg.AllowedTools = tools
 				}
 			}
+			if v, ok := config["schedule_enabled"].(bool); ok {
+				cfg.ScheduleEnabled = v
+			}
+			if v, ok := config["schedule_cron"].(string); ok {
+				cfg.ScheduleCron = v
+			}
 			a.SetConfig(cfg)
 			return nil
 		},
@@ -820,6 +828,40 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 		// API-originated messages from agent-to-agent communication.
 		SendAgentMessage: func(id string, message string) error {
 			return orch.GetAgentManager().SendMessage("gateway-api", id, message)
+		},
+
+		// GetAgentMessages returns pending messages in an agent's inbox.
+		GetAgentMessages: func(id string) ([]map[string]interface{}, error) {
+			msgs, err := orch.GetAgentManager().GetMessages(id)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]map[string]interface{}, 0, len(msgs))
+			for _, m := range msgs {
+				out = append(out, map[string]interface{}{
+					"from_id":   m.FromID,
+					"from_name": m.FromName,
+					"message":   m.Message,
+					"timestamp": m.Timestamp,
+				})
+			}
+			return out, nil
+		},
+
+		// RestartAgent stops and re-creates an agent with the same config.
+		RestartAgent: func(id string) (map[string]interface{}, error) {
+			newAgent, err := orch.GetAgentManager().Restart(orch, id)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{
+				"status":    "restarted",
+				"old_id":    id,
+				"new_id":    newAgent.ID,
+				"name":      newAgent.Name,
+				"task":      newAgent.Task,
+				"role":      string(newAgent.Role),
+			}, nil
 		},
 
 		// ListFiles delegates to the FileBroker to list a workspace directory.

@@ -625,32 +625,42 @@ export async function fetchAgentMessages(id: string): Promise<AgentMessage[]> {
 }
 
 export async function updateAgentConfig(id: string, config: Partial<AgentConfig>): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/config`, {
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to update config');
 }
 
 export async function sendAgentMessage(id: string, message: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/message`, {
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
   });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to send message');
 }
 
 export async function stopAgent(id: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to stop agent');
 }
 
 export async function deleteAgent(id: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete agent');
 }
 
 export async function pauseAgent(id: string): Promise<void> {
-  // Pause is not supported by the backend — stop instead
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to pause agent');
+}
+
+export async function restartAgent(id: string): Promise<{ new_id: string; old_id: string }> {
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/restart`, { method: 'POST' });
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to restart agent');
+  return res.json();
 }
 
 export async function fetchMemory(): Promise<MemoryEntry[]> {

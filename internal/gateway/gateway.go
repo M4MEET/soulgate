@@ -163,6 +163,12 @@ type GatewayAPI struct {
 	// SendAgentMessage delivers a message to a running agent's inbox.
 	SendAgentMessage func(id string, message string) error
 
+	// GetAgentMessages returns pending messages in an agent's inbox.
+	GetAgentMessages func(id string) ([]map[string]interface{}, error)
+
+	// RestartAgent stops and re-creates an agent with the same config.
+	RestartAgent func(id string) (map[string]interface{}, error)
+
 	// ListFiles returns the directory listing at the given workspace-relative
 	// path. Each entry is a map with keys: name, is_dir, size.
 	ListFiles func(path string) ([]map[string]interface{}, error)
@@ -2430,6 +2436,10 @@ func (g *Gateway) handleAPIAgentDetail(w http.ResponseWriter, r *http.Request) {
 		g.handleAgentConfig(w, r, id)
 	case "message":
 		g.handleAgentMessage(w, r, id)
+	case "messages":
+		g.handleAgentMessages(w, r, id)
+	case "restart":
+		g.handleAgentRestart(w, r, id)
 	default:
 		writeGatewayJSON(w, http.StatusNotFound, map[string]string{
 			"error": fmt.Sprintf("unknown sub-resource: %s", subResource),
@@ -2559,6 +2569,44 @@ func (g *Gateway) handleAgentMessage(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	writeGatewayJSON(w, http.StatusOK, map[string]string{"status": "sent", "id": id})
+}
+
+// handleAgentMessages handles GET /api/agents/{id}/messages.
+func (g *Gateway) handleAgentMessages(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.GetAgentMessages == nil {
+		writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
+		return
+	}
+	msgs, err := g.config.API.GetAgentMessages(id)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, map[string]interface{}{"messages": msgs})
+}
+
+// handleAgentRestart handles POST /api/agents/{id}/restart.
+func (g *Gateway) handleAgentRestart(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if g.config.API == nil || g.config.API.RestartAgent == nil {
+		writeGatewayJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent restart not available",
+		})
+		return
+	}
+	result, err := g.config.API.RestartAgent(id)
+	if err != nil {
+		writeGatewayJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeGatewayJSON(w, http.StatusOK, result)
 }
 
 // handleAPIExec handles POST /api/exec.
