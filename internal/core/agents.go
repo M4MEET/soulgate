@@ -1175,7 +1175,8 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 		capSet["agent_delegate"] = true
 		capSet["agent_message"] = true
 		capSet["agent_list"] = true
-		capSet["agent_create"] = true
+		// Intentionally NOT adding agent_create — agents should message
+		// existing agents, not spawn duplicates
 		capSet["agent_memory_write"] = true
 		capSet["agent_memory_read"] = true
 		capSet["agent_memory_list"] = true
