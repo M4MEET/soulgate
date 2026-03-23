@@ -529,48 +529,6 @@ func (e *llmTaskExecutor) Complete(ctx context.Context, prompt string, jsonMode 
 	return resp.Message.Content, nil
 }
 
-// ── Agent memory handlers ────────────────────────────────────────────────────
-
-func (o *Orchestrator) handleAgentMemoryWrite(_ context.Context, input json.RawMessage) (string, error) {
-	var p struct{ AgentID, Key, Value string }
-	if err := json.Unmarshal(input, &p); err != nil { return "", err }
-	a, ok := o.agentManager.Get(p.AgentID)
-	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
-	a.GetOrCreateMemory(o.workspace.ConfigDir).Set(p.Key, p.Value)
-	return fmt.Sprintf("Stored '%s' in %s memory", p.Key, p.AgentID), nil
-}
-
-func (o *Orchestrator) handleAgentMemoryRead(_ context.Context, input json.RawMessage) (string, error) {
-	var p struct{ AgentID, Key string }
-	if err := json.Unmarshal(input, &p); err != nil { return "", err }
-	a, ok := o.agentManager.Get(p.AgentID)
-	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
-	val, found := a.GetOrCreateMemory(o.workspace.ConfigDir).Get(p.Key)
-	if !found { return fmt.Sprintf("Key '%s' not found", p.Key), nil }
-	return val, nil
-}
-
-func (o *Orchestrator) handleAgentMemoryDelete(_ context.Context, input json.RawMessage) (string, error) {
-	var p struct{ AgentID, Key string }
-	if err := json.Unmarshal(input, &p); err != nil { return "", err }
-	a, ok := o.agentManager.Get(p.AgentID)
-	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
-	a.GetOrCreateMemory(o.workspace.ConfigDir).Delete(p.Key)
-	return fmt.Sprintf("Deleted '%s' from %s memory", p.Key, p.AgentID), nil
-}
-
-func (o *Orchestrator) handleAgentMemoryList(_ context.Context, input json.RawMessage) (string, error) {
-	var p struct{ AgentID string }
-	if err := json.Unmarshal(input, &p); err != nil { return "", err }
-	a, ok := o.agentManager.Get(p.AgentID)
-	if !ok { return "", fmt.Errorf("agent not found: %s", p.AgentID) }
-	entries := a.GetOrCreateMemory(o.workspace.ConfigDir).List()
-	if len(entries) == 0 { return "No entries", nil }
-	var sb strings.Builder
-	for _, e := range entries { sb.WriteString(fmt.Sprintf("%s = %s\n", e.Key, e.Value)) }
-	return sb.String(), nil
-}
-
 // ── Skill self-modification handlers ─────────────────────────────────────────
 
 func (o *Orchestrator) handleSkillCreate(_ context.Context, input json.RawMessage) (string, error) {
