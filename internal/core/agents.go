@@ -1154,14 +1154,11 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 
 	tools := o.getToolSchemas()
 
-	// Build the set of tools disallowed for sub-agents
-	topLevelAgentTools := map[string]bool{
-		"agent_create": true,
-		"agent_list":   true,
-		"agent_stop":   true,
+	// Tools that agents should NEVER have — prevents duplicate agent spawning
+	blockedAgentTools := map[string]bool{
+		"agent_create": true, // agents must not spawn clones
+		"agent_stop":   true, // agents must not kill other agents
 	}
-	// Sub-agents get agent_delegate and agent_message but not top-level creation
-	// Top-level agents (no parent) keep all agent tools
 	isSubAgent := agent.ParentID != ""
 
 	// Build capability allow-set (nil means allow all)
@@ -1185,8 +1182,12 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 
 	filtered := make([]model.ToolSchema, 0, len(tools))
 	for _, t := range tools {
-		// Sub-agents cannot spawn top-level agents
-		if isSubAgent && topLevelAgentTools[t.Name] {
+		// Block dangerous tools from all agents
+		if blockedAgentTools[t.Name] {
+			continue
+		}
+		// Sub-agents also can't delegate
+		if isSubAgent && t.Name == "agent_delegate" {
 			continue
 		}
 		// Apply capability filter if set
