@@ -231,8 +231,14 @@ const LOG_ICONS: Record<string, { color: string; bg: string; icon: React.Element
   message_received: { color: 'text-blue-400',    bg: 'bg-blue-500/10',   icon: MessageSquare },
 };
 
+// Extended log entry with source agent info
+interface MergedLogEntry extends AgentLogEntry {
+  agentId: string;
+  agentName: string;
+}
+
 function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents: AgentData[]; onClose: () => void }) {
-  const [entries, setEntries] = useState<AgentLogEntry[]>([]);
+  const [entries, setEntries] = useState<MergedLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const [input, setInput] = useState('');
@@ -244,10 +250,30 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
   const isStandby = agent?.status === 'standby';
   const isRunning = agent?.status === 'running';
 
+  // Get all alive agents for merged view
+  const aliveAgents = agents.filter(a => a.status === 'running' || a.status === 'standby');
+
   const loadLog = useCallback(async () => {
-    const data = await fetchAgentLog(agentId, 100);
-    setEntries(data);
-  }, [agentId]);
+    // Fetch logs from ALL alive agents and merge into unified timeline
+    const agentsToFetch = aliveAgents.length > 1 ? aliveAgents : [agent].filter(Boolean);
+    const allLogs: MergedLogEntry[] = [];
+
+    await Promise.all(
+      agentsToFetch.map(async (a) => {
+        if (!a) return;
+        try {
+          const data = await fetchAgentLog(a.id, 50);
+          for (const entry of data) {
+            allLogs.push({ ...entry, agentId: a.id, agentName: a.name });
+          }
+        } catch { /* ignore */ }
+      })
+    );
+
+    // Sort by timestamp
+    allLogs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    setEntries(allLogs);
+  }, [agentId, aliveAgents.length]);
 
   useEffect(() => {
     setLoading(true);
@@ -298,7 +324,11 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
               isStandby ? 'bg-violet-500/15 text-violet-400' : isRunning ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'
             }`}>{agent?.status}</span>
           </div>
-          <div className="text-[10px] text-zinc-500 truncate">{agent?.task}</div>
+          <div className="text-[10px] text-zinc-500 truncate">
+            {aliveAgents.length > 1
+              ? `Merged view: ${aliveAgents.map(a => a.name).join(' + ')}`
+              : agent?.task}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-zinc-600">{entries.length} entries</span>
@@ -400,34 +430,55 @@ function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents:
               return null;
             }
 
+            // Determine which agent this entry belongs to
+            const me = (entry as MergedLogEntry);
+            const entryAgentId = me.agentId || agentId;
+            const entryAgentName = me.agentName || agent?.name || 'Agent';
+            const isCurrentAgent = entryAgentId === agentId;
+
+            // Agent color palette for multi-agent conversations
+            const agentColors = [
+              { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', bubble: 'bg-zinc-800/60 border-zinc-700/30' },
+              { text: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', bubble: 'bg-pink-900/15 border-pink-500/20' },
+              { text: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', bubble: 'bg-cyan-900/15 border-cyan-500/20' },
+              { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', bubble: 'bg-amber-900/15 border-amber-500/20' },
+            ];
+            const agentIdx = aliveAgents.findIndex(a => a.id === entryAgentId);
+            const aColor = agentColors[agentIdx >= 0 ? agentIdx % agentColors.length : 0];
+
             if (isMsg) {
-              // Incoming message — chat bubble style (right-aligned like user)
+              // Incoming message — right-aligned bubble
+              const sender = entry.message?.match(/\[([^\]]+)\]/)?.[1] || 'User';
+              const msgText = entry.message?.replace(/^\[[^\]]+\]:\s*/, '') || entry.message;
+              // If sender is another agent, show with their color
+              const senderAgent = aliveAgents.find(a => a.name === sender || a.id === sender);
+              const senderColor = senderAgent
+                ? agentColors[aliveAgents.indexOf(senderAgent) % agentColors.length]
+                : null;
+
               return (
                 <div key={gi} className="flex justify-end">
-                  <div className="max-w-[80%] rounded-xl px-3 py-2 bg-blue-600/15 border border-blue-500/20">
+                  <div className={`max-w-[80%] rounded-xl px-3 py-2 ${senderColor ? senderColor.bubble : 'bg-blue-600/15 border-blue-500/20'} border`}>
                     <div className="flex items-center gap-1.5 mb-1">
-                      <User size={10} className="text-blue-400" />
-                      <span className="text-[10px] text-blue-400 font-medium">
-                        {entry.message?.match(/\[([^\]]+)\]/)?.[1] || 'User'}
-                      </span>
+                      {senderColor ? <Bot size={10} className={senderColor.text} /> : <User size={10} className="text-blue-400" />}
+                      <span className={`text-[10px] font-medium ${senderColor ? senderColor.text : 'text-blue-400'}`}>{sender}</span>
                       <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
                     </div>
-                    <div className="text-xs text-blue-100 break-words">
-                      {entry.message?.replace(/^\[[^\]]+\]:\s*/, '') || entry.message}
-                    </div>
+                    <div className="text-xs text-zinc-200 break-words">{msgText}</div>
+                    {!isCurrentAgent && <div className="text-[9px] text-zinc-600 mt-1">in {entryAgentName}'s inbox</div>}
                   </div>
                 </div>
               );
             }
 
             if (isText) {
-              // Agent response — chat bubble style (left-aligned)
+              // Agent response — left-aligned, colored per agent
               return (
-                <div key={gi} className="flex justify-start">
-                  <div className="max-w-[85%] rounded-xl px-3 py-2 bg-zinc-800/60 border border-zinc-700/30">
+                <div key={gi} className={`flex ${isCurrentAgent ? 'justify-start' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] rounded-xl px-3 py-2 ${aColor.bubble} border`}>
                     <div className="flex items-center gap-1.5 mb-1">
-                      <Bot size={10} className="text-emerald-400" />
-                      <span className="text-[10px] text-emerald-400 font-medium">{agent?.name || 'Agent'}</span>
+                      <Bot size={10} className={aColor.text} />
+                      <span className={`text-[10px] font-medium ${aColor.text}`}>{entryAgentName}</span>
                       <span className="text-[9px] text-zinc-600 ml-auto">{new Date(entry.timestamp).toLocaleTimeString()}</span>
                     </div>
                     <div className="text-xs text-zinc-200 break-words whitespace-pre-wrap">{entry.message}</div>
