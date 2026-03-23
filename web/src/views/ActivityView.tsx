@@ -3,11 +3,13 @@ import ReactMarkdown from 'react-markdown';
 import {
   Activity, MessageSquare, Bot, Radio, RefreshCw,
   ChevronRight, Clock, User, Zap, Send,
-  Globe, Filter
+  Globe, Filter, Play, Pause, Square, CheckCircle, AlertCircle, Cpu
 } from 'lucide-react';
 import {
   fetchSessions, fetchConnectors, fetchActivity, fetchSessionDetail, replyToSession, fetchAgents,
+  fetchAgentLog, sendAgentMessage,
   type SessionData, type ConnectorsData, type ActivityEntry, type SessionMessage, type AgentData,
+  type AgentLogEntry,
 } from '../lib/api';
 import toast from 'react-hot-toast';
 
@@ -214,11 +216,187 @@ function SessionChat({ sessionId, onClose }: { sessionId: string; onClose: () =>
 
 // ── Main Activity View ───────────────────────────────────────────────────────
 
+// ── Agent Live Control Panel (embedded in Activity Hub) ──────────────────────
+
+const LOG_ICONS: Record<string, { color: string; bg: string; icon: React.ElementType }> = {
+  model_call:       { color: 'text-violet-400',  bg: 'bg-violet-500/10', icon: Cpu },
+  model_done:       { color: 'text-violet-400',  bg: 'bg-violet-500/10', icon: CheckCircle },
+  tool_start:       { color: 'text-amber-400',   bg: 'bg-amber-500/10',  icon: Play },
+  tool_done:        { color: 'text-emerald-400', bg: 'bg-emerald-500/10',icon: CheckCircle },
+  error:            { color: 'text-red-400',     bg: 'bg-red-500/10',    icon: AlertCircle },
+  text:             { color: 'text-zinc-400',    bg: 'bg-zinc-500/10',   icon: MessageSquare },
+  iteration:        { color: 'text-zinc-500',    bg: 'bg-zinc-500/10',   icon: Clock },
+  status:           { color: 'text-blue-400',    bg: 'bg-blue-500/10',   icon: Activity },
+  info:             { color: 'text-blue-400',    bg: 'bg-blue-500/10',   icon: Activity },
+  message_received: { color: 'text-blue-400',    bg: 'bg-blue-500/10',   icon: MessageSquare },
+};
+
+function AgentLivePanel({ agentId, agents, onClose }: { agentId: string; agents: AgentData[]; onClose: () => void }) {
+  const [entries, setEntries] = useState<AgentLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const agent = agents.find(a => a.id === agentId);
+  const isStandby = agent?.status === 'standby';
+  const isRunning = agent?.status === 'running';
+
+  const loadLog = useCallback(async () => {
+    const data = await fetchAgentLog(agentId, 100);
+    setEntries(data);
+  }, [agentId]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadLog().finally(() => setLoading(false));
+  }, [loadLog]);
+
+  useEffect(() => {
+    if (paused) return;
+    const id = setInterval(() => loadLog(), 2000);
+    return () => clearInterval(id);
+  }, [paused, loadLog]);
+
+  useEffect(() => {
+    if (!paused && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [entries, paused]);
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setInput('');
+    try {
+      await sendAgentMessage(agentId, text);
+      toast.success('Sent to agent');
+      await loadLog();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Send failed');
+    } finally {
+      setSending(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className={`flex items-center gap-3 px-4 py-3 border-b border-zinc-700/40 ${isStandby ? 'bg-violet-500/5' : 'bg-emerald-500/5'}`}>
+        <button onClick={onClose} className="text-zinc-400 hover:text-zinc-200">
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
+        <div className={`w-2 h-2 rounded-full animate-pulse ${isStandby ? 'bg-violet-400' : 'bg-emerald-400'}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`text-sm font-semibold ${isStandby ? 'text-violet-400' : 'text-emerald-400'}`}>{agent?.name || agentId}</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              isStandby ? 'bg-violet-500/15 text-violet-400' : isRunning ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'
+            }`}>{agent?.status}</span>
+          </div>
+          <div className="text-[10px] text-zinc-500 truncate">{agent?.task}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-zinc-600">{entries.length} entries</span>
+          <button
+            onClick={() => setPaused(p => !p)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border transition-all ${
+              paused ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {paused ? <Play size={10} /> : <Pause size={10} />}
+            {paused ? 'Resume' : 'Pause'}
+          </button>
+        </div>
+      </div>
+
+      {/* Activity log */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-1" style={{ scrollbarWidth: 'thin' }}>
+        {loading && (
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-4">
+            <Activity size={14} className="animate-spin" /> Loading...
+          </div>
+        )}
+        {!loading && entries.length === 0 && (
+          <div className="text-center py-8 text-zinc-600 text-sm">No activity yet</div>
+        )}
+        {entries.map((entry, i) => {
+          const cfg = LOG_ICONS[entry.type] || { color: 'text-zinc-500', bg: 'bg-zinc-500/10', icon: Clock };
+          const Icon = cfg.icon;
+          const isMsg = entry.type === 'message_received';
+          const isApproval = entry.message?.toLowerCase().includes('approval') || entry.message?.toLowerCase().includes('permission');
+
+          return (
+            <div key={i} className={`flex items-start gap-2 py-1.5 px-2 rounded-lg transition-colors ${
+              isMsg ? 'bg-blue-500/5 border border-blue-500/15' :
+              isApproval ? 'bg-amber-500/5 border border-amber-500/15' :
+              'hover:bg-zinc-800/40'
+            }`}>
+              <span className={`mt-0.5 p-1 rounded-md ${cfg.bg} flex-shrink-0`}>
+                <Icon size={10} className={cfg.color} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-medium ${cfg.color}`}>{entry.type}</span>
+                  <span className="text-[10px] text-zinc-600">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div className="text-xs text-zinc-300 mt-0.5 break-words">{entry.message}</div>
+                {isApproval && (
+                  <div className="flex gap-2 mt-1.5">
+                    <button className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-[10px] font-medium">
+                      <CheckCircle size={10} /> Approve
+                    </button>
+                    <button className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] font-medium">
+                      <Square size={10} /> Deny
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Command input */}
+      <div className="flex-shrink-0 border-t border-zinc-700/40 px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            placeholder={isStandby ? "Send task to wake this agent..." : "Send message to agent..."}
+            disabled={sending}
+            className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500/60 disabled:opacity-50"
+          />
+          <button
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
+            className="p-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Send size={14} />
+          </button>
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-1">
+          {isStandby ? 'Agent is in standby — send a task to wake it up' : 'Send commands to steer the running agent'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ActivityView() {
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [connectors, setConnectors] = useState<ConnectorsData | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [agents, setAgents] = useState<AgentData[]>([]);
@@ -384,7 +562,7 @@ export default function ActivityView() {
               return (
                 <button
                   key={s.id}
-                  onClick={() => setSelectedSession(s.id)}
+                  onClick={() => { setSelectedSession(s.id); setSelectedAgent(null); }}
                   className={`w-full text-left px-3 py-2.5 border-b border-zinc-800/50 transition-all ${
                     isSelected ? 'bg-indigo-500/10 border-l-2 border-l-indigo-500' : 'hover:bg-zinc-800/40 border-l-2 border-l-transparent'
                   }`}
@@ -406,12 +584,57 @@ export default function ActivityView() {
               );
             })
           )}
+
+          {/* Active agents (running/standby) */}
+          {(() => {
+            const alive = agents.filter(a => a.status === 'running' || a.status === 'standby');
+            if (alive.length === 0) return null;
+            return (
+              <>
+                <div className="px-3 py-2 border-t border-zinc-700/30">
+                  <div className="flex items-center gap-1.5">
+                    <Bot size={11} className="text-violet-400" />
+                    <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Live Agents</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-400 font-medium ml-auto">{alive.length}</span>
+                  </div>
+                </div>
+                {alive.map(a => {
+                  const isSelected = selectedAgent === a.id;
+                  const isStandby = a.status === 'standby';
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => { setSelectedAgent(a.id); setSelectedSession(null); }}
+                      className={`w-full text-left px-3 py-2.5 border-b border-zinc-800/50 transition-all ${
+                        isSelected ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : 'hover:bg-zinc-800/40 border-l-2 border-l-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isStandby ? 'bg-violet-400 animate-pulse' : 'bg-emerald-400 animate-pulse'}`} />
+                        <span className={`text-xs font-semibold ${isStandby ? 'text-violet-400' : 'text-emerald-400'}`}>{a.name}</span>
+                        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full ${
+                          isStandby ? 'bg-violet-500/15 text-violet-400' : 'bg-emerald-500/15 text-emerald-400'
+                        }`}>{a.status}</span>
+                      </div>
+                      <div className="pl-3.5 text-[10px] text-zinc-500 truncate">{a.task}</div>
+                    </button>
+                  );
+                })}
+              </>
+            );
+          })()}
         </div>
       </div>
 
-      {/* Center panel -- Session chat or Activity feed */}
+      {/* Center panel -- Session chat, Agent live control, or Activity feed */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {selectedSession ? (
+        {selectedAgent ? (
+          <AgentLivePanel
+            agentId={selectedAgent}
+            agents={agents}
+            onClose={() => setSelectedAgent(null)}
+          />
+        ) : selectedSession ? (
           <SessionChat
             sessionId={selectedSession}
             onClose={() => setSelectedSession(null)}
