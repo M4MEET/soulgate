@@ -648,7 +648,7 @@ export async function stopAgent(id: string): Promise<void> {
 }
 
 export async function deleteAgent(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/delete`, { method: 'POST' });
   if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete agent');
 }
 

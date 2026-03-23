@@ -5,7 +5,7 @@ import {
   GitBranch, Database, Zap, ChevronRight, MessageSquare,
   Pause, Send, ArrowLeft, Settings, BarChart2,
   Filter, SortAsc, X, Cpu, DollarSign, Hash, Timer,
-  ToggleLeft, ToggleRight, PauseCircle, Radio, Trash2, ExternalLink,
+  ToggleLeft, ToggleRight, PauseCircle, Radio, Trash2,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -14,21 +14,25 @@ import {
 import {
   fetchAgents, createAgent, fetchAgentDetail, fetchAgentLog,
   fetchAgentMessages, updateAgentConfig, sendAgentMessage,
-  stopAgent, pauseAgent, restartAgent, fetchTools,
+  stopAgent, pauseAgent, restartAgent, deleteAgent, fetchTools,
+  fetchProviders, fetchProviderModels,
   type AgentData, type AgentDetailData, type AgentConfig,
-  type AgentLogEntry, type AgentMessage,
+  type AgentLogEntry, type AgentMessage, type ModelInfo,
 } from '../lib/api';
 import { formatRelativeTime, formatCost } from '../lib/utils';
 import toast from 'react-hot-toast';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<AgentData['status'], { label: string; color: string; dot: string; icon: React.ElementType }> = {
+const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string; icon: React.ElementType }> = {
   running:   { label: 'Running',   color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', dot: 'bg-emerald-400',  icon: Activity },
   completed: { label: 'Completed', color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',            dot: 'bg-sky-400',      icon: CheckCircle },
   stopped:   { label: 'Stopped',   color: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',         dot: 'bg-zinc-400',     icon: Square },
+  failed:    { label: 'Failed',    color: 'text-red-400 bg-red-500/10 border-red-500/20',            dot: 'bg-red-400',      icon: AlertCircle },
   error:     { label: 'Error',     color: 'text-red-400 bg-red-500/10 border-red-500/20',            dot: 'bg-red-400',      icon: AlertCircle },
+  paused:    { label: 'Paused',    color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',      dot: 'bg-amber-400',    icon: PauseCircle },
 };
+const DEFAULT_STATUS = STATUS_CONFIG.stopped;
 
 // ── Log entry types ──────────────────────────────────────────────────────────
 
@@ -191,8 +195,8 @@ const CHART_TOOLTIP_STYLE = {
 
 // ── Small reusable pieces ─────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: AgentData['status'] }) {
-  const cfg = STATUS_CONFIG[status];
+function StatusBadge({ status }: { status: string }) {
+  const cfg = STATUS_CONFIG[status] || DEFAULT_STATUS;
   const Icon = cfg.icon;
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium ${cfg.color}`}>
@@ -279,59 +283,63 @@ function TemplateCard({ template, onUse }: { template: AgentTemplate; onUse: (t:
 // ── Agent List Card ──────────────────────────────────────────────────────────
 
 function AgentCard({
-  agent, onClick,
-}: { agent: AgentData; onClick: () => void }) {
+  agent, onClick, onDelete, onRefresh,
+}: { agent: AgentData; onClick: () => void; onDelete: () => void; onRefresh: () => void }) {
+  const isRunning = agent.status === 'running';
+  const isStopped = agent.status === 'stopped' || agent.status === 'error' || agent.status === 'completed';
+
+  const handleStop = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try { await stopAgent(agent.id); toast.success('Agent stopped'); onRefresh(); }
+    catch (err) { toast.error(err instanceof Error ? err.message : 'Stop failed'); }
+  };
+
+  const handleRestart = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try { await restartAgent(agent.id); toast.success('Agent restarted'); onRefresh(); }
+    catch (err) { toast.error(err instanceof Error ? err.message : 'Restart failed'); }
+  };
+
   return (
     <div
       onClick={onClick}
-      className="group relative p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 hover:border-zinc-600/60 cursor-pointer transition-all"
+      className="group relative p-4 rounded-xl bg-zinc-800/40 border border-zinc-700/40 hover:border-zinc-600/60 cursor-pointer transition-all"
     >
-      {/* Quick action overlay */}
-      <div className="absolute top-3 right-3 hidden group-hover:flex items-center gap-1 z-10">
-        <button
-          onClick={e => { e.stopPropagation(); pauseAgent(agent.id).then(() => toast.success('Agent paused')); }}
-          className="p-1.5 rounded-lg bg-zinc-700/80 hover:bg-amber-500/20 text-zinc-400 hover:text-amber-400 transition-all"
-          title="Pause"
-        >
-          <PauseCircle size={12} />
-        </button>
-        <button
-          onClick={e => { e.stopPropagation(); stopAgent(agent.id).then(() => toast.success('Agent stopped')); }}
-          className="p-1.5 rounded-lg bg-zinc-700/80 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 transition-all"
-          title="Stop"
-        >
-          <Square size={12} />
-        </button>
-      </div>
-
-      <div className="flex items-start gap-3 mb-3">
+      <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0">
           <Bot size={18} className="text-indigo-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-zinc-100 text-sm truncate">{agent.name}</div>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-zinc-100 text-sm truncate">{agent.name}</span>
+            <StatusBadge status={agent.status} />
+          </div>
           <div className="text-xs text-zinc-500 capitalize">{agent.role}</div>
+          <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{agent.task}</p>
         </div>
       </div>
 
-      <p className="text-sm text-zinc-400 mb-3 line-clamp-2">{agent.task}</p>
-
-      <div className="flex items-center justify-between">
-        <StatusBadge status={agent.status} />
-        <span className="text-xs text-zinc-600">
-          {agent.last_activity ? formatRelativeTime(agent.last_activity) : 'just created'}
-        </span>
-      </div>
-
-      <div className="mt-3 pt-3 border-t border-zinc-700/30 flex items-center gap-4 text-xs text-zinc-600">
-        <span className="flex items-center gap-1">
-          <MessageSquare size={10} />
-          {agent.message_count ?? 0}
-        </span>
-        <span className="flex items-center gap-1">
-          <Hash size={10} />
-          {agent.id.slice(0, 8)}
-        </span>
+      {/* Action bar — always visible */}
+      <div className="mt-3 pt-3 border-t border-zinc-700/30 flex items-center justify-between">
+        <div className="flex items-center gap-3 text-xs text-zinc-600">
+          <span className="flex items-center gap-1"><Hash size={10} />{agent.id.slice(0, 8)}</span>
+          <span>{agent.last_activity ? formatRelativeTime(agent.last_activity) : 'just created'}</span>
+        </div>
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          {isRunning && (
+            <button onClick={handleStop} className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs transition-all" title="Stop">
+              <Square size={11} /> Stop
+            </button>
+          )}
+          {(isRunning || isStopped) && (
+            <button onClick={handleRestart} className="flex items-center gap-1 px-2 py-1 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs transition-all" title="Restart">
+              <RefreshCw size={11} /> Restart
+            </button>
+          )}
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center gap-1 px-2 py-1 rounded-md bg-zinc-700/50 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 text-xs transition-all" title="Delete">
+              <Trash2 size={11} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -405,15 +413,23 @@ function OverviewTab({ detail }: { detail: AgentDetailData }) {
 
 function ActivityTab({ agentId }: { agentId: string }) {
   const [entries, setEntries] = useState<AgentLogEntry[]>([]);
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const [filter, setFilter] = useState<string>('all');
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const loadLog = useCallback(async () => {
-    const data = await fetchAgentLog(agentId, 100);
-    setEntries(data);
+    const [logData, msgData] = await Promise.all([
+      fetchAgentLog(agentId, 100),
+      fetchAgentMessages(agentId),
+    ]);
+    setEntries(logData);
+    setMessages(msgData);
   }, [agentId]);
 
   useEffect(() => {
@@ -421,27 +437,43 @@ function ActivityTab({ agentId }: { agentId: string }) {
     loadLog().finally(() => setLoading(false));
   }, [loadLog]);
 
-  // Poll every 2 seconds
   useEffect(() => {
     if (paused) return;
     const id = setInterval(() => loadLog(), 2000);
     return () => clearInterval(id);
   }, [paused, loadLog]);
 
-  // Auto-scroll to bottom unless paused
   useEffect(() => {
     if (!paused && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [entries, paused]);
 
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setInput('');
+    try {
+      await sendAgentMessage(agentId, text);
+      toast.success('Message sent to agent');
+      await loadLog();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Send failed');
+    } finally {
+      setSending(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  // Merge log entries and messages into a unified timeline
   const allTypes = Array.from(new Set(entries.map(e => e.type)));
   const visible = filter === 'all' ? entries : entries.filter(e => e.type === filter);
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex flex-col h-full gap-0">
       {/* Controls */}
-      <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+      <div className="flex items-center gap-2 flex-wrap flex-shrink-0 pb-2">
         <div className="flex items-center gap-1 p-0.5 rounded-lg bg-zinc-800/60 border border-zinc-700/40">
           <button
             onClick={() => setFilter('all')}
@@ -464,6 +496,9 @@ function ActivityTab({ agentId }: { agentId: string }) {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-zinc-600">{visible.length} entries</span>
+          {messages.length > 0 && (
+            <span className="text-xs text-blue-400">{messages.length} pending msg</span>
+          )}
           <button
             onClick={() => setPaused(p => !p)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border transition-all ${
@@ -481,7 +516,7 @@ function ActivityTab({ agentId }: { agentId: string }) {
       {/* Log area */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto rounded-xl bg-zinc-900/50 border border-zinc-700/40 p-3 space-y-1 min-h-0"
+        className="flex-1 overflow-y-auto rounded-t-xl bg-zinc-900/50 border border-b-0 border-zinc-700/40 p-3 space-y-1 min-h-0"
         style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
       >
         {loading && (
@@ -495,8 +530,15 @@ function ActivityTab({ agentId }: { agentId: string }) {
         {visible.map((entry, i) => {
           const cfg = getLogTypeCfg(entry.type);
           const EntryIcon = cfg.icon;
+          const isApproval = entry.type === 'approval_required' || entry.message?.toLowerCase().includes('approval') || entry.message?.toLowerCase().includes('permission');
+          const isHumanMessage = entry.type === 'message_received';
+
           return (
-            <div key={i} className="flex items-start gap-2.5 py-1.5 px-2 rounded-lg hover:bg-zinc-800/40 transition-colors">
+            <div key={i} className={`flex items-start gap-2.5 py-1.5 px-2 rounded-lg transition-colors ${
+              isApproval ? 'bg-amber-500/5 border border-amber-500/20' :
+              isHumanMessage ? 'bg-blue-500/5 border border-blue-500/20' :
+              'hover:bg-zinc-800/40'
+            }`}>
               <span className={`mt-0.5 p-1 rounded-md ${cfg.bg} flex-shrink-0`}>
                 <EntryIcon size={11} className={cfg.color} />
               </span>
@@ -513,11 +555,46 @@ function ActivityTab({ agentId }: { agentId: string }) {
                     {JSON.stringify(entry.metadata)}
                   </div>
                 )}
+                {/* Inline approval buttons */}
+                {isApproval && (
+                  <div className="flex gap-2 mt-2">
+                    <button className="flex items-center gap-1 px-3 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-medium transition-all">
+                      <CheckCircle size={12} /> Approve
+                    </button>
+                    <button className="flex items-center gap-1 px-3 py-1 rounded-md bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-all">
+                      <AlertCircle size={12} /> Deny
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );
         })}
         <div ref={bottomRef} />
+      </div>
+
+      {/* Command input — steer the agent */}
+      <div className="flex-shrink-0 rounded-b-xl bg-zinc-900/80 border border-t-0 border-zinc-700/40 px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            placeholder="Send command or message to this agent..."
+            disabled={sending}
+            className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 disabled:opacity-50"
+          />
+          <button
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
+            className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Send size={14} />
+          </button>
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-1">Human-in-the-loop: steer the agent, provide context, or approve/deny actions</div>
       </div>
     </div>
   );
@@ -544,17 +621,34 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
   const [cfg, setCfg] = useState<AgentConfig>(safeConfig);
   const [saving, setSaving] = useState(false);
   const [availableTools, setAvailableTools] = useState<string[]>(['files_read', 'files_write', 'exec_command', 'web_search', 'files_list', 'web_fetch', 'git_status']);
+  const [liveProviders, setLiveProviders] = useState<string[]>([]);
+  const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   const m = detail.metrics;
   const tokenPct = Math.min((m.tokens_used / (cfg.max_tokens || 8192)) * 100, 100);
   const costPct = Math.min((m.cost_usd / (cfg.max_cost_usd || 1)) * 100, 100);
 
+  // Load tools + providers on mount
   useEffect(() => {
     fetchTools().then(tools => {
       const names = tools.map(t => t.name);
       if (names.length > 0) setAvailableTools(names);
-    });
+    }).catch(() => {});
+    fetchProviders().then(provs => {
+      if (provs.length > 0) setLiveProviders(provs);
+    }).catch(() => {});
   }, []);
+
+  // Load models when provider changes
+  useEffect(() => {
+    if (!cfg.provider) return;
+    setLoadingModels(true);
+    fetchProviderModels(cfg.provider).then(models => {
+      setLiveModels(models || []);
+      setLoadingModels(false);
+    }).catch(() => setLoadingModels(false));
+  }, [cfg.provider]);
 
   const save = async () => {
     setSaving(true);
@@ -583,299 +677,211 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
 
   return (
     <div className="space-y-5">
-      {/* Model & Provider */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-4">
-        <h4 className="text-sm font-semibold text-zinc-200">Model</h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Model & Provider — live from OpenRouter catalog */}
+      <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40">
+        <h4 className="text-xs font-semibold text-zinc-400 mb-2">Model & Provider</h4>
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5">Model</label>
+            <label className="text-[10px] text-zinc-500 mb-1 block">Provider ({liveProviders.length || '...'})</label>
+            <select
+              value={cfg.provider}
+              onChange={e => setCfg(c => ({ ...c, provider: e.target.value, model: '' }))}
+              className="w-full px-2 py-1.5 rounded bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500/60"
+            >
+              <option value="">Select provider...</option>
+              {(liveProviders.length > 0 ? liveProviders : PROVIDERS).map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500 mb-1 block">
+              Model {loadingModels ? '(loading...)' : liveModels.length > 0 ? `(${liveModels.length})` : ''}
+            </label>
             <select
               value={cfg.model}
               onChange={e => setCfg(c => ({ ...c, model: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500/60"
+              className="w-full px-2 py-1.5 rounded bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500/60"
             >
-              {MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1.5">Provider</label>
-            <select
-              value={cfg.provider}
-              onChange={e => setCfg(c => ({ ...c, provider: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500/60"
-            >
-              {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+              <option value="">Select model...</option>
+              {(liveModels.length > 0
+                ? liveModels.map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)
+                : MODELS.map(m => <option key={m} value={m}>{m}</option>)
+              )}
             </select>
           </div>
         </div>
       </section>
 
-      {/* Budgets */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-4">
-        <h4 className="text-sm font-semibold text-zinc-200">Budgets</h4>
-        <div className="space-y-3">
+      {/* Budgets — side by side */}
+      <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40">
+        <h4 className="text-xs font-semibold text-zinc-400 mb-2">Budgets</h4>
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-zinc-500">Token Budget</label>
-              <span className="text-xs text-zinc-400">{m.tokens_used.toLocaleString()} / {cfg.max_tokens.toLocaleString()}</span>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] text-zinc-500">Tokens</label>
+              <span className="text-[10px] text-zinc-500">{m.tokens_used.toLocaleString()} / {cfg.max_tokens.toLocaleString()}</span>
             </div>
-            <input
-              type="number"
-              value={cfg.max_tokens}
+            <input type="number" value={cfg.max_tokens}
               onChange={e => setCfg(c => ({ ...c, max_tokens: Number(e.target.value) }))}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500/60 mb-2"
+              className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500/60 mb-1"
             />
-            <div className="h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${tokenPct > 90 ? 'bg-red-500' : tokenPct > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`}
-                style={{ width: `${tokenPct}%` }}
-              />
+            <div className="h-1 bg-zinc-700 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${tokenPct > 90 ? 'bg-red-500' : tokenPct > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} style={{ width: `${tokenPct}%` }} />
             </div>
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-zinc-500">Cost Limit (USD)</label>
-              <span className="text-xs text-zinc-400">{formatCost(m.cost_usd)} / {formatCost(cfg.max_cost_usd)}</span>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] text-zinc-500">Cost (USD)</label>
+              <span className="text-[10px] text-zinc-500">{formatCost(m.cost_usd)} / {formatCost(cfg.max_cost_usd)}</span>
             </div>
-            <input
-              type="number"
-              step="0.01"
-              value={cfg.max_cost_usd}
+            <input type="number" step="0.01" value={cfg.max_cost_usd}
               onChange={e => setCfg(c => ({ ...c, max_cost_usd: Number(e.target.value) }))}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500/60 mb-2"
+              className="w-full px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500/60 mb-1"
             />
-            <div className="h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${costPct > 90 ? 'bg-red-500' : costPct > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                style={{ width: `${costPct}%` }}
-              />
+            <div className="h-1 bg-zinc-700 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${costPct > 90 ? 'bg-red-500' : costPct > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${costPct}%` }} />
             </div>
           </div>
         </div>
       </section>
 
-      {/* Generation settings */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-4">
-        <h4 className="text-sm font-semibold text-zinc-200">Generation</h4>
-        <div>
-          <label className="block text-xs text-zinc-500 mb-2">Thinking Level</label>
-          <div className="flex gap-2">
-            {THINKING_LEVELS.map(level => (
-              <button
-                key={level}
-                onClick={() => setCfg(c => ({ ...c, thinking_level: level }))}
-                className={`flex-1 py-1.5 rounded-lg text-xs border capitalize transition-all ${
-                  cfg.thinking_level === level
-                    ? 'bg-indigo-600/25 border-indigo-500/40 text-indigo-300'
-                    : 'border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
-                }`}
-              >
-                {level}
-              </button>
-            ))}
+      {/* Generation — side by side: thinking + temperature */}
+      <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40">
+        <h4 className="text-xs font-semibold text-zinc-400 mb-2">Generation</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] text-zinc-500 mb-1 block">Thinking</label>
+            <div className="flex gap-1 flex-wrap">
+              {THINKING_LEVELS.map(level => (
+                <button key={level}
+                  onClick={() => setCfg(c => ({ ...c, thinking_level: level }))}
+                  className={`px-2 py-1 rounded text-[10px] border capitalize transition-all ${
+                    cfg.thinking_level === level
+                      ? 'bg-indigo-600/25 border-indigo-500/40 text-indigo-300'
+                      : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >{level}</button>
+              ))}
+            </div>
           </div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs text-zinc-500">Temperature</label>
-            <span className="text-xs text-zinc-400 font-mono">{cfg.temperature.toFixed(2)}</span>
-          </div>
-          <input
-            type="range"
-            min={0} max={2} step={0.05}
-            value={cfg.temperature}
-            onChange={e => setCfg(c => ({ ...c, temperature: Number(e.target.value) }))}
-            className="w-full accent-indigo-500"
-          />
-          <div className="flex justify-between text-xs text-zinc-600 mt-0.5">
-            <span>0.0 (deterministic)</span>
-            <span>2.0 (creative)</span>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] text-zinc-500">Temperature</label>
+              <span className="text-[10px] text-zinc-400 font-mono">{cfg.temperature.toFixed(2)}</span>
+            </div>
+            <input type="range" min={0} max={2} step={0.05} value={cfg.temperature}
+              onChange={e => setCfg(c => ({ ...c, temperature: Number(e.target.value) }))}
+              className="w-full accent-indigo-500"
+            />
+            <div className="flex justify-between text-[9px] text-zinc-600"><span>precise</span><span>creative</span></div>
           </div>
         </div>
       </section>
 
-      {/* Allowed Tools */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-3">
-        <h4 className="text-sm font-semibold text-zinc-200">Allowed Tools</h4>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+      {/* Allowed Tools — 5 columns */}
+      <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40">
+        <h4 className="text-xs font-semibold text-zinc-400 mb-2">Allowed Tools</h4>
+        <div className="grid grid-cols-3 md:grid-cols-5 gap-x-3 gap-y-1">
           {availableTools.map(tool => (
-            <label key={tool} className="flex items-center gap-2 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={cfg.allowed_tools.includes(tool)}
-                onChange={() => toggleTool(tool)}
-                className="w-3.5 h-3.5 accent-indigo-500 rounded"
-              />
-              <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors font-mono">{tool}</span>
+            <label key={tool} className="flex items-center gap-1.5 cursor-pointer group">
+              <input type="checkbox" checked={cfg.allowed_tools.includes(tool)} onChange={() => toggleTool(tool)}
+                className="w-3 h-3 accent-indigo-500 rounded" />
+              <span className="text-[10px] text-zinc-400 group-hover:text-zinc-200 transition-colors font-mono truncate">{tool}</span>
             </label>
           ))}
         </div>
       </section>
 
-      {/* System prompt */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-3">
-        <h4 className="text-sm font-semibold text-zinc-200">System Prompt</h4>
-        <textarea
-          rows={4}
-          value={cfg.system_prompt}
-          onChange={e => setCfg(c => ({ ...c, system_prompt: e.target.value }))}
-          placeholder="Optional system prompt override…"
-          className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 resize-none font-mono"
-        />
-      </section>
-
-      {/* Runtime */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-4">
-        <h4 className="text-sm font-semibold text-zinc-200">Runtime</h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1.5">Timeout (seconds)</label>
-            <input
-              type="number"
-              value={cfg.timeout_seconds}
-              onChange={e => setCfg(c => ({ ...c, timeout_seconds: Number(e.target.value) }))}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500/60"
-            />
-          </div>
-          <div className="flex items-center gap-3 pt-5">
-            <button
-              onClick={() => setCfg(c => ({ ...c, auto_restart: !c.auto_restart }))}
-              className="flex items-center gap-2 text-sm"
-            >
-              {cfg.auto_restart
-                ? <ToggleRight size={22} className="text-indigo-400" />
-                : <ToggleLeft size={22} className="text-zinc-600" />}
-              <span className={cfg.auto_restart ? 'text-zinc-200' : 'text-zinc-500'}>
-                Auto-restart on failure
-              </span>
+      {/* System prompt + Runtime/Schedule — 50/50 side by side */}
+      <div className="grid grid-cols-2 gap-3">
+        <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40">
+          <label className="text-[10px] text-zinc-500 mb-1 block">System Prompt</label>
+          <textarea rows={3} value={cfg.system_prompt}
+            onChange={e => setCfg(c => ({ ...c, system_prompt: e.target.value }))}
+            placeholder="Optional override..."
+            className="w-full px-2 py-1.5 rounded bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 resize-none font-mono"
+          />
+        </section>
+        <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40 flex flex-col gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-zinc-500">Timeout</label>
+              <input type="number" value={cfg.timeout_seconds}
+                onChange={e => setCfg(c => ({ ...c, timeout_seconds: Number(e.target.value) }))}
+                className="w-16 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-[10px] text-zinc-100 focus:outline-none focus:border-indigo-500/60"
+              />
+              <span className="text-[9px] text-zinc-600">s</span>
+            </div>
+            <button onClick={() => setCfg(c => ({ ...c, auto_restart: !c.auto_restart }))} className="flex items-center gap-1 text-[10px]">
+              {cfg.auto_restart ? <ToggleRight size={14} className="text-indigo-400" /> : <ToggleLeft size={14} className="text-zinc-600" />}
+              <span className={cfg.auto_restart ? 'text-zinc-200' : 'text-zinc-500'}>Auto-restart</span>
             </button>
           </div>
-        </div>
-      </section>
-
-      {/* Scheduling */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-4">
-        <div className="flex items-center justify-between">
-          <h4 className="text-sm font-semibold text-zinc-200">Scheduled Runs</h4>
-          <button
-            onClick={() => setCfg(c => ({ ...c, schedule_enabled: !c.schedule_enabled }))}
-            className="flex items-center gap-2 text-sm"
-          >
-            {cfg.schedule_enabled
-              ? <ToggleRight size={22} className="text-emerald-400" />
-              : <ToggleLeft size={22} className="text-zinc-600" />}
-            <span className={cfg.schedule_enabled ? 'text-emerald-400 text-xs' : 'text-zinc-500 text-xs'}>
-              {cfg.schedule_enabled ? 'Enabled' : 'Disabled'}
-            </span>
-          </button>
-        </div>
-
-        {cfg.schedule_enabled && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1.5">Schedule Preset</label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {[
-                  { label: 'Every 15 min', value: '*/15 * * * *' },
-                  { label: 'Every hour', value: '0 * * * *' },
-                  { label: 'Every 6 hours', value: '0 */6 * * *' },
-                  { label: 'Every day 9am', value: '0 9 * * *' },
-                  { label: 'Every Monday', value: '0 9 * * 1' },
-                  { label: 'Custom', value: 'custom' },
-                ].map(preset => (
-                  <button
-                    key={preset.value}
-                    onClick={() => {
-                      if (preset.value !== 'custom') {
-                        setCfg(c => ({ ...c, schedule_cron: preset.value }));
-                      }
-                    }}
-                    className={`px-3 py-2 rounded-lg text-xs transition-all ${
-                      cfg.schedule_cron === preset.value
-                        ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-400'
-                        : 'bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
-                    }`}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1.5">Cron Expression</label>
-              <input
-                value={cfg.schedule_cron || ''}
-                onChange={e => setCfg(c => ({ ...c, schedule_cron: e.target.value }))}
-                placeholder="0 */6 * * *"
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 font-mono"
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => setCfg(c => ({ ...c, schedule_enabled: !c.schedule_enabled }))} className="flex items-center gap-1 text-[10px]">
+              {cfg.schedule_enabled ? <ToggleRight size={14} className="text-emerald-400" /> : <ToggleLeft size={14} className="text-zinc-600" />}
+              <span className={cfg.schedule_enabled ? 'text-emerald-400' : 'text-zinc-500'}>Schedule</span>
+            </button>
+            {cfg.schedule_enabled && (
+              <input value={cfg.schedule_cron || ''} onChange={e => setCfg(c => ({ ...c, schedule_cron: e.target.value }))}
+                placeholder="*/15 * * * *"
+                className="flex-1 min-w-24 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-[10px] text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 font-mono"
               />
-              <p className="text-xs text-zinc-600 mt-1">
-                Format: minute hour day month weekday — e.g., "0 9 * * 1-5" = weekdays at 9am
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/50 border border-zinc-700/40">
-              <div className="flex-1">
-                <div className="text-xs text-zinc-400">On each scheduled run, the agent will execute its configured task</div>
-                <div className="text-xs text-zinc-600 mt-1">
-                  Schedule: {cfg.schedule_cron || 'not set'}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => toast.success('Agent run triggered manually')}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-xs hover:bg-emerald-600/30 transition-all"
-                >
-                  Run Now
-                </button>
-              </div>
-            </div>
+            )}
           </div>
-        )}
-      </section>
+          {cfg.schedule_enabled && (
+            <div className="flex gap-1 flex-wrap">
+              {[{ l: '15m', v: '*/15 * * * *' }, { l: '1h', v: '0 * * * *' }, { l: '6h', v: '0 */6 * * *' }, { l: '9am', v: '0 9 * * *' }, { l: 'Mon', v: '0 9 * * 1' }].map(p => (
+                <button key={p.v} onClick={() => setCfg(c => ({ ...c, schedule_cron: p.v }))}
+                  className={`px-1.5 py-0.5 rounded text-[9px] ${cfg.schedule_cron === p.v ? 'bg-indigo-500/15 text-indigo-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+                >{p.l}</button>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
 
-      {/* Agent Controls */}
-      <section className="p-5 rounded-xl bg-zinc-800/40 border border-zinc-700/40 space-y-3">
-        <h4 className="text-sm font-semibold text-zinc-200">Controls</h4>
-        <div className="grid grid-cols-3 gap-3">
-          <button
-            onClick={() => toast.success('Agent started')}
-            className="py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-600/30 transition-all flex items-center justify-center gap-1.5"
-          >
-            <Play size={13} /> Start
-          </button>
-          <button
-            onClick={() => toast.success('Agent stopped')}
-            className="py-2.5 rounded-lg bg-amber-600/20 border border-amber-500/30 text-amber-400 text-xs font-medium hover:bg-amber-600/30 transition-all flex items-center justify-center gap-1.5"
-          >
-            <Square size={13} /> Stop
-          </button>
-          <button
-            onClick={async () => {
+      {/* Controls + Save — 50/50 side by side */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex gap-1.5">
+          <button onClick={async () => {
               try {
-                const result = await restartAgent(detail.id);
-                toast.success(`Agent restarted (new ID: ${result.new_id})`);
+                const r = await restartAgent(detail.id);
+                toast.success(`Started (${r.new_id})`);
                 onSaved();
-              } catch (err: unknown) {
-                toast.error(err instanceof Error ? err.message : 'Restart failed');
-              }
+              } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Start failed'); }
             }}
-            className="py-2.5 rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-400 text-xs font-medium hover:bg-sky-600/30 transition-all flex items-center justify-center gap-1.5"
-          >
-            <RefreshCw size={13} /> Restart
+            className="flex-1 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-medium hover:bg-emerald-600/30 transition-all flex items-center justify-center gap-1">
+            <Play size={10} /> Start
+          </button>
+          <button onClick={async () => {
+              try {
+                await stopAgent(detail.id);
+                toast.success('Agent stopped');
+                onSaved();
+              } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Stop failed'); }
+            }}
+            className="flex-1 py-1.5 rounded-lg bg-amber-600/20 border border-amber-500/30 text-amber-400 text-[10px] font-medium hover:bg-amber-600/30 transition-all flex items-center justify-center gap-1">
+            <Square size={10} /> Stop
+          </button>
+          <button onClick={async () => {
+              try {
+                const r = await restartAgent(detail.id);
+                toast.success(`Restarted (${r.new_id})`);
+                onSaved();
+              } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Restart failed'); }
+            }}
+            className="flex-1 py-1.5 rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-400 text-[10px] font-medium hover:bg-sky-600/30 transition-all flex items-center justify-center gap-1">
+            <RefreshCw size={10} /> Restart
           </button>
         </div>
-      </section>
-
-      <button
-        onClick={save}
-        disabled={saving}
-        className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        {saving ? <Activity size={14} className="animate-spin" /> : <Settings size={14} />}
-        {saving ? 'Saving…' : 'Save Configuration'}
-      </button>
+        <button onClick={save} disabled={saving}
+          className="py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
+          {saving ? <Activity size={11} className="animate-spin" /> : <Settings size={11} />}
+          {saving ? 'Saving...' : 'Save Config'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1077,13 +1083,12 @@ function MetricsTab({ detail }: { detail: AgentDetailData }) {
 
 // ── Agent Detail Full Page ───────────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'activity' | 'configuration' | 'messages' | 'metrics';
+type DetailTab = 'overview' | 'activity' | 'configuration' | 'metrics';
 
 const DETAIL_TABS: { id: DetailTab; label: string; icon: React.ElementType }[] = [
   { id: 'overview',       label: 'Overview',      icon: Bot },
-  { id: 'activity',       label: 'Activity',       icon: Activity },
+  { id: 'activity',       label: 'Live Control',   icon: Activity },
   { id: 'configuration',  label: 'Configuration',  icon: Settings },
-  { id: 'messages',       label: 'Messages',       icon: MessageSquare },
   { id: 'metrics',        label: 'Metrics',        icon: BarChart2 },
 ];
 
@@ -1223,7 +1228,6 @@ function AgentDetailPage({
         {tab === 'overview'      && <OverviewTab detail={detail} />}
         {tab === 'activity'      && <ActivityTab agentId={detail.id} />}
         {tab === 'configuration' && <ConfigurationTab detail={detail} onSaved={load} />}
-        {tab === 'messages'      && <MessagesTab detail={detail} />}
         {tab === 'metrics'       && <MetricsTab detail={detail} />}
       </div>
     </div>
@@ -1444,8 +1448,8 @@ export default function AgentsView() {
                 className="px-2.5 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/60"
               >
                 <option value="all">All statuses</option>
-                {(['running', 'completed', 'stopped', 'error'] as const).map(s => (
-                  <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
+                {(['running', 'completed', 'stopped', 'failed', 'error'] as const).map(s => (
+                  <option key={s} value={s}>{(STATUS_CONFIG[s] || DEFAULT_STATUS).label}</option>
                 ))}
               </select>
 
@@ -1481,7 +1485,9 @@ export default function AgentsView() {
           ) : visibleAgents.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {visibleAgents.map(agent => (
-                <AgentCard key={agent.id} agent={agent} onClick={() => setSelectedId(agent.id)} />
+                <AgentCard key={agent.id} agent={agent} onClick={() => setSelectedId(agent.id)} onRefresh={load} onDelete={async () => {
+                  try { await deleteAgent(agent.id); toast.success(`Agent ${agent.id} deleted`); load(); } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Delete failed'); }
+                }} />
               ))}
             </div>
           ) : (
