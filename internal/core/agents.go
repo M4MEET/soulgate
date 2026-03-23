@@ -903,8 +903,14 @@ func (am *AgentManager) standbyLoop(ctx context.Context, orch *Orchestrator, age
 				continue
 			}
 
-			// Combine all pending messages into one prompt
+			// Build prompt with system context + messages
 			var sb strings.Builder
+			cfg := agent.GetConfig()
+			if cfg.SystemPrompt != "" {
+				sb.WriteString(cfg.SystemPrompt)
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString("You received the following message(s). Respond using your available tools (agent_message, agent_list, etc). Do NOT just describe what you would do — actually call the tools.\n\n")
 			for _, m := range msgs {
 				sb.WriteString(fmt.Sprintf("[From %s]: %s\n", m.FromName, m.Message))
 			}
@@ -1197,6 +1203,13 @@ func (o *Orchestrator) executeAgentLoop(ctx context.Context, prompt string, runI
 
 	currentProvider, currentModel := o.GetCurrentProvider()
 	systemPrompt := buildSystemPrompt(o.workspace.Root, o.workspace.ConfigDir, toolNames, currentProvider, currentModel)
+
+	// Agent-specific system prompt additions
+	agentCfg := agent.GetConfig()
+	if agentCfg.SystemPrompt != "" {
+		systemPrompt += "\n\n" + agentCfg.SystemPrompt
+	}
+	systemPrompt += "\n\nCRITICAL: When you need to communicate with other agents, you MUST actually call the agent_message function — do NOT write JSON in your text response. Use function calling, not text."
 
 	for {
 		if err := tracker.BeginIteration(); err != nil {
