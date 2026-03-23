@@ -88,6 +88,11 @@ type Config struct {
 
 	// Heartbeat configures the periodic proactive health-check.
 	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
+
+	// Connectors holds saved credentials for messaging connectors.
+	// Each entry is keyed by connector type (telegram, slack, discord, etc.)
+	// and contains the credentials needed to spawn that connector.
+	Connectors map[string]map[string]string `yaml:"connectors,omitempty"`
 }
 
 // RetentionConfig defines data-retention settings for all stored artefacts.
