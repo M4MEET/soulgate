@@ -678,7 +678,7 @@ export default function ActivityView() {
             );
           })()}
 
-          {/* ── Live Agents ── */}
+          {/* ── Agents (compact badges) ── */}
           {(() => {
             const alive = agents.filter(a => a.status === 'running' || a.status === 'standby');
             if (alive.length === 0) return null;
@@ -686,31 +686,22 @@ export default function ActivityView() {
               <div className="px-3 py-2 border-t border-zinc-700/20">
                 <div className="flex items-center gap-1.5 mb-2">
                   <Bot size={10} className="text-violet-400" />
-                  <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Live Agents</span>
+                  <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Agents</span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-400 font-medium ml-auto">{alive.length}</span>
                 </div>
-                <div className="space-y-1">
+                <div className="flex flex-wrap gap-1.5">
                   {alive.map(a => {
-                    const isSelected = selectedAgent === a.id;
                     const isStandby = a.status === 'standby';
-                    const dotColor = isStandby ? 'bg-violet-400' : 'bg-emerald-400';
-                    const textColor = isStandby ? 'text-violet-400' : 'text-emerald-400';
-                    const badgeBg = isStandby ? 'bg-violet-500/15 text-violet-400' : 'bg-emerald-500/15 text-emerald-400';
                     return (
-                      <button
-                        key={a.id}
-                        onClick={() => { setSelectedAgent(a.id); setSelectedSession(null); }}
-                        className={`w-full text-left px-2.5 py-2 rounded-lg transition-all ${
-                          isSelected ? 'bg-violet-500/10 ring-1 ring-violet-500/30' : 'hover:bg-zinc-800/50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full ${dotColor} animate-pulse flex-shrink-0`} />
-                          <span className={`text-xs font-medium ${textColor} truncate`}>{a.name}</span>
-                          <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full ${badgeBg} flex-shrink-0`}>{a.status}</span>
-                        </div>
-                        <div className="pl-3.5 mt-0.5 text-[10px] text-zinc-600 truncate">{a.role} &middot; {a.id}</div>
-                      </button>
+                      <span key={a.id} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] border ${
+                        isStandby
+                          ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isStandby ? 'bg-violet-400' : 'bg-emerald-400'}`} />
+                        <span className="font-medium">{a.name}</span>
+                        <span className="opacity-60">{a.status}</span>
+                      </span>
                     );
                   })}
                 </div>
@@ -718,58 +709,73 @@ export default function ActivityView() {
             );
           })()}
 
-          {/* ── Conversations ── */}
-          <div className="px-3 py-2 border-t border-zinc-700/20">
-            <div className="flex items-center gap-1.5 mb-2">
-              <MessageSquare size={10} className="text-zinc-500" />
-              <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Conversations</span>
-              {channels.length > 1 && (
-                <select
-                  value={channelFilter}
-                  onChange={e => setChannelFilter(e.target.value)}
-                  className="ml-auto bg-transparent text-[10px] text-zinc-500 border-none outline-none cursor-pointer"
-                >
-                  <option value="">All</option>
-                  {channels.map(ch => <option key={ch} value={ch}>{ch}</option>)}
-                </select>
-              )}
-              {filteredSessions.length > 0 && !channels.length && (
-                <span className="text-[10px] text-zinc-600 ml-auto">{filteredSessions.length}</span>
-              )}
-            </div>
-          </div>
+          {/* ── Conversations (connector sessions + agent chats unified) ── */}
+          {(() => {
+            const alive = agents.filter(a => a.status === 'running' || a.status === 'standby');
+            const totalConversations = filteredSessions.length + alive.length;
+            return (
+              <>
+                <div className="px-3 py-2 border-t border-zinc-700/20">
+                  <div className="flex items-center gap-1.5">
+                    <MessageSquare size={10} className="text-zinc-500" />
+                    <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Conversations</span>
+                    <span className="text-[10px] text-zinc-600 ml-auto">{totalConversations}</span>
+                  </div>
+                </div>
 
-          {filteredSessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-zinc-600 text-xs gap-1.5">
-              <Globe size={18} className="text-zinc-700" />
-              <span>{loading ? 'Loading...' : 'No sessions yet'}</span>
-              {!loading && <span className="text-zinc-700">Send a message to any connector</span>}
-            </div>
-          ) : (
-            <div className="px-2 space-y-0.5">
-              {filteredSessions.map(s => {
-                const ch = s.channel || s.id.split(':')[0] || 'unknown';
-                const style = getChannelStyle(ch);
-                const isSelected = selectedSession === s.id;
+                {totalConversations === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-zinc-600 text-xs gap-1.5">
+                    <Globe size={18} className="text-zinc-700" />
+                    <span>{loading ? 'Loading...' : 'No conversations yet'}</span>
+                  </div>
+                ) : (
+                  <div className="px-2 space-y-0.5">
+                    {/* Agent conversations */}
+                    {alive.map(a => {
+                      const isSelected = selectedAgent === a.id;
+                      const isStandby = a.status === 'standby';
+                      return (
+                        <button
+                          key={`agent-${a.id}`}
+                          onClick={() => { setSelectedAgent(a.id); setSelectedSession(null); }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg transition-all ${
+                            isSelected ? 'bg-violet-500/10 ring-1 ring-violet-500/30' : 'hover:bg-zinc-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse ${isStandby ? 'bg-violet-400' : 'bg-emerald-400'}`} />
+                            <span className={`text-xs font-medium ${isStandby ? 'text-violet-400' : 'text-emerald-400'}`}>{a.name}</span>
+                            <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full ${isStandby ? 'bg-violet-500/15 text-violet-400' : 'bg-emerald-500/15 text-emerald-400'}`}>{a.status}</span>
+                          </div>
+                          <div className="pl-3.5 mt-0.5 text-[10px] text-zinc-600 truncate">{a.id}</div>
+                        </button>
+                      );
+                    })}
 
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => { setSelectedSession(s.id); setSelectedAgent(null); }}
-                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-all ${
-                      isSelected ? 'bg-indigo-500/10 ring-1 ring-indigo-500/30' : 'hover:bg-zinc-800/50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`w-1.5 h-1.5 rounded-full ${style.dot} flex-shrink-0`} />
-                      <span className={`text-xs font-medium capitalize ${style.text}`}>{ch}</span>
-                      <span className="text-[10px] text-zinc-600 flex items-center gap-1 ml-auto">
-                        <MessageSquare size={8} /> {s.message_count}
-                      </span>
-                    </div>
-                    <div className="pl-3.5 mt-0.5 flex items-center gap-2">
-                      <span className="text-[10px] text-zinc-500 truncate flex-1">{s.conversation_id || s.id}</span>
-                      <span className="text-[9px] text-zinc-700">{s.last_activity ? relativeTime(s.last_activity) : ''}</span>
+                    {/* Connector sessions */}
+                    {filteredSessions.map(s => {
+                      const ch = s.channel || s.id.split(':')[0] || 'unknown';
+                      const style = getChannelStyle(ch);
+                      const isSelected = selectedSession === s.id;
+
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => { setSelectedSession(s.id); setSelectedAgent(null); }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg transition-all ${
+                            isSelected ? 'bg-indigo-500/10 ring-1 ring-indigo-500/30' : 'hover:bg-zinc-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-1.5 h-1.5 rounded-full ${style.dot} flex-shrink-0`} />
+                            <span className={`text-xs font-medium capitalize ${style.text}`}>{ch}</span>
+                            <span className="text-[10px] text-zinc-600 flex items-center gap-1 ml-auto">
+                              <MessageSquare size={8} /> {s.message_count}
+                            </span>
+                          </div>
+                          <div className="pl-3.5 mt-0.5 flex items-center gap-2">
+                            <span className="text-[10px] text-zinc-500 truncate flex-1">{s.conversation_id || s.id}</span>
+                            <span className="text-[9px] text-zinc-700">{s.last_activity ? relativeTime(s.last_activity) : ''}</span>
                     </div>
                   </button>
                 );
