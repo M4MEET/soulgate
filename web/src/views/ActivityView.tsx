@@ -776,12 +776,15 @@ export default function ActivityView() {
                           <div className="pl-3.5 mt-0.5 flex items-center gap-2">
                             <span className="text-[10px] text-zinc-500 truncate flex-1">{s.conversation_id || s.id}</span>
                             <span className="text-[9px] text-zinc-700">{s.last_activity ? relativeTime(s.last_activity) : ''}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 
