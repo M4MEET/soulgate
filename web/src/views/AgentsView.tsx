@@ -789,11 +789,31 @@ function ConfigurationTab({ detail, onSaved }: { detail: AgentDetailData; onSave
 
       {/* Allowed Tools — 5 columns */}
       <section className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/40">
-        <h4 className="text-xs font-semibold text-zinc-400 mb-2">Allowed Tools</h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs font-semibold text-zinc-400">Allowed Tools</h4>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-600">{cfg.allowed_tools.length === 0 ? 'all' : cfg.allowed_tools.length} / {availableTools.length}</span>
+            <button
+              onClick={() => setCfg(c => ({ ...c, allowed_tools: [...availableTools] }))}
+              className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors"
+            >
+              Select All
+            </button>
+            <button
+              onClick={() => setCfg(c => ({ ...c, allowed_tools: [] }))}
+              className="text-[10px] px-2 py-0.5 rounded bg-zinc-700/50 text-zinc-400 hover:bg-zinc-700 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        {cfg.allowed_tools.length === 0 && (
+          <div className="text-[10px] text-zinc-600 mb-2 italic">Empty = all tools enabled (no restrictions)</div>
+        )}
         <div className="grid grid-cols-3 md:grid-cols-5 gap-x-3 gap-y-1">
           {availableTools.map(tool => (
             <label key={tool} className="flex items-center gap-1.5 cursor-pointer group">
-              <input type="checkbox" checked={cfg.allowed_tools.includes(tool)} onChange={() => toggleTool(tool)}
+              <input type="checkbox" checked={cfg.allowed_tools.length === 0 || cfg.allowed_tools.includes(tool)} onChange={() => toggleTool(tool)}
                 className="w-3 h-3 accent-indigo-500 rounded" />
               <span className="text-[10px] text-zinc-400 group-hover:text-zinc-200 transition-colors font-mono truncate">{tool}</span>
             </label>
