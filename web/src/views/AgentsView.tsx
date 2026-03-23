@@ -5,7 +5,7 @@ import {
   GitBranch, Database, Zap, ChevronRight, MessageSquare,
   Pause, Send, ArrowLeft, Settings, BarChart2,
   Filter, SortAsc, X, Cpu, DollarSign, Hash, Timer,
-  ToggleLeft, ToggleRight, PauseCircle,
+  ToggleLeft, ToggleRight, PauseCircle, Radio, Trash2, ExternalLink,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -1224,7 +1224,7 @@ function AgentDetailPage({
 
 // ── Main Agents View ─────────────────────────────────────────────────────────
 
-type MainTab = 'agents' | 'templates';
+type MainTab = 'agents' | 'templates' | 'a2a';
 type SortKey = 'created' | 'name' | 'status';
 
 export default function AgentsView() {
@@ -1339,7 +1339,7 @@ export default function AgentsView() {
 
       {/* Main tabs */}
       <div className="flex gap-0.5 mb-5 p-0.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 w-fit">
-        {(['agents', 'templates'] as const).map(t => (
+        {(['agents', 'templates', 'a2a'] as const).map(t => (
           <button
             key={t}
             onClick={() => setMainTab(t)}
@@ -1349,6 +1349,7 @@ export default function AgentsView() {
           >
             {t === 'templates' && <span className="inline-flex items-center gap-1.5"><Sparkles size={12} className="text-amber-400" />Templates</span>}
             {t === 'agents' && <span className="inline-flex items-center gap-1.5"><Bot size={12} />Agents</span>}
+            {t === 'a2a' && <span className="inline-flex items-center gap-1.5"><Radio size={12} className="text-purple-400" />A2A Remote</span>}
           </button>
         ))}
       </div>
@@ -1491,6 +1492,346 @@ export default function AgentsView() {
             </div>
           )}
         </>
+      )}
+
+      {/* A2A Remote Agents */}
+      {mainTab === 'a2a' && <A2ASection />}
+    </div>
+  );
+}
+
+// ── A2A Section (embedded in Agents view) ───────────────────────────────────
+
+interface RemoteAgentData {
+  url: string;
+  card: {
+    name: string;
+    description: string;
+    version: string;
+    skills: { id: string; name: string; description: string; tags: string[] }[];
+    capabilities: { streaming: boolean; pushNotifications: boolean };
+  };
+  added_at: string;
+  last_seen: string;
+  status: string;
+}
+
+interface A2ATaskData {
+  id: string;
+  contextId: string;
+  status: { state: string; timestamp: string; message?: { parts: { text?: string }[] } };
+  artifacts: { artifactId: string; name: string; parts: { text?: string }[] }[];
+  history: { messageId: string; role: string; parts: { text?: string }[] }[];
+}
+
+const A2A_STATE_COLORS: Record<string, string> = {
+  submitted: 'text-blue-400 bg-blue-500/10',
+  working: 'text-yellow-400 bg-yellow-500/10',
+  completed: 'text-emerald-400 bg-emerald-500/10',
+  failed: 'text-red-400 bg-red-500/10',
+  canceled: 'text-zinc-400 bg-zinc-500/10',
+  'input-required': 'text-purple-400 bg-purple-500/10',
+  rejected: 'text-red-400 bg-red-500/10',
+};
+
+function A2ASection() {
+  const [remoteAgents, setRemoteAgents] = useState<RemoteAgentData[]>([]);
+  const [a2aTasks, setA2ATasks] = useState<A2ATaskData[]>([]);
+  const [a2aTab, setA2ATab] = useState<'remote' | 'tasks' | 'card'>('remote');
+  const [card, setCard] = useState<Record<string, unknown> | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addURL, setAddURL] = useState('');
+  const [showSend, setShowSend] = useState(false);
+  const [sendTarget, setSendTarget] = useState('');
+  const [sendMsg, setSendMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
+
+  const loadAgents = useCallback(async () => {
+    try {
+      const res = await fetch('/api/a2a/agents');
+      const data = await res.json();
+      setRemoteAgents(data.agents || []);
+    } catch { /* */ }
+  }, []);
+
+  const loadTasks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/a2a/tasks');
+      const data = await res.json();
+      setA2ATasks(data.tasks || []);
+    } catch { /* */ }
+  }, []);
+
+  const loadCard = useCallback(async () => {
+    try {
+      const res = await fetch('/api/a2a/card');
+      setCard(await res.json());
+    } catch { /* */ }
+  }, []);
+
+  useEffect(() => {
+    loadAgents(); loadTasks(); loadCard();
+    const iv = setInterval(() => { loadAgents(); loadTasks(); }, 5000);
+    return () => clearInterval(iv);
+  }, [loadAgents, loadTasks, loadCard]);
+
+  const addAgent = async () => {
+    if (!addURL) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/a2a/agents', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: addURL }),
+      });
+      if (!res.ok) { toast.error((await res.json()).error || 'Discovery failed'); return; }
+      toast.success('Agent discovered'); setAddURL(''); setShowAdd(false); loadAgents();
+    } catch { toast.error('Network error'); } finally { setBusy(false); }
+  };
+
+  const removeAgent = async (url: string) => {
+    await fetch(`/api/a2a/agents/${encodeURIComponent(url)}`, { method: 'DELETE' });
+    toast.success('Removed'); loadAgents();
+  };
+
+  const sendToAgent = async () => {
+    if (!sendTarget || !sendMsg) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/a2a/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentUrl: sendTarget, message: sendMsg }),
+      });
+      if (!res.ok) { toast.error((await res.json()).error || 'Send failed'); return; }
+      toast.success('Message sent'); setSendMsg(''); setShowSend(false); loadTasks();
+    } catch { toast.error('Network error'); } finally { setBusy(false); }
+  };
+
+  const cancelTask = async (id: string) => {
+    await fetch(`/api/a2a/tasks/${id}/cancel`, { method: 'POST' });
+    toast.success('Canceled'); loadTasks();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-400">
+          Discover and communicate with remote A2A-compatible agents
+        </p>
+        <div className="flex gap-2">
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors">
+            <Plus size={14} /> Discover Agent
+          </button>
+          <button onClick={() => setShowSend(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-medium transition-colors">
+            <Send size={14} /> Send Task
+          </button>
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="flex gap-0.5 p-0.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 w-fit">
+        {(['remote', 'tasks', 'card'] as const).map(t => (
+          <button key={t} onClick={() => setA2ATab(t)} className={`px-3 py-1 rounded-md text-xs transition-all ${a2aTab === t ? 'bg-zinc-700 text-zinc-100 font-medium' : 'text-zinc-500 hover:text-zinc-300'}`}>
+            {t === 'remote' ? `Agents (${remoteAgents.length})` : t === 'tasks' ? `Tasks (${a2aTasks.length})` : 'My Card'}
+          </button>
+        ))}
+      </div>
+
+      {/* Remote Agents */}
+      {a2aTab === 'remote' && (
+        <div className="space-y-3">
+          {remoteAgents.length === 0 ? (
+            <div className="text-center py-10 text-zinc-500">
+              <Radio size={32} className="mx-auto mb-2 opacity-30" />
+              <p>No remote agents connected</p>
+              <p className="text-xs mt-1">Click "Discover Agent" to find A2A-compatible agents</p>
+            </div>
+          ) : remoteAgents.map(agent => (
+            <div key={agent.url} className="p-4 rounded-xl border border-zinc-700/50 bg-zinc-800/30 hover:border-zinc-600/60 transition-all">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-zinc-100">{agent.card.name}</h4>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${agent.status === 'online' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
+                      {agent.status}
+                    </span>
+                    <span className="text-[10px] text-zinc-600">v{agent.card.version}</span>
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-0.5">{agent.card.description}</p>
+                  <p className="text-[10px] text-zinc-600 font-mono mt-1 truncate">{agent.url}</p>
+
+                  {agent.card.capabilities && (
+                    <div className="flex gap-1.5 mt-2">
+                      {agent.card.capabilities.streaming && <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] rounded">Streaming</span>}
+                      {agent.card.capabilities.pushNotifications && <span className="px-1.5 py-0.5 bg-purple-500/10 text-purple-400 text-[10px] rounded">Push</span>}
+                    </div>
+                  )}
+
+                  {agent.card.skills?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {agent.card.skills.slice(0, 6).map(s => (
+                        <span key={s.id} className="px-1.5 py-0.5 bg-zinc-700/50 text-zinc-400 text-[10px] rounded" title={s.description}>{s.name}</span>
+                      ))}
+                      {agent.card.skills.length > 6 && <span className="text-[10px] text-zinc-600">+{agent.card.skills.length - 6} more</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-1.5 ml-3">
+                  <button onClick={() => { setSendTarget(agent.url); setShowSend(true); }} className="p-1.5 hover:bg-purple-500/10 text-purple-400 rounded transition-colors" title="Send task">
+                    <Send size={14} />
+                  </button>
+                  <button onClick={() => removeAgent(agent.url)} className="p-1.5 hover:bg-red-500/10 text-red-400 rounded transition-colors" title="Remove">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Tasks */}
+      {a2aTab === 'tasks' && (
+        <div className="space-y-2">
+          {a2aTasks.length === 0 ? (
+            <div className="text-center py-10 text-zinc-500">
+              <Activity size={32} className="mx-auto mb-2 opacity-30" />
+              <p>No A2A tasks yet</p>
+              <p className="text-xs mt-1">Send a task to a remote agent to get started</p>
+            </div>
+          ) : a2aTasks.map(task => (
+            <div key={task.id} onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
+              className={`p-3 rounded-lg border cursor-pointer transition-all ${expandedTask === task.id ? 'border-blue-500/40 bg-zinc-800/60' : 'border-zinc-700/40 bg-zinc-800/20 hover:border-zinc-600/50'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${A2A_STATE_COLORS[task.status.state] || 'text-zinc-400 bg-zinc-500/10'}`}>
+                    {task.status.state}
+                  </span>
+                  <span className="text-xs text-zinc-300 font-mono">{task.id.slice(0, 8)}</span>
+                  <span className="text-[10px] text-zinc-600">{new Date(task.status.timestamp).toLocaleString()}</span>
+                </div>
+                {!task.status.state.match(/completed|failed|canceled|rejected/) && (
+                  <button onClick={(e) => { e.stopPropagation(); cancelTask(task.id); }} className="px-2 py-0.5 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded text-[10px] transition-colors">
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {task.history?.[0] && (
+                <p className="text-xs text-zinc-500 mt-1.5 truncate">
+                  {task.history[0].parts?.map(p => p.text).filter(Boolean).join(' ')}
+                </p>
+              )}
+
+              {/* Expanded */}
+              {expandedTask === task.id && (
+                <div className="mt-3 pt-3 border-t border-zinc-700/40 space-y-3">
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div><span className="text-zinc-600">Task ID:</span> <span className="text-zinc-400 font-mono">{task.id}</span></div>
+                    <div><span className="text-zinc-600">Context:</span> <span className="text-zinc-400 font-mono">{task.contextId?.slice(0, 12)}</span></div>
+                  </div>
+
+                  {task.history?.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-zinc-600 mb-1">History ({task.history.length})</p>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {task.history.map((msg, i) => (
+                          <div key={i} className={`p-2 rounded text-xs ${msg.role === 'user' ? 'bg-blue-900/10 border-l-2 border-blue-500/40' : 'bg-zinc-700/20 border-l-2 border-emerald-500/40'}`}>
+                            <span className="text-[10px] text-zinc-600">{msg.role}</span>
+                            <p className="text-zinc-400 mt-0.5">{msg.parts?.map(p => p.text).filter(Boolean).join(' ')}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {task.artifacts?.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-zinc-600 mb-1">Artifacts ({task.artifacts.length})</p>
+                      {task.artifacts.map(art => (
+                        <div key={art.artifactId} className="bg-zinc-700/20 p-2 rounded text-xs">
+                          <span className="text-zinc-500">{art.name || art.artifactId}</span>
+                          <pre className="text-zinc-400 mt-1 text-[10px] whitespace-pre-wrap">{art.parts?.map(p => p.text).filter(Boolean).join('\n')}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* My Card */}
+      {a2aTab === 'card' && card && (
+        <div className="p-4 rounded-xl border border-zinc-700/50 bg-zinc-800/30">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-medium text-zinc-200">Your Agent Card</h4>
+            <span className="text-[10px] text-zinc-600 font-mono">/.well-known/agent.json</span>
+          </div>
+          <pre className="bg-zinc-900/80 p-3 rounded-lg text-[11px] text-zinc-400 overflow-x-auto max-h-80 overflow-y-auto">
+            {JSON.stringify(card, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* Add Agent Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
+          <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-5 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-white mb-3">Discover Remote Agent</h3>
+            <p className="text-xs text-zinc-400 mb-3">Enter the base URL of an A2A-compatible agent.</p>
+            <input type="text" value={addURL} onChange={e => setAddURL(e.target.value)}
+              placeholder="https://agent.example.com"
+              className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
+              onKeyDown={e => e.key === 'Enter' && addAgent()} />
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-zinc-400 hover:text-white text-xs">Cancel</button>
+              <button onClick={addAgent} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs disabled:opacity-50">
+                {busy ? 'Discovering...' : 'Discover'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Task Modal */}
+      {showSend && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowSend(false)}>
+          <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-5 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-white mb-3">Send Task to Remote Agent</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">Target Agent</label>
+                {remoteAgents.length > 0 ? (
+                  <select value={sendTarget} onChange={e => setSendTarget(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                    <option value="">Select an agent...</option>
+                    {remoteAgents.map(a => <option key={a.url} value={a.url}>{a.card.name} — {a.url}</option>)}
+                  </select>
+                ) : (
+                  <input type="text" value={sendTarget} onChange={e => setSendTarget(e.target.value)}
+                    placeholder="https://agent.example.com"
+                    className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none" />
+                )}
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">Task Message</label>
+                <textarea value={sendMsg} onChange={e => setSendMsg(e.target.value)}
+                  placeholder="What should the remote agent do?"
+                  rows={3}
+                  className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none resize-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowSend(false)} className="px-3 py-1.5 text-zinc-400 hover:text-white text-xs">Cancel</button>
+              <button onClick={sendToAgent} disabled={busy || !sendTarget || !sendMsg} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs disabled:opacity-50">
+                {busy ? 'Sending...' : 'Send Task'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
