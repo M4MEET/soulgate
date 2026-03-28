@@ -486,6 +486,8 @@ export async function fetchTools(): Promise<ToolData[]> {
 
 export interface HubItem {
   name: string;
+  type?: string;
+  kind?: string;
   description: string;
   version?: string;
   author?: string;
@@ -497,6 +499,7 @@ export interface HubItem {
 
 export interface InstalledHubItem {
   type: string;
+  kind?: string;
   name: string;
   version: string;
   installed_at: string;
@@ -509,20 +512,24 @@ export async function hubSearch(query: string): Promise<HubItem[]> {
   return data.results || [];
 }
 
-export async function hubInstall(name: string): Promise<{ status: string; error?: string }> {
+export async function hubInstall(name: string, type?: string): Promise<{ status: string; error?: string }> {
+  const body: Record<string, string> = { name };
+  if (type) body.type = type;
   const res = await fetch(`${BASE}/api/hub/install`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   });
   return res.json();
 }
 
-export async function hubUninstall(name: string): Promise<{ status: string; error?: string }> {
+export async function hubUninstall(name: string, type?: string): Promise<{ status: string; error?: string }> {
+  const body: Record<string, string> = { name };
+  if (type) body.type = type;
   const res = await fetch(`${BASE}/api/hub/uninstall`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   });
   return res.json();
 }
