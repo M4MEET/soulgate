@@ -97,7 +97,8 @@ type WorkflowStep struct {
 
 // HubItem represents any hub item
 type HubItem struct {
-	Type        string  `json:"type"` // plugin, skill, integration, recipe
+	Type        string  `json:"type"` // skill, tool, agent
+	Kind        string  `json:"kind,omitempty"` // plugin, mcp, connector, script (for tools)
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Rating      float64 `json:"rating"`
@@ -108,6 +109,7 @@ type HubItem struct {
 // InstalledItem represents locally installed item
 type InstalledItem struct {
 	Type        string    `json:"type"`
+	Kind        string    `json:"kind,omitempty"`
 	Name        string    `json:"name"`
 	Version     string    `json:"version"`
 	InstalledAt time.Time `json:"installed_at"`

@@ -140,8 +140,22 @@ func (r *Registry) load() error {
 		return fmt.Errorf("failed to unmarshal registry: %w", err)
 	}
 
-	// Convert to map
+	// Convert to map, migrating old 6-type entries to 3-type system.
 	for _, item := range items {
+		switch item.Type {
+		case "plugin":
+			item.Type = "tool"
+			item.Kind = "plugin"
+		case "mcp":
+			item.Type = "tool"
+			item.Kind = "mcp"
+		case "connector":
+			item.Type = "tool"
+			item.Kind = "connector"
+		case "extension":
+			item.Type = "tool"
+			item.Kind = "script"
+		}
 		key := fmt.Sprintf("%s/%s", item.Type, item.Name)
 		r.installed[key] = item
 	}

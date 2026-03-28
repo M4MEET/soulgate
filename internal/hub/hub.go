@@ -13,31 +13,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PackageType identifies the kind of hub package.
+// PackageType identifies the user-facing category: skill, tool, or agent.
 type PackageType string
 
 const (
-	TypeSkill     PackageType = "skill"
-	TypePlugin    PackageType = "plugin"
-	TypeAgent     PackageType = "agent"
-	TypeMCP       PackageType = "mcp"
-	TypeConnector PackageType = "connector"
-	TypeExtension PackageType = "extension"
+	TypeSkill PackageType = "skill"
+	TypeTool  PackageType = "tool"
+	TypeAgent PackageType = "agent"
+)
+
+// ToolKind identifies the implementation kind within the "tool" category.
+type ToolKind string
+
+const (
+	KindPlugin    ToolKind = "plugin"
+	KindMCP       ToolKind = "mcp"
+	KindConnector ToolKind = "connector"
+	KindScript    ToolKind = "script"
 )
 
 const (
 	defaultRegistryURL = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/registry.json"
 	hubCacheTTL        = 30 * time.Minute
-	// hubInstalledFile is the path to the installed-package manifest relative to
-	// the workspace .soulgate directory.
-	hubInstalledFile = "hub/installed.json"
-	rawBaseURL       = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/%ss/%s/"
+	hubInstalledFile   = "hub/installed.json"
+	rawBaseURL         = "https://raw.githubusercontent.com/M4MEET/soulgate-hub/main/%ss/%s/"
 )
 
 // Package describes a single package in the remote registry.
 type Package struct {
 	Name        string      `json:"name"        yaml:"name"`
 	Type        PackageType `json:"type"        yaml:"type"`
+	Kind        ToolKind    `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Version     string      `json:"version"     yaml:"version"`
 	Description string      `json:"description" yaml:"description"`
 	Author      string      `json:"author"      yaml:"author"`
@@ -56,13 +62,13 @@ type PackageRegistry struct {
 type InstalledPackage struct {
 	Name        string      `json:"name"`
 	Type        PackageType `json:"type"`
+	Kind        ToolKind    `json:"kind,omitempty"`
 	Version     string      `json:"version"`
 	InstalledAt time.Time   `json:"installed_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
-// Hub is the package manager for skills, plugins, agents, MCP servers,
-// connectors, and extensions.
+// Hub is the package manager for skills, tools, and agents.
 type Hub struct {
 	registryURL string
 	cacheDir    string // ~/.soulgate/hub-cache/
@@ -71,7 +77,6 @@ type Hub struct {
 }
 
 // NewHub creates a Hub for the given workspace root directory.
-// cacheDir defaults to ~/.soulgate/hub-cache/, registryURL to the GitHub raw URL.
 func NewHub(workDir string) *Hub {
 	home, _ := os.UserHomeDir()
 	cacheDir := filepath.Join(home, ".soulgate", "hub-cache")
@@ -85,26 +90,25 @@ func NewHub(workDir string) *Hub {
 
 // FetchRegistry downloads (or loads from cache) the remote registry.json.
 func (h *Hub) FetchRegistry() (*PackageRegistry, error) {
-	// Try cache first.
 	cached, err := h.readCache("registry.json")
 	if err == nil {
 		var reg PackageRegistry
 		if json.Unmarshal(cached, &reg) == nil {
+			h.migrateRegistryPackages(&reg)
 			return &reg, nil
 		}
 	}
 
-	// Fetch from network.
 	req, err := http.NewRequest(http.MethodGet, h.registryURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("hub: create request: %w", err)
 	}
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		// Offline: return cached data even if stale.
 		if cached != nil {
 			var reg PackageRegistry
 			if json.Unmarshal(cached, &reg) == nil {
+				h.migrateRegistryPackages(&reg)
 				return &reg, nil
 			}
 		}
@@ -126,14 +130,34 @@ func (h *Hub) FetchRegistry() (*PackageRegistry, error) {
 		return nil, fmt.Errorf("hub: parse registry: %w", err)
 	}
 
-	// Persist to cache.
 	_ = h.writeCache("registry.json", data)
 
+	h.migrateRegistryPackages(&reg)
 	return &reg, nil
 }
 
-// Search returns packages whose name, description, or tags contain query
-// (case-insensitive). An empty query returns all packages.
+// migrateRegistryPackages converts old 6-type registry entries to the new 3-type system.
+func (h *Hub) migrateRegistryPackages(reg *PackageRegistry) {
+	for i := range reg.Packages {
+		pkg := &reg.Packages[i]
+		switch PackageType(pkg.Type) {
+		case "plugin":
+			pkg.Type = TypeTool
+			pkg.Kind = KindPlugin
+		case "mcp":
+			pkg.Type = TypeTool
+			pkg.Kind = KindMCP
+		case "connector":
+			pkg.Type = TypeTool
+			pkg.Kind = KindConnector
+		case "extension":
+			pkg.Type = TypeTool
+			pkg.Kind = KindScript
+		}
+	}
+}
+
+// Search returns packages whose name, description, or tags contain query.
 func (h *Hub) Search(query string) ([]Package, error) {
 	reg, err := h.FetchRegistry()
 	if err != nil {
@@ -158,7 +182,7 @@ func (h *Hub) Search(query string) ([]Package, error) {
 
 // Info returns details for a package identified by "type:name" or "type/name".
 func (h *Hub) Info(typeAndName string) (*Package, error) {
-	pkgType, name, err := parseTypeAndName(typeAndName)
+	pkgType, kind, name, err := parseTypeAndName(typeAndName)
 	if err != nil {
 		return nil, err
 	}
@@ -169,8 +193,12 @@ func (h *Hub) Info(typeAndName string) (*Package, error) {
 	}
 
 	for i := range reg.Packages {
-		if reg.Packages[i].Type == pkgType && reg.Packages[i].Name == name {
-			return &reg.Packages[i], nil
+		p := &reg.Packages[i]
+		if p.Name == name && p.Type == pkgType {
+			if pkgType == TypeTool && kind != "" && p.Kind != kind {
+				continue
+			}
+			return p, nil
 		}
 	}
 
@@ -179,17 +207,21 @@ func (h *Hub) Info(typeAndName string) (*Package, error) {
 
 // Install downloads and installs a package identified by "type:name" or "type/name".
 func (h *Hub) Install(typeAndName string) error {
-	pkgType, name, err := parseTypeAndName(typeAndName)
+	pkgType, kind, name, err := parseTypeAndName(typeAndName)
 	if err != nil {
 		return err
 	}
 
-	// Try to find in registry for metadata.  Non-fatal if registry is unreachable.
+	// Try to find in registry for metadata.
 	var pkg *Package
 	if reg, regErr := h.FetchRegistry(); regErr == nil {
 		for i := range reg.Packages {
-			if reg.Packages[i].Type == pkgType && reg.Packages[i].Name == name {
-				pkg = &reg.Packages[i]
+			p := &reg.Packages[i]
+			if p.Name == name && p.Type == pkgType {
+				pkg = p
+				if kind != "" {
+					kind = p.Kind // trust registry kind
+				}
 				break
 			}
 		}
@@ -200,54 +232,59 @@ func (h *Hub) Install(typeAndName string) error {
 		version = pkg.Version
 	}
 
-	baseRaw := fmt.Sprintf(rawBaseURL, string(pkgType), name)
+	// If kind wasn't resolved from registry or input, default for tools.
+	if pkgType == TypeTool && kind == "" {
+		kind = KindPlugin
+	}
+
+	baseRaw := h.buildRawURL(pkgType, kind, name)
 
 	switch pkgType {
 	case TypeSkill:
 		if err := h.installSkill(name, baseRaw, pkg); err != nil {
 			return err
 		}
-	case TypePlugin:
-		if err := h.installPlugin(name, baseRaw, pkg); err != nil {
+	case TypeTool:
+		if err := h.installTool(name, kind, baseRaw, pkg); err != nil {
 			return err
 		}
 	case TypeAgent:
 		if err := h.installAgent(name, baseRaw, pkg); err != nil {
 			return err
 		}
-	case TypeMCP:
-		if err := h.installMCP(name, baseRaw, pkg); err != nil {
-			return err
-		}
-	case TypeConnector:
-		if err := h.installConnector(name, baseRaw, pkg); err != nil {
-			return err
-		}
-	case TypeExtension:
-		if err := h.installExtension(name, baseRaw, pkg); err != nil {
-			return err
-		}
 	default:
 		return fmt.Errorf("hub: unknown package type %q", pkgType)
 	}
 
-	// Record in installed manifest.
 	err = h.recordInstalled(InstalledPackage{
 		Name:        name,
 		Type:        pkgType,
+		Kind:        kind,
 		Version:     version,
 		InstalledAt: time.Now(),
 		UpdatedAt:   time.Now(),
 	})
-	h.logActivity("install", name, pkgType, version, err)
+	h.logActivity("install", name, pkgType, kind, version, err)
 	return err
 }
 
 // Uninstall removes a package identified by "type:name" or "type/name".
 func (h *Hub) Uninstall(typeAndName string) error {
-	pkgType, name, err := parseTypeAndName(typeAndName)
+	pkgType, kind, name, err := parseTypeAndName(typeAndName)
 	if err != nil {
 		return err
+	}
+
+	// Look up installed record for kind if not specified.
+	if pkgType == TypeTool && kind == "" {
+		if pkgs, loadErr := h.loadInstalled(); loadErr == nil {
+			for _, p := range pkgs {
+				if p.Type == TypeTool && p.Name == name {
+					kind = p.Kind
+					break
+				}
+			}
+		}
 	}
 
 	destDir := h.packageDir(pkgType, name)
@@ -255,7 +292,7 @@ func (h *Hub) Uninstall(typeAndName string) error {
 		return fmt.Errorf("hub: %s %q is not installed", pkgType, name)
 	}
 
-	if pkgType == TypeMCP {
+	if kind == KindMCP {
 		if err := h.removeMCPEntry(name); err != nil {
 			return fmt.Errorf("hub: remove MCP entry from config: %w", err)
 		}
@@ -266,7 +303,7 @@ func (h *Hub) Uninstall(typeAndName string) error {
 	}
 
 	err = h.removeInstalled(pkgType, name)
-	h.logActivity("uninstall", name, pkgType, "", err)
+	h.logActivity("uninstall", name, pkgType, kind, "", err)
 	return err
 }
 
@@ -307,25 +344,6 @@ func (h *Hub) installSkill(name, baseRaw string, pkg *Package) error {
 	return h.downloadFile(baseRaw+"SKILL.md", dest)
 }
 
-func (h *Hub) installPlugin(name, baseRaw string, pkg *Package) error {
-	destDir := h.packageDir(TypePlugin, name)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("hub: create plugin dir: %w", err)
-	}
-	// Always try manifest.yml.
-	if err := h.downloadFile(baseRaw+"manifest.yml", filepath.Join(destDir, "manifest.yml")); err != nil {
-		return err
-	}
-	// Download declared files if available.
-	if pkg != nil {
-		for _, f := range pkg.Files {
-			dest := filepath.Join(destDir, filepath.Base(f))
-			_ = h.downloadFile(baseRaw+f, dest) // best-effort for extra files
-		}
-	}
-	return nil
-}
-
 func (h *Hub) installAgent(name, baseRaw string, pkg *Package) error {
 	destDir := h.packageDir(TypeAgent, name)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -334,43 +352,72 @@ func (h *Hub) installAgent(name, baseRaw string, pkg *Package) error {
 	return h.downloadFile(baseRaw+"agent.yml", filepath.Join(destDir, "agent.yml"))
 }
 
-func (h *Hub) installMCP(name, baseRaw string, pkg *Package) error {
-	destDir := h.packageDir(TypeMCP, name)
+// installTool dispatches to the correct installer based on kind.
+func (h *Hub) installTool(name string, kind ToolKind, baseRaw string, pkg *Package) error {
+	switch kind {
+	case KindPlugin:
+		return h.installToolPlugin(name, baseRaw, pkg)
+	case KindMCP:
+		return h.installToolMCP(name, baseRaw, pkg)
+	case KindConnector:
+		return h.installToolConnector(name, baseRaw, pkg)
+	case KindScript:
+		return h.installToolScript(name, baseRaw, pkg)
+	default:
+		return fmt.Errorf("hub: unknown tool kind %q", kind)
+	}
+}
+
+func (h *Hub) installToolPlugin(name, baseRaw string, pkg *Package) error {
+	destDir := h.packageDir(TypeTool, name)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("hub: create mcp dir: %w", err)
+		return fmt.Errorf("hub: create tool dir: %w", err)
+	}
+	if err := h.downloadFile(baseRaw+"manifest.yml", filepath.Join(destDir, "manifest.yml")); err != nil {
+		return err
+	}
+	if pkg != nil {
+		for _, f := range pkg.Files {
+			dest := filepath.Join(destDir, filepath.Base(f))
+			_ = h.downloadFile(baseRaw+f, dest)
+		}
+	}
+	return nil
+}
+
+func (h *Hub) installToolMCP(name, baseRaw string, pkg *Package) error {
+	destDir := h.packageDir(TypeTool, name)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("hub: create tool dir: %w", err)
 	}
 
-	// Download the setup guide for reference.
 	_ = h.downloadFile(baseRaw+"README.md", filepath.Join(destDir, "README.md"))
 
-	// Download mcp.yml for config entry data.
 	mcpYMLPath := filepath.Join(destDir, "mcp.yml")
 	_ = h.downloadFile(baseRaw+"mcp.yml", mcpYMLPath)
 
-	// Inject into .soulgate/config.yml.
 	return h.addMCPEntry(name, mcpYMLPath)
 }
 
-func (h *Hub) installConnector(name, baseRaw string, pkg *Package) error {
-	destDir := h.packageDir(TypeConnector, name)
+func (h *Hub) installToolConnector(name, baseRaw string, pkg *Package) error {
+	destDir := h.packageDir(TypeTool, name)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("hub: create connector dir: %w", err)
+		return fmt.Errorf("hub: create tool dir: %w", err)
 	}
 	_ = h.downloadFile(baseRaw+"README.md", filepath.Join(destDir, "README.md"))
 	return h.downloadFile(baseRaw+"setup.md", filepath.Join(destDir, "setup.md"))
 }
 
-func (h *Hub) installExtension(name, baseRaw string, pkg *Package) error {
-	destDir := h.packageDir(TypeExtension, name)
+func (h *Hub) installToolScript(name, baseRaw string, pkg *Package) error {
+	destDir := h.packageDir(TypeTool, name)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("hub: create extension dir: %w", err)
+		return fmt.Errorf("hub: create tool dir: %w", err)
 	}
 	return h.downloadFile(baseRaw+"extension.sh", filepath.Join(destDir, "extension.sh"))
 }
 
 // ---- MCP config helpers ----
 
-// mcpYMLEntry is used to unmarshal a downloaded mcp.yml file.
 type mcpYMLEntry struct {
 	Command string            `yaml:"command"`
 	Args    []string          `yaml:"args"`
@@ -390,14 +437,12 @@ func (h *Hub) addMCPEntry(name, mcpYMLPath string) error {
 		return fmt.Errorf("hub: parse config.yml: %w", err)
 	}
 
-	// Build the new MCP server entry.
 	entry := map[string]interface{}{
 		"name":    name,
 		"command": "npx",
 		"args":    []string{"-y", fmt.Sprintf("@modelcontextprotocol/server-%s", name)},
 	}
 
-	// If we have a downloaded mcp.yml, use it to override defaults.
 	if ymlData, err := os.ReadFile(mcpYMLPath); err == nil {
 		var mcpEntry mcpYMLEntry
 		if yaml.Unmarshal(ymlData, &mcpEntry) == nil {
@@ -416,14 +461,12 @@ func (h *Hub) addMCPEntry(name, mcpYMLPath string) error {
 		}
 	}
 
-	// Ensure mcp.servers exists.
 	mcp, _ := cfg["mcp"].(map[string]interface{})
 	if mcp == nil {
 		mcp = map[string]interface{}{}
 	}
 
 	servers, _ := mcp["servers"].([]interface{})
-	// Remove existing entry with same name if present.
 	filtered := make([]interface{}, 0, len(servers))
 	for _, s := range servers {
 		if sm, ok := s.(map[string]interface{}); ok {
@@ -452,7 +495,6 @@ func (h *Hub) removeMCPEntry(name string) error {
 	configPath := filepath.Join(h.workDir, ".soulgate", "config.yml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		// Config may not exist; nothing to remove.
 		return nil
 	}
 
@@ -489,7 +531,7 @@ func (h *Hub) removeMCPEntry(name string) error {
 // ---- installed manifest ----
 
 func (h *Hub) installedPath() string {
-	return filepath.Join(h.workDir, ".soulgate", hubInstalledFile) // .soulgate/hub/installed.json
+	return filepath.Join(h.workDir, ".soulgate", hubInstalledFile)
 }
 
 func (h *Hub) loadInstalled() ([]InstalledPackage, error) {
@@ -504,6 +546,34 @@ func (h *Hub) loadInstalled() ([]InstalledPackage, error) {
 	if err := json.Unmarshal(data, &pkgs); err != nil {
 		return nil, fmt.Errorf("hub: parse installed manifest: %w", err)
 	}
+
+	// Migrate old 6-type entries to 3-type system.
+	migrated := false
+	for i := range pkgs {
+		p := &pkgs[i]
+		switch PackageType(p.Type) {
+		case "plugin":
+			p.Type = TypeTool
+			p.Kind = KindPlugin
+			migrated = true
+		case "mcp":
+			p.Type = TypeTool
+			p.Kind = KindMCP
+			migrated = true
+		case "connector":
+			p.Type = TypeTool
+			p.Kind = KindConnector
+			migrated = true
+		case "extension":
+			p.Type = TypeTool
+			p.Kind = KindScript
+			migrated = true
+		}
+	}
+	if migrated {
+		_ = h.saveInstalled(pkgs)
+	}
+
 	return pkgs, nil
 }
 
@@ -513,11 +583,10 @@ func (h *Hub) recordInstalled(ip InstalledPackage) error {
 		pkgs = nil
 	}
 
-	// Replace or append.
 	found := false
 	for i, p := range pkgs {
 		if p.Type == ip.Type && p.Name == ip.Name {
-			ip.InstalledAt = p.InstalledAt // preserve original install time
+			ip.InstalledAt = p.InstalledAt
 			pkgs[i] = ip
 			found = true
 			break
@@ -561,15 +630,39 @@ func (h *Hub) saveInstalled(pkgs []InstalledPackage) error {
 // ---- path helpers ----
 
 // packageDir returns the local directory for a given package.
-// All hub packages now live under .soulgate/hub/<type>s/<name>/:
-//   - skill:X     → .soulgate/hub/skills/X/
-//   - plugin:X    → .soulgate/hub/plugins/X/
-//   - agent:X     → .soulgate/hub/agents/X/
-//   - mcp:X       → .soulgate/hub/mcp/X/      (also patched into config.yml)
-//   - connector:X → .soulgate/hub/connectors/X/
-//   - extension:X → .soulgate/hub/extensions/X/
+//   - skill:X → .soulgate/hub/skills/X/
+//   - tool:X  → .soulgate/hub/tools/X/
+//   - agent:X → .soulgate/hub/agents/X/
 func (h *Hub) packageDir(pkgType PackageType, name string) string {
 	return filepath.Join(h.workDir, ".soulgate", "hub", string(pkgType)+"s", name)
+}
+
+// buildRawURL maps the new type+kind to the remote repo directory structure.
+// The remote repo keeps its old layout: plugins/, mcps/, connectors/, extensions/, skills/, agents/
+func (h *Hub) buildRawURL(pkgType PackageType, kind ToolKind, name string) string {
+	var remoteDir string
+	switch pkgType {
+	case TypeSkill:
+		remoteDir = "skill"
+	case TypeAgent:
+		remoteDir = "agent"
+	case TypeTool:
+		switch kind {
+		case KindPlugin:
+			remoteDir = "plugin"
+		case KindMCP:
+			remoteDir = "mcp"
+		case KindConnector:
+			remoteDir = "connector"
+		case KindScript:
+			remoteDir = "extension"
+		default:
+			remoteDir = "plugin"
+		}
+	default:
+		remoteDir = string(pkgType)
+	}
+	return fmt.Sprintf(rawBaseURL, remoteDir, name)
 }
 
 // ---- download helpers ----
@@ -634,29 +727,50 @@ func (h *Hub) writeCache(name string, data []byte) error {
 
 // ---- parsing helpers ----
 
-// parseTypeAndName parses "type:name" or "type/name" into its components.
-func parseTypeAndName(s string) (PackageType, string, error) {
+// oldTypeMapping maps legacy 6-type names to new type + kind.
+var oldTypeMapping = map[string]struct {
+	Type PackageType
+	Kind ToolKind
+}{
+	"plugin":    {TypeTool, KindPlugin},
+	"mcp":       {TypeTool, KindMCP},
+	"connector": {TypeTool, KindConnector},
+	"extension": {TypeTool, KindScript},
+}
+
+// parseTypeAndName parses "type:name" or "type/name" into (PackageType, ToolKind, name).
+// Old type names (plugin, mcp, connector, extension) are accepted for backward compat
+// and mapped to TypeTool + appropriate kind.
+func parseTypeAndName(s string) (PackageType, ToolKind, string, error) {
 	var parts []string
 	if strings.Contains(s, ":") {
 		parts = strings.SplitN(s, ":", 2)
 	} else if strings.Contains(s, "/") {
 		parts = strings.SplitN(s, "/", 2)
 	} else {
-		return "", "", fmt.Errorf("hub: invalid package identifier %q — use type:name or type/name", s)
+		return "", "", "", fmt.Errorf("hub: invalid package identifier %q — use type:name or type/name", s)
 	}
 
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("hub: invalid package identifier %q", s)
+		return "", "", "", fmt.Errorf("hub: invalid package identifier %q", s)
 	}
 
-	pkgType := PackageType(parts[0])
+	typeName := parts[0]
+	name := parts[1]
+
+	// Check for backward-compat old type names.
+	if mapping, ok := oldTypeMapping[typeName]; ok {
+		return mapping.Type, mapping.Kind, name, nil
+	}
+
+	// Check new types.
+	pkgType := PackageType(typeName)
 	switch pkgType {
-	case TypeSkill, TypePlugin, TypeAgent, TypeMCP, TypeConnector, TypeExtension:
-	default:
-		return "", "", fmt.Errorf("hub: unknown package type %q", parts[0])
+	case TypeSkill, TypeTool, TypeAgent:
+		return pkgType, "", name, nil
 	}
 
-	return pkgType, parts[1], nil
+	return "", "", "", fmt.Errorf("hub: unknown package type %q (valid: skill, tool, agent)", typeName)
 }
 
 func containsTag(tags []string, q string) bool {
@@ -669,23 +783,23 @@ func containsTag(tags []string, q string) bool {
 }
 
 // --------------------------------------------------------------------------
-// Activity Log (durable JSONL journal of install/uninstall/update actions)
+// Activity Log
 // --------------------------------------------------------------------------
 
 const activityLogFile = "hub/activity.jsonl"
 
 // ActivityEntry records a hub action for auditing.
 type ActivityEntry struct {
-	Action    string    `json:"action"` // install, uninstall, update
+	Action    string    `json:"action"`
 	Package   string    `json:"package"`
 	Type      string    `json:"type"`
+	Kind      string    `json:"kind,omitempty"`
 	Version   string    `json:"version,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Error     string    `json:"error,omitempty"`
 }
 
-// logActivity appends a single hub action to the activity JSONL file.
-func (h *Hub) logActivity(action, name string, pkgType PackageType, version string, err error) {
+func (h *Hub) logActivity(action, name string, pkgType PackageType, kind ToolKind, version string, err error) {
 	path := filepath.Join(h.workDir, ".soulgate", activityLogFile)
 	_ = os.MkdirAll(filepath.Dir(path), 0700)
 
@@ -693,6 +807,7 @@ func (h *Hub) logActivity(action, name string, pkgType PackageType, version stri
 		Action:    action,
 		Package:   name,
 		Type:      string(pkgType),
+		Kind:      string(kind),
 		Version:   version,
 		Timestamp: time.Now(),
 	}
