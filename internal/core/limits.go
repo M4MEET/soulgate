@@ -42,11 +42,12 @@ func DefaultExecutionLimits() ExecutionLimits {
 
 // ExecutionTracker tracks resource usage during execution
 type ExecutionTracker struct {
-	limits             ExecutionLimits
-	startTime          time.Time
-	iterations         int
-	tokensUsed         int
-	lastIterationStart time.Time
+	limits              ExecutionLimits
+	startTime           time.Time
+	iterations          int
+	tokensUsed          int
+	lastIterationStart  time.Time
+	retriedFakeToolCall bool // true after one retry for hallucinated tool calls
 }
 
 // NewExecutionTracker creates a new execution tracker

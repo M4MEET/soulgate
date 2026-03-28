@@ -218,6 +218,26 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 
 		// Check stop reason
 		if resp.StopReason == model.StopReasonEndTurn || resp.StopReason == model.StopReasonMaxTokens {
+			// Detect hallucinated tool calls: the model wrote text that looks
+			// like a tool result (e.g. "[Used exec_command(...): ...]") instead
+			// of making an actual tool_use request. This happens when the
+			// conversation history contains breadcrumb summaries and the model
+			// mimics that format. Retry once with a nudge.
+			if !tracker.retriedFakeToolCall && len(tools) > 0 && looksLikeFakeToolCall(resp.Message.Content) {
+				tracker.retriedFakeToolCall = true
+				// Remove the hallucinated assistant message and add a nudge
+				// so the model actually invokes the tool.
+				messages = append(messages, model.Message{
+					Role:    model.RoleUser,
+					Content: "[System: You wrote a tool call as text instead of actually invoking it. The action was NOT executed. Please use the tool calling mechanism to actually perform the action.]",
+				})
+				o.emitThinking(ThinkingEvent{
+					Kind:    ThinkingStatus,
+					Message: "detected hallucinated tool call, retrying with actual tool use",
+				})
+				continue
+			}
+
 			// Final response — record text to history
 			o.appendToHistory(assistantMsg)
 			return resp.Message.Content, nil
@@ -282,6 +302,22 @@ func (o *Orchestrator) executeAgenticLoop(ctx context.Context, userPrompt string
 
 		return "", fmt.Errorf("unexpected stop reason: %s", resp.StopReason)
 	}
+}
+
+// looksLikeFakeToolCall detects when the model wrote text that mimics
+// a tool call result instead of actually using the tool_use mechanism.
+// This happens when conversation history contains breadcrumb summaries
+// like "[Used exec_command(...): ...]" and the model copies that format.
+func looksLikeFakeToolCall(content string) bool {
+	// Match the breadcrumb format: [Used toolname(
+	if strings.Contains(content, "[Used ") && strings.Contains(content, "(") {
+		return true
+	}
+	// Match patterns like [calling toolname...]
+	if strings.Contains(content, "[calling ") && strings.Contains(content, "...]") {
+		return true
+	}
+	return false
 }
 
 // isGreeting returns true only for pure greetings — the only messages
