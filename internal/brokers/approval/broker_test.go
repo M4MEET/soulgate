@@ -13,6 +13,7 @@ import (
 func TestApprovalBroker_Approve(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir).WithTimeout(10 * time.Second)
+	defer b.Close()
 
 	var requestID string
 
@@ -45,6 +46,7 @@ func TestApprovalBroker_Approve(t *testing.T) {
 func TestApprovalBroker_Deny(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir).WithTimeout(10 * time.Second)
+	defer b.Close()
 
 	done := make(chan bool, 1)
 	go func() {
@@ -73,6 +75,7 @@ func TestApprovalBroker_Expiry(t *testing.T) {
 	dir := t.TempDir()
 	// Very short timeout so expiry fires quickly.
 	b := NewBroker(dir).WithTimeout(200 * time.Millisecond)
+	defer b.Close()
 
 	done := make(chan bool, 1)
 	go func() {
@@ -93,6 +96,7 @@ func TestApprovalBroker_Expiry(t *testing.T) {
 func TestApprovalBroker_ContextCancel(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir).WithTimeout(30 * time.Second)
+	defer b.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -116,6 +120,7 @@ func TestApprovalBroker_ContextCancel(t *testing.T) {
 func TestApprovalBroker_DuplicateDecide(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir).WithTimeout(10 * time.Second)
+	defer b.Close()
 
 	go func() {
 		b.RequestApproval(context.Background(), "files.write", "./x.txt", "test", "agent-5") //nolint:errcheck
@@ -135,6 +140,7 @@ func TestApprovalBroker_DuplicateDecide(t *testing.T) {
 func TestApprovalBroker_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir)
+	defer b.Close()
 
 	err := b.Approve("nonexistent-id", "admin")
 	assert.Error(t, err, "approving non-existent request should fail")
@@ -146,6 +152,7 @@ func TestApprovalBroker_NotFound(t *testing.T) {
 func TestApprovalBroker_Persistence(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir).WithTimeout(10 * time.Second)
+	defer b.Close()
 
 	// Submit without deciding — request will be persisted as pending.
 	go func() {
@@ -163,6 +170,7 @@ func TestApprovalBroker_Persistence(t *testing.T) {
 func TestApprovalBroker_HandlerNotification(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBroker(dir).WithTimeout(10 * time.Second)
+	defer b.Close()
 
 	notified := make(chan *ApprovalRequest, 1)
 	b.AddHandler(&testHandler{ch: notified})

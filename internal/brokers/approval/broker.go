@@ -75,6 +75,7 @@ type Broker struct {
 	handlers []ApprovalHandler
 	dataDir  string // directory where pending requests are persisted
 	timeout  time.Duration
+	stopCh   chan struct{} // closed to stop the background sweeper
 }
 
 // NewBroker creates an ApprovalBroker.  configDir is the .soulgate workspace
@@ -84,6 +85,7 @@ func NewBroker(configDir string) *Broker {
 		pending: make(map[string]*ApprovalRequest),
 		dataDir: configDir,
 		timeout: DefaultTimeout,
+		stopCh:  make(chan struct{}),
 	}
 	// Best-effort: load any requests that were pending when the process last
 	// exited.  Those requests will not have live response channels; the caller
@@ -255,7 +257,13 @@ func (b *Broker) expirySweeper() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-b.stopCh:
+			return
+		case <-ticker.C:
+		}
+
 		now := time.Now().UTC()
 		var expired []string
 
@@ -292,6 +300,16 @@ func (b *Broker) expirySweeper() {
 			b.persistToDisk()
 			b.pruneDecided()
 		}
+	}
+}
+
+// Close stops the background sweeper goroutine. Safe to call multiple times.
+func (b *Broker) Close() {
+	select {
+	case <-b.stopCh:
+		// already closed
+	default:
+		close(b.stopCh)
 	}
 }
 
