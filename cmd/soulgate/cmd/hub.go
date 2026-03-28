@@ -13,11 +13,18 @@ import (
 // hubCmd is the root hub command.
 var hubCmd = &cobra.Command{
 	Use:   "hub",
-	Short: "Manage skills, plugins, agents, MCP servers, and extensions",
+	Short: "Manage skills, tools, and agents",
 	Long: `SoulHub is the community package manager for SoulGate.
 
-Browse, install, and manage skills, plugins, agents, MCP servers,
-connectors, and extensions from the community registry.`,
+Browse, install, and manage skills, tools, and agents from the community registry.
+
+Categories:
+  skill  — Behavioral instructions (SKILL.md)
+  tool   — Capabilities: plugins, MCP servers, connectors, scripts
+  agent  — Pre-configured agent templates (agent.yml)
+
+Legacy type names (plugin, mcp, connector, extension) are still accepted
+and mapped to tool with the appropriate kind.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		showHubOverview()
 	},
@@ -37,13 +44,15 @@ var hubInstallCmd = &cobra.Command{
 	Short: "Install a package from the hub",
 	Long: `Install a package from the SoulHub registry.
 
-Package type must be one of: skill, plugin, agent, mcp, connector, extension
+Package type must be one of: skill, tool, agent
+(Legacy names plugin, mcp, connector, extension are also accepted)
 
 Examples:
   soulgate hub install skill:kubernetes-ops
-  soulgate hub install plugin:git-tools
-  soulgate hub install mcp:github
-  soulgate hub install agent:code-reviewer`,
+  soulgate hub install tool:git-tools
+  soulgate hub install agent:code-reviewer
+  soulgate hub install plugin:example     (backward compat → tool with kind=plugin)
+  soulgate hub install mcp:github         (backward compat → tool with kind=mcp)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHubInstall(args[0])
@@ -57,7 +66,8 @@ var hubUninstallCmd = &cobra.Command{
 
 Examples:
   soulgate hub uninstall skill:kubernetes-ops
-  soulgate hub uninstall mcp:github`,
+  soulgate hub uninstall tool:github
+  soulgate hub uninstall mcp:github       (backward compat)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHubUninstall(args[0])
@@ -87,7 +97,7 @@ var hubInfoCmd = &cobra.Command{
 
 Examples:
   soulgate hub info skill:kubernetes-ops
-  soulgate hub info mcp:github`,
+  soulgate hub info tool:github`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHubInfo(args[0])
@@ -108,13 +118,12 @@ func init() {
 func showHubOverview() {
 	fmt.Println(colorAccentBright("SoulHub — Community Package Manager"))
 	fmt.Println()
-	fmt.Println(colorBold("Package types:"))
-	fmt.Println("  " + colorAccent("skill") + "      - Instruction sets (SKILL.md)")
-	fmt.Println("  " + colorAccent("plugin") + "     - WASM extensions (manifest.yml)")
-	fmt.Println("  " + colorAccent("agent") + "      - Agent definitions (agent.yml)")
-	fmt.Println("  " + colorAccent("mcp") + "        - MCP servers (patched into config.yml)")
-	fmt.Println("  " + colorAccent("connector") + "  - Integration setup guides")
-	fmt.Println("  " + colorAccent("extension") + "  - Shell scripts and hooks")
+	fmt.Println(colorBold("Categories:"))
+	fmt.Println("  " + colorAccent("skill") + "  - Behavioral instructions (SKILL.md)")
+	fmt.Println("  " + colorAccent("tool") + "   - Capabilities: plugins, MCP servers, connectors, scripts")
+	fmt.Println("  " + colorAccent("agent") + "  - Pre-configured agent templates (agent.yml)")
+	fmt.Println()
+	fmt.Println(colorMuted("  Legacy names (plugin, mcp, connector, extension) are still accepted."))
 	fmt.Println()
 	fmt.Println(colorBold("Commands:"))
 	fmt.Println("  " + colorMuted("soulgate hub search <query>        ") + "Search registry")
@@ -124,6 +133,14 @@ func showHubOverview() {
 	fmt.Println("  " + colorMuted("soulgate hub update                ") + "Update all packages")
 	fmt.Println("  " + colorMuted("soulgate hub info <type:name>      ") + "Show package details")
 	fmt.Println()
+}
+
+// formatTypeKind returns a display label like "tool (mcp)" or just "skill".
+func formatTypeKind(pkgType hub.PackageType, kind hub.ToolKind) string {
+	if pkgType == hub.TypeTool && kind != "" {
+		return fmt.Sprintf("%s (%s)", pkgType, kind)
+	}
+	return string(pkgType)
 }
 
 // runHubSearch searches the registry and prints results.
@@ -141,12 +158,13 @@ func runHubSearch(query string) error {
 
 	fmt.Printf(colorAccentBright("Search results for %q\n\n"), query)
 	for _, pkg := range results {
-		fmt.Printf("  %s %s\n", colorAccent(fmt.Sprintf("%-10s", string(pkg.Type))), colorBold(pkg.Name))
+		label := formatTypeKind(pkg.Type, pkg.Kind)
+		fmt.Printf("  %s %s\n", colorAccent(fmt.Sprintf("%-16s", label)), colorBold(pkg.Name))
 		if pkg.Description != "" {
-			fmt.Printf("           %s\n", colorMuted(pkg.Description))
+			fmt.Printf("                   %s\n", colorMuted(pkg.Description))
 		}
 		if pkg.Version != "" {
-			fmt.Printf("           %s\n", colorMuted("v"+pkg.Version))
+			fmt.Printf("                   %s\n", colorMuted("v"+pkg.Version))
 		}
 		fmt.Println()
 	}
@@ -197,9 +215,10 @@ func runHubList() error {
 
 	fmt.Println(colorAccentBright("Installed packages\n"))
 	for _, p := range pkgs {
-		fmt.Printf("  %s %s/%s\n",
+		label := formatTypeKind(p.Type, p.Kind)
+		fmt.Printf("  %s %s / %s\n",
 			colorSuccess("*"),
-			colorAccent(string(p.Type)),
+			colorAccent(label),
 			colorBold(p.Name),
 		)
 		if p.Version != "" {
@@ -241,7 +260,8 @@ func runHubInfo(typeAndName string) error {
 		return fmt.Errorf("info failed: %w", err)
 	}
 
-	fmt.Printf("%s %s\n\n", colorAccentBright(string(pkg.Type)), colorBold(pkg.Name))
+	label := formatTypeKind(pkg.Type, pkg.Kind)
+	fmt.Printf("%s %s\n\n", colorAccentBright(label), colorBold(pkg.Name))
 	if pkg.Description != "" {
 		fmt.Printf("  %s\n\n", pkg.Description)
 	}
@@ -267,14 +287,11 @@ func runHubInfo(typeAndName string) error {
 
 // ---- helpers ----
 
-// newHub creates a Hub for the current workspace.
-// Falls back to the current working directory when no workspace is found.
 func newHub() *hub.Hub {
 	workDir := resolveWorkDir()
 	return hub.NewHub(workDir)
 }
 
-// resolveWorkDir returns the workspace root, walking up from cwd.
 func resolveWorkDir() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -294,7 +311,6 @@ func resolveWorkDir() string {
 	return cwd
 }
 
-// printPostInstallHint prints a type-specific hint after successful install.
 func printPostInstallHint(typeAndName string) {
 	if !strings.Contains(typeAndName, ":") && !strings.Contains(typeAndName, "/") {
 		return
@@ -309,12 +325,13 @@ func printPostInstallHint(typeAndName string) {
 		fmt.Println(colorMuted("  Restart soulgate for changes to take effect."))
 	case "skill":
 		fmt.Println(colorMuted("  Skill installed — it will be available on next run."))
-	case "plugin":
-		fmt.Println(colorMuted("  Plugin installed — restart soulgate to load it."))
+	case "tool", "plugin":
+		fmt.Println(colorMuted("  Tool installed — restart soulgate to load it."))
+	case "agent":
+		fmt.Println(colorMuted("  Agent template installed — use it with soulgate agent."))
 	}
 }
 
-// renderStars renders a float rating as star characters.
 func renderStars(rating float64) string {
 	n := int(rating)
 	stars := strings.Repeat("*", n)
