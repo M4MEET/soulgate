@@ -247,13 +247,13 @@ type GatewayAPI struct {
 	// Returns a status message or error.
 	SpawnConnector func(connectorType string, config map[string]string) (string, error)
 
-	// HubSearch searches the SoulGate Hub for plugins/tools.
+	// HubSearch searches the SoulGate Hub for packages.
 	HubSearch func(query string) ([]map[string]interface{}, error)
 
-	// HubInstall installs a plugin from the Hub by name.
+	// HubInstall installs a package from the Hub by "type:name" string.
 	HubInstall func(name string) error
 
-	// HubUninstall removes an installed plugin by name.
+	// HubUninstall removes an installed package by "type:name" string.
 	HubUninstall func(name string) error
 
 	// HubInstalled returns the list of installed Hub items.
@@ -1157,8 +1157,8 @@ func (g *Gateway) handleAPIConnectorsPost(w http.ResponseWriter, r *http.Request
 // handleAPIHub handles Hub operations: search, install, uninstall, list installed.
 //   GET    /api/hub?q=...         → search hub
 //   GET    /api/hub/installed     → list installed
-//   POST   /api/hub/install       → install plugin
-//   POST   /api/hub/uninstall     → uninstall plugin
+//   POST   /api/hub/install       → install package (body: {name, type?})
+//   POST   /api/hub/uninstall     → uninstall package (body: {name, type?})
 func (g *Gateway) handleAPIHub(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/hub")
 	path = strings.TrimPrefix(path, "/")
@@ -1197,12 +1197,18 @@ func (g *Gateway) handleAPIHub(w http.ResponseWriter, r *http.Request) {
 		}
 		var body struct {
 			Name string `json:"name"`
+			Type string `json:"type,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
 			return
 		}
-		if err := g.config.API.HubInstall(body.Name); err != nil {
+		// If type is provided and name doesn't already contain ":", combine them.
+		installKey := body.Name
+		if body.Type != "" && !strings.Contains(body.Name, ":") && !strings.Contains(body.Name, "/") {
+			installKey = body.Type + ":" + body.Name
+		}
+		if err := g.config.API.HubInstall(installKey); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
@@ -1218,12 +1224,18 @@ func (g *Gateway) handleAPIHub(w http.ResponseWriter, r *http.Request) {
 		}
 		var body struct {
 			Name string `json:"name"`
+			Type string `json:"type,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
 			return
 		}
-		if err := g.config.API.HubUninstall(body.Name); err != nil {
+		// If type is provided and name doesn't already contain ":", combine them.
+		uninstallKey := body.Name
+		if body.Type != "" && !strings.Contains(body.Name, ":") && !strings.Contains(body.Name, "/") {
+			uninstallKey = body.Type + ":" + body.Name
+		}
+		if err := g.config.API.HubUninstall(uninstallKey); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck

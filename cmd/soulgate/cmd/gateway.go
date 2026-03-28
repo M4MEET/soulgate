@@ -1315,58 +1315,49 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 			return spawnConnectorProcess(connectorType, cfg, gatewayPort)
 		},
 
-		// Hub integration — wire up search, install, uninstall using the hub package.
+		// Hub integration — uses hub.NewHub() for all operations.
 		HubSearch: func(query string) ([]map[string]interface{}, error) {
-			hubClient := hub.NewHubClient("", filepath.Join(ws.ConfigDir, ".cache"))
-			plugins, err := hubClient.SearchPlugins(context.Background(), query)
+			h := hub.NewHub(ws.Root)
+			pkgs, err := h.Search(query)
 			if err != nil {
 				return nil, err
 			}
-			results := make([]map[string]interface{}, 0, len(plugins))
-			for _, p := range plugins {
+			results := make([]map[string]interface{}, 0, len(pkgs))
+			for _, p := range pkgs {
 				results = append(results, map[string]interface{}{
 					"name":        p.Name,
+					"type":        string(p.Type),
+					"kind":        string(p.Kind),
 					"description": p.Description,
 					"version":     p.Version,
 					"author":      p.Author,
-					"category":    p.Category,
 					"tags":        p.Tags,
-					"rating":      p.Rating,
-					"downloads":   p.Downloads,
 				})
 			}
 			return results, nil
 		},
 
 		HubInstall: func(name string) error {
-			hubClient := hub.NewHubClient("", filepath.Join(ws.ConfigDir, ".cache"))
-			registry, err := hub.NewRegistry(filepath.Join(ws.ConfigDir, "hub_registry.json"))
-			if err != nil {
-				return fmt.Errorf("hub registry: %w", err)
-			}
-			installer := hub.NewInstaller(hubClient, registry, ws.ConfigDir)
-			return installer.InstallPlugin(context.Background(), name, hub.InstallOptions{})
+			h := hub.NewHub(ws.Root)
+			return h.Install(name)
 		},
 
 		HubUninstall: func(name string) error {
-			registry, err := hub.NewRegistry(filepath.Join(ws.ConfigDir, "hub_registry.json"))
-			if err != nil {
-				return fmt.Errorf("hub registry: %w", err)
-			}
-			installer := hub.NewInstaller(nil, registry, ws.ConfigDir)
-			return installer.Uninstall("plugin", name)
+			h := hub.NewHub(ws.Root)
+			return h.Uninstall(name)
 		},
 
 		HubInstalled: func() []map[string]interface{} {
-			registry, err := hub.NewRegistry(filepath.Join(ws.ConfigDir, "hub_registry.json"))
+			h := hub.NewHub(ws.Root)
+			items, err := h.List()
 			if err != nil {
 				return nil
 			}
-			items := registry.List()
 			results := make([]map[string]interface{}, 0, len(items))
 			for _, item := range items {
 				results = append(results, map[string]interface{}{
-					"type":         item.Type,
+					"type":         string(item.Type),
+					"kind":         string(item.Kind),
 					"name":         item.Name,
 					"version":      item.Version,
 					"installed_at": item.InstalledAt,
