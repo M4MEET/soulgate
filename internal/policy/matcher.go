@@ -82,6 +82,11 @@ func (m *Matcher) MatchAction(pattern, action string) bool {
 // Returns an error only when the pattern itself is malformed; a pattern that
 // simply does not match returns (false, nil).
 func (m *Matcher) MatchResource(pattern, resource string) (bool, error) {
+	// Universal wildcard — matches everything regardless of content
+	if pattern == "*" || pattern == "**" {
+		return true, nil
+	}
+
 	cg := m.compile(pattern)
 	if cg.err != nil {
 		return false, cg.err
