@@ -40,23 +40,23 @@ func MigrateFilesystem(configDir string) {
 
 	// Simple 1-to-1 file renames.
 	moves := map[string]string{
-		"memory.json":             "state/memory.json",
-		"agents_state.json":       "state/agents.json",
-		"branches.json":           "state/branches.json",
-		"web_threads.json":        "state/threads.json",
-		"cron_jobs.json":          "state/cron.json",
-		"heartbeat_state.json":    "state/heartbeat.json",
-		"session_state.json":      "state/session.json",
-		"policy.yml":              "security/policy.yml",
-		"scoped_policy.yml":       "security/scoped_policy.yml",
-		"secrets.json":            "security/secrets.json",
-		"users.json":              "security/users.json",
-		"api_tokens.json":         "security/tokens.json",
-		"approval_requests.json":  "security/approvals.json",
-		"costs.jsonl":             "logs/costs.jsonl",
-		"hub-installed.json":      "hub/installed.json",
+		"memory.json":            "state/memory.json",
+		"agents_state.json":      "state/agents.json",
+		"branches.json":          "state/branches.json",
+		"web_threads.json":       "state/threads.json",
+		"cron_jobs.json":         "state/cron.json",
+		"heartbeat_state.json":   "state/heartbeat.json",
+		"session_state.json":     "state/session.json",
+		"policy.yml":             "security/policy.yml",
+		"scoped_policy.yml":      "security/scoped_policy.yml",
+		"secrets.json":           "security/secrets.json",
+		"users.json":             "security/users.json",
+		"api_tokens.json":        "security/tokens.json",
+		"approval_requests.json": "security/approvals.json",
+		"costs.jsonl":            "logs/costs.jsonl",
+		"hub-installed.json":     "hub/installed.json",
 		// Legacy audit DB
-		"audit.jsonl":             "logs/audit.jsonl",
+		"audit.jsonl": "logs/audit.jsonl",
 	}
 	for src, dst := range moves {
 		srcPath := filepath.Join(configDir, src)

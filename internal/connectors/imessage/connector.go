@@ -86,10 +86,10 @@ type gatewayResponse struct {
 
 // iMessage is a parsed row from the message / handle join.
 type iMessage struct {
-	rowID    int64
-	text     string
-	phone    string // sender's phone number / Apple ID from handle.id
-	date     int64
+	rowID int64
+	text  string
+	phone string // sender's phone number / Apple ID from handle.id
+	date  int64
 }
 
 // Connector polls the iMessage SQLite database for incoming messages and

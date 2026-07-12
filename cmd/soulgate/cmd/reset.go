@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	resetScope       string
-	resetYes         bool
+	resetScope string
+	resetYes   bool
 )
 
 var resetCmd = &cobra.Command{

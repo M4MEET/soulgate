@@ -41,7 +41,7 @@ import (
 
 const (
 	defaultGatewayURL       = "http://localhost:8080"
-	mattermostMaxMessageLen = 16383 // Mattermost post character limit
+	mattermostMaxMessageLen = 16383   // Mattermost post character limit
 	wsReadLimit             = 1 << 20 // 1 MiB per WebSocket message
 	wsReconnectDelay        = 5 * time.Second
 	wsPingInterval          = 30 * time.Second
@@ -208,7 +208,7 @@ func (c *Connector) runWebSocket(ctx context.Context) error {
 
 	dialer := websocket.Dialer{
 		// Allow self-signed certs if the server URL uses https with custom certs.
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: false}, //nolint:gosec
+		TLSClientConfig:  &tls.Config{InsecureSkipVerify: false}, //nolint:gosec
 		HandshakeTimeout: 10 * time.Second,
 	}
 

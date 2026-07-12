@@ -350,9 +350,9 @@ func generateFAL(ctx context.Context, workspaceRoot, apiKey, prompt, size, outpu
 	width, height := parseSizeDimensions(size)
 
 	reqBody, err := json.Marshal(map[string]interface{}{
-		"prompt":           prompt,
-		"image_size":       map[string]int{"width": width, "height": height},
-		"num_images":       1,
+		"prompt":                prompt,
+		"image_size":            map[string]int{"width": width, "height": height},
+		"num_images":            1,
 		"enable_safety_checker": false,
 	})
 	if err != nil {

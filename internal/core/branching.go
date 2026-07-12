@@ -19,20 +19,20 @@ const branchesFileName = "state/branches.json"
 type ConversationBranch struct {
 	ID        string          `json:"id"`
 	ParentID  string          `json:"parent_id"`  // empty for the root branch
-	ForkPoint int             `json:"fork_point"`  // message index in parent where this branch diverges
-	Label     string          `json:"label"`       // user-supplied label
+	ForkPoint int             `json:"fork_point"` // message index in parent where this branch diverges
+	Label     string          `json:"label"`      // user-supplied label
 	Messages  []model.Message `json:"messages"`
 	CreatedAt time.Time       `json:"created_at"`
 }
 
 // BranchInfo is a summary view of a branch used by List().
 type BranchInfo struct {
-	ID        string
-	ParentID  string
-	Label     string
+	ID           string
+	ParentID     string
+	Label        string
 	MessageCount int
-	CreatedAt time.Time
-	IsCurrent bool
+	CreatedAt    time.Time
+	IsCurrent    bool
 }
 
 // BranchManager stores and manipulates conversation branches.

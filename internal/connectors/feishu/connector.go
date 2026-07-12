@@ -40,10 +40,10 @@ import (
 )
 
 const (
-	defaultGatewayURL  = "http://localhost:8080"
-	defaultListenAddr  = ":3979"
-	feishuBaseURL      = "https://open.feishu.cn"
-	tokenEndpoint      = "/open-apis/auth/v3/tenant_access_token/internal"
+	defaultGatewayURL   = "http://localhost:8080"
+	defaultListenAddr   = ":3979"
+	feishuBaseURL       = "https://open.feishu.cn"
+	tokenEndpoint       = "/open-apis/auth/v3/tenant_access_token/internal"
 	sendMessageEndpoint = "/open-apis/im/v1/messages"
 
 	// tokenRefreshBuffer is the safety margin before token expiry to refresh.
@@ -106,8 +106,8 @@ type eventHeader struct {
 
 // messageReceiveEvent is the payload of an im.message.receive_v1 event.
 type messageReceiveEvent struct {
-	Sender  messageSender  `json:"sender"`
-	Message feishuMessage  `json:"message"`
+	Sender  messageSender `json:"sender"`
+	Message feishuMessage `json:"message"`
 }
 
 // messageSender identifies who sent the message.
@@ -127,10 +127,10 @@ type feishuMessage struct {
 	RootID      string `json:"root_id"`   // non-empty if this is a thread reply
 	ParentID    string `json:"parent_id"` // parent message in a thread
 	CreateTime  string `json:"create_time"`
-	ChatID      string `json:"chat_id"`    // the conversation/group chat ID
-	ChatType    string `json:"chat_type"`  // "p2p" = DM, "group" = group chat
+	ChatID      string `json:"chat_id"`      // the conversation/group chat ID
+	ChatType    string `json:"chat_type"`    // "p2p" = DM, "group" = group chat
 	MessageType string `json:"message_type"` // "text", "post", etc.
-	Content     string `json:"content"`    // JSON-encoded content
+	Content     string `json:"content"`      // JSON-encoded content
 }
 
 // textContent is the JSON content for a "text" Feishu message.

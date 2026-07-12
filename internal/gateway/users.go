@@ -60,7 +60,7 @@ func userAuthMiddleware(um *auth.UserManager, next http.Handler) http.Handler {
 // requireRole returns a middleware that enforces the calling user has one of
 // the permitted roles. It falls through to the next handler when the gateway
 // has no UserManager (auth not configured).
-func requireRole(um *auth.UserManager, roles ...auth.Role, ) func(http.Handler) http.Handler {
+func requireRole(um *auth.UserManager, roles ...auth.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if um == nil {
 			return next

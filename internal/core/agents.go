@@ -115,18 +115,18 @@ type AgentLogEntry struct {
 // AgentConfig holds runtime configuration overrides for a background agent.
 // Zero values mean "use the orchestrator default".
 type AgentConfig struct {
-	Model          string   `json:"model"`            // model override (empty = use default)
-	Provider       string   `json:"provider"`         // provider override
-	AllowedTools   []string `json:"allowed_tools"`    // tool allowlist (empty = all)
-	MaxTokens      int      `json:"max_tokens"`       // token budget (0 = unlimited)
-	MaxCostUSD     float64  `json:"max_cost_usd"`     // cost limit (0 = unlimited)
-	ThinkingLevel  string   `json:"thinking_level"`   // off/low/medium/high
-	Temperature    float64  `json:"temperature"`      // 0.0–2.0
-	SystemPrompt   string   `json:"system_prompt"`    // custom instructions prepended to task
-	TimeoutSeconds int      `json:"timeout_seconds"`  // max runtime in seconds (0 = use default)
-	AutoRestart    bool     `json:"auto_restart"`     // restart on crash
-	ScheduleEnabled bool   `json:"schedule_enabled"` // enable cron scheduling
-	ScheduleCron   string   `json:"schedule_cron"`    // cron expression (e.g. "0 9 * * 1-5")
+	Model           string   `json:"model"`            // model override (empty = use default)
+	Provider        string   `json:"provider"`         // provider override
+	AllowedTools    []string `json:"allowed_tools"`    // tool allowlist (empty = all)
+	MaxTokens       int      `json:"max_tokens"`       // token budget (0 = unlimited)
+	MaxCostUSD      float64  `json:"max_cost_usd"`     // cost limit (0 = unlimited)
+	ThinkingLevel   string   `json:"thinking_level"`   // off/low/medium/high
+	Temperature     float64  `json:"temperature"`      // 0.0–2.0
+	SystemPrompt    string   `json:"system_prompt"`    // custom instructions prepended to task
+	TimeoutSeconds  int      `json:"timeout_seconds"`  // max runtime in seconds (0 = use default)
+	AutoRestart     bool     `json:"auto_restart"`     // restart on crash
+	ScheduleEnabled bool     `json:"schedule_enabled"` // enable cron scheduling
+	ScheduleCron    string   `json:"schedule_cron"`    // cron expression (e.g. "0 9 * * 1-5")
 }
 
 // AgentMetrics holds observable runtime counters for a background agent.
@@ -145,18 +145,18 @@ type AgentMetrics struct {
 
 // BackgroundAgent represents a task-specific agent running in the background
 type BackgroundAgent struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Task         string        `json:"task"`
-	Status       AgentStatus   `json:"status"`
-	Role         AgentRole     `json:"role"`
-	Capabilities []string      `json:"capabilities,omitempty"`
-	ParentID     string        `json:"parent_id,omitempty"`
-	ChildIDs     []string      `json:"child_ids,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
-	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
-	Result       string        `json:"result,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	ID           string      `json:"id"`
+	Name         string      `json:"name"`
+	Task         string      `json:"task"`
+	Status       AgentStatus `json:"status"`
+	Role         AgentRole   `json:"role"`
+	Capabilities []string    `json:"capabilities,omitempty"`
+	ParentID     string      `json:"parent_id,omitempty"`
+	ChildIDs     []string    `json:"child_ids,omitempty"`
+	CreatedAt    time.Time   `json:"created_at"`
+	CompletedAt  *time.Time  `json:"completed_at,omitempty"`
+	Result       string      `json:"result,omitempty"`
+	Error        string      `json:"error,omitempty"`
 
 	// Config holds runtime configuration overrides (protected by cfgMu).
 	Config AgentConfig
@@ -180,7 +180,7 @@ type BackgroundAgent struct {
 	msgMu       sync.Mutex
 	inbox       []AgentMessage // pending messages from other agents
 	memMu       sync.Mutex
-	memory      *AgentMemory   // per-agent private memory (lazy init)
+	memory      *AgentMemory // per-agent private memory (lazy init)
 }
 
 const maxAgentLogEntries = 200
@@ -441,13 +441,13 @@ type agentState struct {
 	ParentID    string      `json:"parent_id,omitempty"`
 	Config      AgentConfig `json:"config"`
 	// Persisted metrics
-	TokensUsed     int64          `json:"tokens_used"`
-	CostMicros     int64          `json:"cost_micros"`
-	ToolCallCount  int64          `json:"tool_call_count"`
-	ModelCallCount int64          `json:"model_call_count"`
-	ErrorCount     int64          `json:"error_count"`
+	TokensUsed     int64 `json:"tokens_used"`
+	CostMicros     int64 `json:"cost_micros"`
+	ToolCallCount  int64 `json:"tool_call_count"`
+	ModelCallCount int64 `json:"model_call_count"`
+	ErrorCount     int64 `json:"error_count"`
 	// Persisted activity log
-	ActivityLog    []AgentLogEntry `json:"activity_log,omitempty"`
+	ActivityLog []AgentLogEntry `json:"activity_log,omitempty"`
 }
 
 func (am *AgentManager) statePath() string {

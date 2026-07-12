@@ -13,11 +13,11 @@ import (
 
 // Document is a piece of text with its embedding vector stored for semantic search.
 type Document struct {
-	ID        string    `json:"id"`
-	Content   string    `json:"content"`
+	ID        string            `json:"id"`
+	Content   string            `json:"content"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
-	Vector    Vector    `json:"vector"`
-	CreatedAt time.Time `json:"created_at"`
+	Vector    Vector            `json:"vector"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // SearchResult is a document with its similarity score.

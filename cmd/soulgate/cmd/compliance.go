@@ -237,4 +237,3 @@ func formatDays(days int) string {
 	}
 	return fmt.Sprintf("%d days", days)
 }
-

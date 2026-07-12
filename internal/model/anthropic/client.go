@@ -346,9 +346,9 @@ type anthropicContent struct {
 }
 
 type anthropicTool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"input_schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	InputSchema  map[string]interface{} `json:"input_schema"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 

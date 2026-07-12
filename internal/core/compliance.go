@@ -43,12 +43,12 @@ type SessionSummary struct {
 
 // ComplianceExport is a point-in-time snapshot of audit and cost data.
 type ComplianceExport struct {
-	ExportedAt  time.Time        `json:"exported_at"`
-	UserID      string           `json:"user_id,omitempty"`
-	DateRange   DateRange        `json:"date_range"`
-	AuditEvents []*audit.Event   `json:"audit_events"`
-	Sessions    []SessionSummary `json:"sessions"`
-	CostEntries []CostEntry      `json:"cost_entries"`
+	ExportedAt  time.Time           `json:"exported_at"`
+	UserID      string              `json:"user_id,omitempty"`
+	DateRange   DateRange           `json:"date_range"`
+	AuditEvents []*audit.Event      `json:"audit_events"`
+	Sessions    []SessionSummary    `json:"sessions"`
+	CostEntries []CostEntry         `json:"cost_entries"`
 	Policies    []policy.PolicyRule `json:"policies"`
 }
 

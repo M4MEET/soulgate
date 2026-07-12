@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/M4MEET/soulgate/internal/brokers/secrets"
 	"github.com/M4MEET/soulgate/internal/mcp"
 	"github.com/M4MEET/soulgate/internal/model"
 	"github.com/M4MEET/soulgate/internal/policy"
@@ -12,7 +13,6 @@ import (
 	"github.com/M4MEET/soulgate/internal/tools/canvas"
 	"github.com/M4MEET/soulgate/internal/tools/computer"
 	"github.com/M4MEET/soulgate/internal/tools/cron"
-	"github.com/M4MEET/soulgate/internal/brokers/secrets"
 	"github.com/M4MEET/soulgate/internal/tools/email"
 	"github.com/M4MEET/soulgate/internal/tools/embeddings"
 	"github.com/M4MEET/soulgate/internal/tools/filewatcher"

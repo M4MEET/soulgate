@@ -23,26 +23,26 @@ type ModelPricing struct {
 // Entries are ordered most-specific first to ensure correct substring matching.
 var modelPricing = map[string]ModelPricing{
 	// Anthropic
-	"claude-opus-4":     {15.0, 75.0, 1.5},
-	"claude-sonnet-4":   {3.0, 15.0, 0.3},
-	"claude-haiku":      {0.25, 1.25, 0.025},
+	"claude-opus-4":   {15.0, 75.0, 1.5},
+	"claude-sonnet-4": {3.0, 15.0, 0.3},
+	"claude-haiku":    {0.25, 1.25, 0.025},
 	// OpenAI
-	"gpt-4.1-mini":      {0.4, 1.6, 0.1},
-	"gpt-4.1-nano":      {0.1, 0.4, 0.025},
-	"gpt-4.1":           {2.0, 8.0, 0.5},
-	"o3":                {2.0, 8.0, 0.5},
+	"gpt-4.1-mini": {0.4, 1.6, 0.1},
+	"gpt-4.1-nano": {0.1, 0.4, 0.025},
+	"gpt-4.1":      {2.0, 8.0, 0.5},
+	"o3":           {2.0, 8.0, 0.5},
 	// Groq / open-source
-	"llama-3.3-70b":     {0.59, 0.79, 0},
+	"llama-3.3-70b": {0.59, 0.79, 0},
 	// Google
-	"gemini-2.5-flash":  {0.15, 0.6, 0.0375},
-	"gemini-2.5-pro":    {1.25, 10.0, 0},
-	"gemini-2.0-flash":  {0.1, 0.4, 0},
+	"gemini-2.5-flash": {0.15, 0.6, 0.0375},
+	"gemini-2.5-pro":   {1.25, 10.0, 0},
+	"gemini-2.0-flash": {0.1, 0.4, 0},
 	// DeepSeek
-	"deepseek-chat":     {0.14, 0.28, 0.014},
+	"deepseek-chat": {0.14, 0.28, 0.014},
 	// Mistral
-	"mistral-large":     {2.0, 6.0, 0},
+	"mistral-large": {2.0, 6.0, 0},
 	// xAI Grok
-	"grok-3":            {3.0, 15.0, 0},
+	"grok-3": {3.0, 15.0, 0},
 }
 
 // CostEntry is a single persisted record of one model API call's cost.
@@ -66,14 +66,14 @@ type DayCost struct {
 
 // CostSummary is a snapshot suitable for the /usage command output.
 type CostSummary struct {
-	SessionCost   float64            `json:"session_cost_usd"`
-	TodayCost     float64            `json:"today_cost_usd"`
-	TotalCost     float64            `json:"total_cost_usd"`
-	ByProvider    map[string]float64 `json:"by_provider"`
-	ByModel       map[string]float64 `json:"by_model"`
-	Last7Days     []DayCost          `json:"last_7_days"`
-	SessionCalls  int                `json:"session_calls"`
-	TotalCalls    int                `json:"total_calls"`
+	SessionCost  float64            `json:"session_cost_usd"`
+	TodayCost    float64            `json:"today_cost_usd"`
+	TotalCost    float64            `json:"total_cost_usd"`
+	ByProvider   map[string]float64 `json:"by_provider"`
+	ByModel      map[string]float64 `json:"by_model"`
+	Last7Days    []DayCost          `json:"last_7_days"`
+	SessionCalls int                `json:"session_calls"`
+	TotalCalls   int                `json:"total_calls"`
 }
 
 // CostTracker records and persists API cost entries.

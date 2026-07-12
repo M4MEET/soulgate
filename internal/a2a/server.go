@@ -16,15 +16,15 @@ type TaskExecutor func(ctx context.Context, task *Task, events chan<- StreamResp
 
 // ServerConfig configures the A2A server.
 type ServerConfig struct {
-	AgentName    string
-	Description  string
-	Version      string
-	BaseURL      string
-	Provider     *AgentProvider
-	Skills       []AgentSkill
-	IconURL      string
-	Executor     TaskExecutor
-	Store        *TaskStore
+	AgentName   string
+	Description string
+	Version     string
+	BaseURL     string
+	Provider    *AgentProvider
+	Skills      []AgentSkill
+	IconURL     string
+	Executor    TaskExecutor
+	Store       *TaskStore
 }
 
 // Server implements the A2A protocol server endpoints.

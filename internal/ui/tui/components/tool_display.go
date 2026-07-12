@@ -118,13 +118,13 @@ type ToolBoxConfig struct {
 
 // FormatToolBox renders a tool call in a rich box format:
 //
-//	  ⚡ exec_command
-//	  │ command: ls -la
-//	  │ ─────────────────
-//	  │ total 30752
-//	  │ drwxr-xr-x  56 ...
-//	  │ (12 lines, showing first 8)
-//	  └─ ✓ 27ms
+//	⚡ exec_command
+//	│ command: ls -la
+//	│ ─────────────────
+//	│ total 30752
+//	│ drwxr-xr-x  56 ...
+//	│ (12 lines, showing first 8)
+//	└─ ✓ 27ms
 //
 // The cfg parameter is optional; pass nil to use defaults.
 func FormatToolBox(toolName string, args string, result string, duration time.Duration, cfg *ToolBoxConfig) string {

@@ -322,8 +322,8 @@ func (c *Connector) sendResponse(channelID, threadTS, response string) error {
 	blocks := formatBlocks(response)
 
 	opts := []slack.MsgOption{
-		slack.MsgOptionText(response, false),   // fallback plain text for notifications
-		slack.MsgOptionBlocks(blocks...),        // rich Block Kit rendering
+		slack.MsgOptionText(response, false), // fallback plain text for notifications
+		slack.MsgOptionBlocks(blocks...),     // rich Block Kit rendering
 		slack.MsgOptionDisableLinkUnfurl(),
 	}
 

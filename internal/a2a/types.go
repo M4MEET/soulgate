@@ -13,14 +13,14 @@ import "time"
 type TaskState string
 
 const (
-	TaskStateSubmitted    TaskState = "submitted"
-	TaskStateWorking     TaskState = "working"
-	TaskStateCompleted   TaskState = "completed"
-	TaskStateFailed      TaskState = "failed"
-	TaskStateCanceled    TaskState = "canceled"
-	TaskStateInputReq    TaskState = "input-required"
-	TaskStateAuthReq     TaskState = "auth-required"
-	TaskStateRejected    TaskState = "rejected"
+	TaskStateSubmitted TaskState = "submitted"
+	TaskStateWorking   TaskState = "working"
+	TaskStateCompleted TaskState = "completed"
+	TaskStateFailed    TaskState = "failed"
+	TaskStateCanceled  TaskState = "canceled"
+	TaskStateInputReq  TaskState = "input-required"
+	TaskStateAuthReq   TaskState = "auth-required"
+	TaskStateRejected  TaskState = "rejected"
 )
 
 func (s TaskState) IsTerminal() bool {
@@ -57,37 +57,37 @@ func TextPart(text string) Part {
 
 // Message is a single turn in a conversation.
 type Message struct {
-	MessageID string            `json:"messageId"`
-	Role      string            `json:"role"` // "user" or "agent"
-	Parts     []Part            `json:"parts"`
-	TaskID    string            `json:"taskId,omitempty"`
-	ContextID string            `json:"contextId,omitempty"`
+	MessageID string                 `json:"messageId"`
+	Role      string                 `json:"role"` // "user" or "agent"
+	Parts     []Part                 `json:"parts"`
+	TaskID    string                 `json:"taskId,omitempty"`
+	ContextID string                 `json:"contextId,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Artifact is a named output produced by a task.
 type Artifact struct {
-	ArtifactID  string            `json:"artifactId"`
-	Name        string            `json:"name,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Parts       []Part            `json:"parts"`
+	ArtifactID  string                 `json:"artifactId"`
+	Name        string                 `json:"name,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Parts       []Part                 `json:"parts"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // TaskStatus holds the current state of a task.
 type TaskStatus struct {
-	State     TaskState  `json:"state"`
-	Message   *Message   `json:"message,omitempty"`
-	Timestamp time.Time  `json:"timestamp"`
+	State     TaskState `json:"state"`
+	Message   *Message  `json:"message,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // Task is the core unit of work in A2A.
 type Task struct {
-	ID        string            `json:"id"`
-	ContextID string            `json:"contextId,omitempty"`
-	Status    TaskStatus        `json:"status"`
-	Artifacts []Artifact        `json:"artifacts,omitempty"`
-	History   []Message         `json:"history,omitempty"`
+	ID        string                 `json:"id"`
+	ContextID string                 `json:"contextId,omitempty"`
+	Status    TaskStatus             `json:"status"`
+	Artifacts []Artifact             `json:"artifacts,omitempty"`
+	History   []Message              `json:"history,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -97,18 +97,18 @@ type Task struct {
 
 // AgentCard is served at /.well-known/agent.json for discovery.
 type AgentCard struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description"`
-	Version      string            `json:"version"`
-	URL          string            `json:"url"`
-	Provider     *AgentProvider    `json:"provider,omitempty"`
-	Capabilities AgentCapabilities `json:"capabilities"`
-	Skills       []AgentSkill      `json:"skills"`
-	InputModes   []string          `json:"defaultInputModes"`
-	OutputModes  []string          `json:"defaultOutputModes"`
+	Name         string                    `json:"name"`
+	Description  string                    `json:"description"`
+	Version      string                    `json:"version"`
+	URL          string                    `json:"url"`
+	Provider     *AgentProvider            `json:"provider,omitempty"`
+	Capabilities AgentCapabilities         `json:"capabilities"`
+	Skills       []AgentSkill              `json:"skills"`
+	InputModes   []string                  `json:"defaultInputModes"`
+	OutputModes  []string                  `json:"defaultOutputModes"`
 	Security     map[string]SecurityScheme `json:"securitySchemes,omitempty"`
-	IconURL      string            `json:"iconUrl,omitempty"`
-	DocURL       string            `json:"documentationUrl,omitempty"`
+	IconURL      string                    `json:"iconUrl,omitempty"`
+	DocURL       string                    `json:"documentationUrl,omitempty"`
 }
 
 type AgentProvider struct {
@@ -151,10 +151,10 @@ type JSONRPCRequest struct {
 }
 
 type JSONRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id"`
-	Result  interface{}     `json:"result,omitempty"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
+	JSONRPC string        `json:"jsonrpc"`
+	ID      interface{}   `json:"id"`
+	Result  interface{}   `json:"result,omitempty"`
+	Error   *JSONRPCError `json:"error,omitempty"`
 }
 
 type JSONRPCError struct {
@@ -165,12 +165,12 @@ type JSONRPCError struct {
 
 // Standard A2A error codes
 const (
-	ErrTaskNotFound          = -32001
-	ErrTaskNotCancelable     = -32002
-	ErrPushNotSupported      = -32003
-	ErrUnsupportedOperation  = -32004
+	ErrTaskNotFound            = -32001
+	ErrTaskNotCancelable       = -32002
+	ErrPushNotSupported        = -32003
+	ErrUnsupportedOperation    = -32004
 	ErrContentTypeNotSupported = -32005
-	ErrInvalidAgentResponse  = -32006
+	ErrInvalidAgentResponse    = -32006
 )
 
 // --------------------------------------------------------------------------

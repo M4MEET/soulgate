@@ -14,9 +14,9 @@ import (
 // model calls search_available_tools, saving ~3000 tokens per API call.
 type ToolRegistry struct {
 	mu          sync.RWMutex
-	allTools    []model.ToolSchema            // full catalog
-	toolIndex   map[string]model.ToolSchema   // name -> schema for fast lookup
-	activeTools map[string]struct{}           // tools currently exposed to model
+	allTools    []model.ToolSchema          // full catalog
+	toolIndex   map[string]model.ToolSchema // name -> schema for fast lookup
+	activeTools map[string]struct{}         // tools currently exposed to model
 }
 
 // alwaysOnTools are sent on every API call. These are the tools users expect
@@ -30,8 +30,8 @@ var alwaysOnTools = map[string]bool{
 	"files_write": true,
 	"files_list":  true,
 	// Shell execution — covers app launching, system commands, etc.
-	"exec_command":   true,
-	"process_start":  true,
+	"exec_command":  true,
+	"process_start": true,
 	// Web access
 	"web_search": true,
 	"web_fetch":  true,

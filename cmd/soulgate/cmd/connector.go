@@ -12,8 +12,8 @@ import (
 	feishuconnector "github.com/M4MEET/soulgate/internal/connectors/feishu"
 	imessageconnector "github.com/M4MEET/soulgate/internal/connectors/imessage"
 	ircconnector "github.com/M4MEET/soulgate/internal/connectors/irc"
-	mattermostconnector "github.com/M4MEET/soulgate/internal/connectors/mattermost"
 	matrixconnector "github.com/M4MEET/soulgate/internal/connectors/matrix"
+	mattermostconnector "github.com/M4MEET/soulgate/internal/connectors/mattermost"
 	nostrconnector "github.com/M4MEET/soulgate/internal/connectors/nostr"
 	signalconnector "github.com/M4MEET/soulgate/internal/connectors/signal"
 	slackconnector "github.com/M4MEET/soulgate/internal/connectors/slack"
@@ -88,10 +88,10 @@ var (
 	signalCLIBinary   string
 
 	// Teams-specific flags.
-	teamsGatewayURL   string
-	teamsAppID        string
-	teamsAppPassword  string
-	teamsListenAddr   string
+	teamsGatewayURL  string
+	teamsAppID       string
+	teamsAppPassword string
+	teamsListenAddr  string
 
 	// Matrix-specific flags.
 	matrixGatewayURL     string
@@ -131,11 +131,11 @@ var (
 	mattermostBotUsername string
 
 	// Feishu-specific flags.
-	feishuGatewayURL   string
-	feishuAppID        string
-	feishuAppSecret    string
-	feishuListenAddr   string
-	feishuVerifyToken  string
+	feishuGatewayURL  string
+	feishuAppID       string
+	feishuAppSecret   string
+	feishuListenAddr  string
+	feishuVerifyToken string
 )
 
 func init() {
@@ -1163,4 +1163,3 @@ func runConnectorFeishu(cmd *cobra.Command, args []string) error {
 	fmt.Println("\nFeishu connector stopped")
 	return nil
 }
-

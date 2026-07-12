@@ -741,14 +741,14 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 					"duration":         metrics.Duration,
 				},
 				"config": map[string]interface{}{
-					"model":           cfg.Model,
-					"provider":        cfg.Provider,
-					"allowed_tools":   cfg.AllowedTools,
-					"max_tokens":      cfg.MaxTokens,
-					"max_cost_usd":    cfg.MaxCostUSD,
-					"thinking_level":  cfg.ThinkingLevel,
-					"temperature":     cfg.Temperature,
-					"system_prompt":   cfg.SystemPrompt,
+					"model":            cfg.Model,
+					"provider":         cfg.Provider,
+					"allowed_tools":    cfg.AllowedTools,
+					"max_tokens":       cfg.MaxTokens,
+					"max_cost_usd":     cfg.MaxCostUSD,
+					"thinking_level":   cfg.ThinkingLevel,
+					"temperature":      cfg.Temperature,
+					"system_prompt":    cfg.SystemPrompt,
 					"timeout_seconds":  cfg.TimeoutSeconds,
 					"auto_restart":     cfg.AutoRestart,
 					"schedule_enabled": cfg.ScheduleEnabled,
@@ -887,12 +887,12 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 				return nil, err
 			}
 			return map[string]interface{}{
-				"status":    "restarted",
-				"old_id":    id,
-				"new_id":    newAgent.ID,
-				"name":      newAgent.Name,
-				"task":      newAgent.Task,
-				"role":      string(newAgent.Role),
+				"status": "restarted",
+				"old_id": id,
+				"new_id": newAgent.ID,
+				"name":   newAgent.Name,
+				"task":   newAgent.Task,
+				"role":   string(newAgent.Role),
 			}, nil
 		},
 
@@ -1054,8 +1054,8 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 					Decision:    policy.Decision(getString(rule, "decision")),
 					Priority:    getInt(rule, "priority"),
 				},
-				Scope:    policy.PolicyScope(getString(rule, "scope")),
-				ScopeID:  getString(rule, "scope_id"),
+				Scope:     policy.PolicyScope(getString(rule, "scope")),
+				ScopeID:   getString(rule, "scope_id"),
 				PIIAction: getString(rule, "pii_action"),
 			}
 
@@ -1163,10 +1163,10 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 			hb := orch.GetHeartbeat()
 			s := hb.Status()
 			m := map[string]interface{}{
-				"enabled":    s.Enabled,
-				"running":    s.Running,
-				"interval":   s.Interval,
-				"run_count":  s.RunCount,
+				"enabled":   s.Enabled,
+				"running":   s.Running,
+				"interval":  s.Interval,
+				"run_count": s.RunCount,
 			}
 			if !s.LastRun.IsZero() {
 				m["last_run"] = s.LastRun.Format("2006-01-02T15:04:05Z")

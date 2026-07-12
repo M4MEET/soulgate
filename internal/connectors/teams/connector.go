@@ -74,16 +74,16 @@ type Config struct {
 // activity is a Bot Framework v4 Activity object (subset of fields we use).
 // See https://learn.microsoft.com/en-us/azure/bot-service/rest-api/bot-framework-rest-connector-api-reference
 type activity struct {
-	Type           string          `json:"type"`
-	ID             string          `json:"id"`
-	ServiceURL     string          `json:"serviceUrl"`
-	ChannelID      string          `json:"channelId"`
-	Conversation   conversationRef `json:"conversation"`
-	From           channelAccount  `json:"from"`
-	Recipient      channelAccount  `json:"recipient"`
-	Text           string          `json:"text"`
-	TextFormat     string          `json:"textFormat,omitempty"`
-	MentionsField  json.RawMessage `json:"entities,omitempty"`
+	Type          string          `json:"type"`
+	ID            string          `json:"id"`
+	ServiceURL    string          `json:"serviceUrl"`
+	ChannelID     string          `json:"channelId"`
+	Conversation  conversationRef `json:"conversation"`
+	From          channelAccount  `json:"from"`
+	Recipient     channelAccount  `json:"recipient"`
+	Text          string          `json:"text"`
+	TextFormat    string          `json:"textFormat,omitempty"`
+	MentionsField json.RawMessage `json:"entities,omitempty"`
 }
 
 // conversationRef identifies the conversation (channel, group chat, or 1:1).
@@ -100,13 +100,13 @@ type channelAccount struct {
 
 // replyActivity is the Activity we POST back to the Bot Framework service.
 type replyActivity struct {
-	Type         string         `json:"type"`
-	Text         string         `json:"text"`
-	TextFormat   string         `json:"textFormat"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text"`
+	TextFormat   string          `json:"textFormat"`
 	Conversation conversationRef `json:"conversation"`
-	From         channelAccount `json:"from"`
-	Recipient    channelAccount `json:"recipient"`
-	ReplyToID    string         `json:"replyToId,omitempty"`
+	From         channelAccount  `json:"from"`
+	Recipient    channelAccount  `json:"recipient"`
+	ReplyToID    string          `json:"replyToId,omitempty"`
 }
 
 // tokenResponse is the response from the Bot Framework OAuth2 token endpoint.

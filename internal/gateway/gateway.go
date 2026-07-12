@@ -104,9 +104,9 @@ type ChatHandler func(ctx context.Context, message string) (string, error)
 // ThinkingEvent is a real-time event from the agentic loop, sent to the
 // web UI via Server-Sent Events so users can watch the AI think.
 type ThinkingEvent struct {
-	Kind    string `json:"kind"`    // iteration, model_call, model_done, tool_start, tool_done, stream, status, done
-	Message string `json:"message"` // human-readable description
-	Data    string `json:"data,omitempty"`    // tool name, model name, etc.
+	Kind    string `json:"kind"`           // iteration, model_call, model_done, tool_start, tool_done, stream, status, done
+	Message string `json:"message"`        // human-readable description
+	Data    string `json:"data,omitempty"` // tool name, model name, etc.
 	Tokens  int    `json:"tokens,omitempty"`
 }
 
@@ -262,11 +262,11 @@ type GatewayAPI struct {
 
 // Config holds Gateway configuration
 type Config struct {
-	Address     string
-	Port        int
-	SessionsDir string      // Directory for session JSONL files
-	AuthEnabled bool        // Enable authentication (default: false for backward compatibility)
-	OnChat       ChatHandler         // If set, gateway serves POST /api/chat
+	Address      string
+	Port         int
+	SessionsDir  string               // Directory for session JSONL files
+	AuthEnabled  bool                 // Enable authentication (default: false for backward compatibility)
+	OnChat       ChatHandler          // If set, gateway serves POST /api/chat
 	OnStreamChat StreamingChatHandler // If set, streams thinking events via SSE
 
 	// Metadata surfaced on the /api/status endpoint and the web UI.
@@ -388,22 +388,22 @@ func NewGateway(config *Config) (*Gateway, error) {
 	}
 
 	gw := &Gateway{
-		clients:        make(map[string]*Client),
-		agents:         make(map[string]*Client),
-		channels:       make(map[string]*Client),
-		uis:            make(map[string]*Client),
-		nodes:          make(map[string]*Client),
-		sessions:       make(map[string]*Session),
-		sessionStorage: sessionStorage,
-		router:         router,
-		tokenManager:   tokenManager,
-		pairingManager: pairingManager,
-		authEnabled:    authEnabled,
-		apiAuth:        apiAuth,
-		apiDevMode:     apiDevMode,
-		userManager:    userManager,
-		config:         config,
-		startedAt:      time.Now(),
+		clients:           make(map[string]*Client),
+		agents:            make(map[string]*Client),
+		channels:          make(map[string]*Client),
+		uis:               make(map[string]*Client),
+		nodes:             make(map[string]*Client),
+		sessions:          make(map[string]*Session),
+		sessionStorage:    sessionStorage,
+		router:            router,
+		tokenManager:      tokenManager,
+		pairingManager:    pairingManager,
+		authEnabled:       authEnabled,
+		apiAuth:           apiAuth,
+		apiDevMode:        apiDevMode,
+		userManager:       userManager,
+		config:            config,
+		startedAt:         time.Now(),
 		metrics:           newMetricsCollector(),
 		spawnedConnectors: make(map[string]*SpawnedConnector),
 	}
@@ -729,16 +729,16 @@ func (g *Gateway) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	g.clientsMux.RUnlock()
 
 	g.roleMux.RLock()
-	agentCount   := len(g.agents)
+	agentCount := len(g.agents)
 	channelCount := len(g.channels)
-	uiCount      := len(g.uis)
-	nodeCount    := len(g.nodes)
+	uiCount := len(g.uis)
+	nodeCount := len(g.nodes)
 
 	// Build per-role client maps so the UI can render individual client rows.
-	agentIDs   := clientIDs(g.agents)
+	agentIDs := clientIDs(g.agents)
 	channelIDs := clientIDs(g.channels)
-	uiIDs      := clientIDs(g.uis)
-	nodeIDs    := clientIDs(g.nodes)
+	uiIDs := clientIDs(g.uis)
+	nodeIDs := clientIDs(g.nodes)
 	g.roleMux.RUnlock()
 
 	g.sessionMux.RLock()
@@ -820,14 +820,14 @@ func (g *Gateway) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	snapshots := make([]map[string]interface{}, 0, len(g.sessions))
 	for _, s := range g.sessions {
 		snapshots = append(snapshots, map[string]interface{}{
-			"id":             s.ID,
+			"id":              s.ID,
 			"conversation_id": s.ConversationID,
-			"channel":        s.Channel,
-			"state":          s.GetState(),
-			"message_count":  s.GetMessageCount(),
-			"assigned_agent": s.GetAssignedAgent(),
-			"created_at":     s.CreatedAt.UTC().Format(time.RFC3339),
-			"last_activity":  s.UpdatedAt.UTC().Format(time.RFC3339),
+			"channel":         s.Channel,
+			"state":           s.GetState(),
+			"message_count":   s.GetMessageCount(),
+			"assigned_agent":  s.GetAssignedAgent(),
+			"created_at":      s.CreatedAt.UTC().Format(time.RFC3339),
+			"last_activity":   s.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	g.sessionMux.RUnlock()
@@ -1155,10 +1155,11 @@ func (g *Gateway) handleAPIConnectorsPost(w http.ResponseWriter, r *http.Request
 }
 
 // handleAPIHub handles Hub operations: search, install, uninstall, list installed.
-//   GET    /api/hub?q=...         → search hub
-//   GET    /api/hub/installed     → list installed
-//   POST   /api/hub/install       → install package (body: {name, type?})
-//   POST   /api/hub/uninstall     → uninstall package (body: {name, type?})
+//
+//	GET    /api/hub?q=...         → search hub
+//	GET    /api/hub/installed     → list installed
+//	POST   /api/hub/install       → install package (body: {name, type?})
+//	POST   /api/hub/uninstall     → uninstall package (body: {name, type?})
 func (g *Gateway) handleAPIHub(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/hub")
 	path = strings.TrimPrefix(path, "/")
@@ -2422,11 +2423,12 @@ func (g *Gateway) handleAPIFile(w http.ResponseWriter, r *http.Request) {
 // handleAPIAgentDetail is the router for the /api/agents/{id} subtree.
 //
 // Routes dispatched:
-//   GET    /api/agents/{id}         → full agent detail (identity + metrics + config + log)
-//   GET    /api/agents/{id}/log     → last N log entries (?limit=N)
-//   POST   /api/agents/{id}/config  → update agent configuration
-//   POST   /api/agents/{id}/message → send a message to the agent
-//   DELETE /api/agents/{id}         → stop the agent
+//
+//	GET    /api/agents/{id}         → full agent detail (identity + metrics + config + log)
+//	GET    /api/agents/{id}/log     → last N log entries (?limit=N)
+//	POST   /api/agents/{id}/config  → update agent configuration
+//	POST   /api/agents/{id}/message → send a message to the agent
+//	DELETE /api/agents/{id}         → stop the agent
 func (g *Gateway) handleAPIAgentDetail(w http.ResponseWriter, r *http.Request) {
 	// Strip the leading "/api/agents/" prefix to get the remainder.
 	rest := strings.TrimPrefix(r.URL.Path, "/api/agents/")
@@ -2799,7 +2801,7 @@ func (g *Gateway) handleAPIApprovals(w http.ResponseWriter, r *http.Request) {
 
 		// Parse optional decided_by from body.
 		var body struct {
-			DecidedBy string 
+			DecidedBy string
 		}
 		// Best-effort decode; an empty or absent body is fine.
 		_ = json.NewDecoder(r.Body).Decode(&body)

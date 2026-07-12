@@ -121,9 +121,9 @@ func (c *OpenRouterCatalog) loadFromDisk() bool {
 	}
 
 	var cache struct {
-		FetchedAt time.Time             `json:"fetched_at"`
-		Models    []OpenRouterModel     `json:"models"`
-		Providers []OpenRouterProvider  `json:"providers"`
+		FetchedAt time.Time            `json:"fetched_at"`
+		Models    []OpenRouterModel    `json:"models"`
+		Providers []OpenRouterProvider `json:"providers"`
 	}
 	if err := json.Unmarshal(data, &cache); err != nil {
 		return false
@@ -146,9 +146,9 @@ func (c *OpenRouterCatalog) loadFromDisk() bool {
 func (c *OpenRouterCatalog) saveToDisk() {
 	c.mu.RLock()
 	cache := struct {
-		FetchedAt time.Time             `json:"fetched_at"`
-		Models    []OpenRouterModel     `json:"models"`
-		Providers []OpenRouterProvider  `json:"providers"`
+		FetchedAt time.Time            `json:"fetched_at"`
+		Models    []OpenRouterModel    `json:"models"`
+		Providers []OpenRouterProvider `json:"providers"`
 	}{
 		FetchedAt: c.lastFetch,
 		Models:    c.models,
@@ -272,9 +272,9 @@ func (c *OpenRouterCatalog) loadStaleDiskCache() {
 		return
 	}
 	var cache struct {
-		FetchedAt time.Time             `json:"fetched_at"`
-		Models    []OpenRouterModel     `json:"models"`
-		Providers []OpenRouterProvider  `json:"providers"`
+		FetchedAt time.Time            `json:"fetched_at"`
+		Models    []OpenRouterModel    `json:"models"`
+		Providers []OpenRouterProvider `json:"providers"`
 	}
 	if err := json.Unmarshal(data, &cache); err != nil {
 		return

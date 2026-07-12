@@ -40,11 +40,11 @@ import (
 )
 
 const (
-	defaultGatewayURL    = "http://localhost:8080"
-	syncTimeout          = 30000 // milliseconds — long-poll window
-	syncRetryDelay       = 5 * time.Second
-	matrixMaxMessageLen  = 16384 // practical limit for a single Matrix message body
-	sinceTokenFilename   = ".matrix_since_token"
+	defaultGatewayURL   = "http://localhost:8080"
+	syncTimeout         = 30000 // milliseconds — long-poll window
+	syncRetryDelay      = 5 * time.Second
+	matrixMaxMessageLen = 16384 // practical limit for a single Matrix message body
+	sinceTokenFilename  = ".matrix_since_token"
 )
 
 // Config holds all configuration for the Matrix connector.

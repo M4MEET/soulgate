@@ -89,9 +89,9 @@ func (m *MetricsCollector) snapshot(gw *Gateway) metricsSnapshot {
 	runtime.ReadMemStats(&ms)
 
 	return metricsSnapshot{
-		endpoints:    endpoints,
-		tokensTotal:  atomic.LoadInt64(&m.tokensTotal),
-		costMicroUSD: atomic.LoadInt64(&m.costMicroUSD),
+		endpoints:      endpoints,
+		tokensTotal:    atomic.LoadInt64(&m.tokensTotal),
+		costMicroUSD:   atomic.LoadInt64(&m.costMicroUSD),
 		agentClients:   agentCount,
 		channelClients: channelCount,
 		goroutines:     int64(runtime.NumGoroutine()),

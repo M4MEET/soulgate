@@ -19,12 +19,12 @@ import (
 )
 
 const (
-	defaultGatewayURL    = "http://localhost:8080"
-	defaultServer        = "irc.libera.chat:6697"
-	reconnectDelay       = 5 * time.Second
-	pingTimeout          = 3 * time.Minute
-	writeTimeout         = 30 * time.Second
-	maxIRCMessageLen     = 450 // Conservative limit to stay under the 512-byte RFC limit with prefix overhead
+	defaultGatewayURL = "http://localhost:8080"
+	defaultServer     = "irc.libera.chat:6697"
+	reconnectDelay    = 5 * time.Second
+	pingTimeout       = 3 * time.Minute
+	writeTimeout      = 30 * time.Second
+	maxIRCMessageLen  = 450 // Conservative limit to stay under the 512-byte RFC limit with prefix overhead
 )
 
 // Config holds all IRC connector configuration.

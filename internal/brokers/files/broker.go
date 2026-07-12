@@ -57,8 +57,8 @@ func (b *Broker) Close() error {
 
 // policyOpts controls optional behaviour in withPolicyCheck.
 type policyOpts struct {
-	coreProtect    bool                    // Whether to check isCoreProtected (write/delete only)
-	protectMsgFn   func(relPath string) string // Returns the full error message when core protection triggers
+	coreProtect  bool                        // Whether to check isCoreProtected (write/delete only)
+	protectMsgFn func(relPath string) string // Returns the full error message when core protection triggers
 }
 
 // withPolicyCheck encapsulates the common guard sequence shared by every broker

@@ -470,4 +470,3 @@ func mdSortAndDedup(spans []mdSpan) []mdSpan {
 	}
 	return out
 }
-

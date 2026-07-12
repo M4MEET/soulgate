@@ -54,7 +54,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"net.request"},
 		SchemaResource:  "query:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Query string `json:"query"` }
+			var p struct {
+				Query string `json:"query"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -70,7 +72,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"net.request"},
 		SchemaResource:  "https://*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ URL string `json:"url"` }
+			var p struct {
+				URL string `json:"url"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -87,7 +91,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"exec.command"},
 		SchemaResource:  "process:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Command string `json:"command"` }
+			var p struct {
+				Command string `json:"command"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -104,27 +110,27 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		SchemaResource:  "process:*",
 	},
 	"process_poll": {
-		Action:          "process.poll",
-		FallbackActions: []string{"exec.command"},
-		SchemaResource:  "process:*",
+		Action:            "process.poll",
+		FallbackActions:   []string{"exec.command"},
+		SchemaResource:    "process:*",
 		ResourceFromInput: processIDResource("process_poll"),
 	},
 	"process_log": {
-		Action:          "process.log",
-		FallbackActions: []string{"exec.command"},
-		SchemaResource:  "process:*",
+		Action:            "process.log",
+		FallbackActions:   []string{"exec.command"},
+		SchemaResource:    "process:*",
 		ResourceFromInput: processIDResource("process_log"),
 	},
 	"process_write": {
-		Action:          "process.write",
-		FallbackActions: []string{"exec.command"},
-		SchemaResource:  "process:*",
+		Action:            "process.write",
+		FallbackActions:   []string{"exec.command"},
+		SchemaResource:    "process:*",
 		ResourceFromInput: processIDResource("process_write"),
 	},
 	"process_kill": {
-		Action:          "process.kill",
-		FallbackActions: []string{"exec.command"},
-		SchemaResource:  "process:*",
+		Action:            "process.kill",
+		FallbackActions:   []string{"exec.command"},
+		SchemaResource:    "process:*",
 		ResourceFromInput: processIDResource("process_kill"),
 	},
 
@@ -134,7 +140,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"files.read", "pdf.fetch", "net.request"},
 		SchemaResource:  "./**",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Path string `json:"path"` }
+			var p struct {
+				Path string `json:"path"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -159,7 +167,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"files.read"},
 		SchemaResource:  "./**",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Path string `json:"path"` }
+			var p struct {
+				Path string `json:"path"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -179,7 +189,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		Action:         "filewatcher.stop",
 		SchemaResource: "filewatcher:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ ID string `json:"id"` }
+			var p struct {
+				ID string `json:"id"`
+			}
 			_ = json.Unmarshal(input, &p)
 			id := strings.TrimSpace(p.ID)
 			if id == "" {
@@ -213,7 +225,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"net.request"},
 		SchemaResource:  "https://*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ URL string `json:"url"` }
+			var p struct {
+				URL string `json:"url"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -314,7 +328,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"net.request"},
 		SchemaResource:  "mcp:resource:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ URI string `json:"uri"` }
+			var p struct {
+				URI string `json:"uri"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -329,7 +345,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"net.request"},
 		SchemaResource:  "mcp:prompt:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Name string `json:"name"` }
+			var p struct {
+				Name string `json:"name"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -347,7 +365,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"net.request"},
 		SchemaResource:  "email:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ To string `json:"to"` }
+			var p struct {
+				To string `json:"to"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -384,7 +404,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"exec.command"},
 		SchemaResource:  "git:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Message string `json:"message"` }
+			var p struct {
+				Message string `json:"message"`
+			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("invalid tool input: %w", err)
 			}
@@ -400,7 +422,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"exec.command"},
 		SchemaResource:  "git:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Action string `json:"action"` }
+			var p struct {
+				Action string `json:"action"`
+			}
 			_ = json.Unmarshal(input, &p)
 			action := strings.TrimSpace(p.Action)
 			if action == "" {
@@ -414,7 +438,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		FallbackActions: []string{"exec.command"},
 		SchemaResource:  "git:*",
 		ResourceFromInput: func(input json.RawMessage) (string, error) {
-			var p struct{ Action string `json:"action"` }
+			var p struct {
+				Action string `json:"action"`
+			}
 			_ = json.Unmarshal(input, &p)
 			action := strings.TrimSpace(p.Action)
 			if action == "" {
@@ -508,34 +534,34 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 	// No-permission tools
 	"search_available_tools": {NoPermissionRequired: true},
 	"llm_task":               {NoPermissionRequired: true},
-	"memory_write":         {NoPermissionRequired: true},
-	"memory_get":           {NoPermissionRequired: true},
-	"memory_search":        {NoPermissionRequired: true},
-	"switch_model":         {NoPermissionRequired: true},
-	"agent_create":    {NoPermissionRequired: true},
-	"agent_list":      {NoPermissionRequired: true},
-	"agent_stop":      {NoPermissionRequired: true},
-	"agent_delegate":  {NoPermissionRequired: true},
-	"agent_message":        {NoPermissionRequired: true},
-	"agent_memory_write":   {NoPermissionRequired: true},
-	"agent_memory_read":    {NoPermissionRequired: true},
-	"agent_memory_delete":  {NoPermissionRequired: true},
-	"agent_memory_list":    {NoPermissionRequired: true},
-	"delegate_task":   {NoPermissionRequired: true},
-	"skill_create":    {NoPermissionRequired: true},
-	"skill_list":      {NoPermissionRequired: true},
-	"skill_update":    {NoPermissionRequired: true},
-	"skill_learn":     {NoPermissionRequired: true},
-	"plugin_create":   {NoPermissionRequired: true},
-	"plugin_list":     {NoPermissionRequired: true},
-	"hub_search":      {NoPermissionRequired: true},
-	"hub_install":     {NoPermissionRequired: true},
-	"hub_uninstall":   {NoPermissionRequired: true},
-	"hub_update":      {NoPermissionRequired: true},
-	"hub_info":        {NoPermissionRequired: true},
-	"hub_list":        {NoPermissionRequired: true},
-	"soulgate_introspect":  {NoPermissionRequired: true},
-	"soulgate_configure":   {NoPermissionRequired: true},
+	"memory_write":           {NoPermissionRequired: true},
+	"memory_get":             {NoPermissionRequired: true},
+	"memory_search":          {NoPermissionRequired: true},
+	"switch_model":           {NoPermissionRequired: true},
+	"agent_create":           {NoPermissionRequired: true},
+	"agent_list":             {NoPermissionRequired: true},
+	"agent_stop":             {NoPermissionRequired: true},
+	"agent_delegate":         {NoPermissionRequired: true},
+	"agent_message":          {NoPermissionRequired: true},
+	"agent_memory_write":     {NoPermissionRequired: true},
+	"agent_memory_read":      {NoPermissionRequired: true},
+	"agent_memory_delete":    {NoPermissionRequired: true},
+	"agent_memory_list":      {NoPermissionRequired: true},
+	"delegate_task":          {NoPermissionRequired: true},
+	"skill_create":           {NoPermissionRequired: true},
+	"skill_list":             {NoPermissionRequired: true},
+	"skill_update":           {NoPermissionRequired: true},
+	"skill_learn":            {NoPermissionRequired: true},
+	"plugin_create":          {NoPermissionRequired: true},
+	"plugin_list":            {NoPermissionRequired: true},
+	"hub_search":             {NoPermissionRequired: true},
+	"hub_install":            {NoPermissionRequired: true},
+	"hub_uninstall":          {NoPermissionRequired: true},
+	"hub_update":             {NoPermissionRequired: true},
+	"hub_info":               {NoPermissionRequired: true},
+	"hub_list":               {NoPermissionRequired: true},
+	"soulgate_introspect":    {NoPermissionRequired: true},
+	"soulgate_configure":     {NoPermissionRequired: true},
 }
 
 func cronDef() ToolPermissionDef {
@@ -551,7 +577,9 @@ func cronDef() ToolPermissionDef {
 // and builds a "toolName:id" resource string.
 func processIDResource(toolName string) func(json.RawMessage) (string, error) {
 	return func(input json.RawMessage) (string, error) {
-		var p struct{ ID string `json:"id"` }
+		var p struct {
+			ID string `json:"id"`
+		}
 		_ = json.Unmarshal(input, &p)
 		resource := toolName
 		if strings.TrimSpace(p.ID) != "" {
@@ -577,7 +605,9 @@ func runtimeChecksFromRegistry(toolCall model.ToolCall) ([]permissionCheck, erro
 
 	// Special case: apply_patch needs multi-file checks
 	if toolCall.Name == "apply_patch" {
-		var params struct{ Patch string `json:"patch"` }
+		var params struct {
+			Patch string `json:"patch"`
+		}
 		if err := json.Unmarshal(toolCall.Input, &params); err != nil {
 			return nil, fmt.Errorf("invalid tool input: %w", err)
 		}
@@ -586,7 +616,9 @@ func runtimeChecksFromRegistry(toolCall model.ToolCall) ([]permissionCheck, erro
 
 	// Special case: pdf_read may switch action based on URL vs path
 	if toolCall.Name == "pdf_read" {
-		var params struct{ Path string `json:"path"` }
+		var params struct {
+			Path string `json:"path"`
+		}
 		if err := json.Unmarshal(toolCall.Input, &params); err != nil {
 			return nil, fmt.Errorf("invalid tool input: %w", err)
 		}

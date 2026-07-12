@@ -97,7 +97,7 @@ type WorkflowStep struct {
 
 // HubItem represents any hub item
 type HubItem struct {
-	Type        string  `json:"type"` // skill, tool, agent
+	Type        string  `json:"type"`           // skill, tool, agent
 	Kind        string  `json:"kind,omitempty"` // plugin, mcp, connector, script (for tools)
 	Name        string  `json:"name"`
 	Description string  `json:"description"`

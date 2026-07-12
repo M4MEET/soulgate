@@ -247,20 +247,20 @@ func GetStepHint(step int) string {
 		return ""
 	}
 	hints := map[string]string{
-		"welcome":        "press enter to continue, q to skip",
-		"security":       "type \"I understand\" to acknowledge",
-		"flow_select":    "enter for QuickStart, a for Advanced",
+		"welcome":         "press enter to continue, q to skip",
+		"security":        "type \"I understand\" to acknowledge",
+		"flow_select":     "enter for QuickStart, a for Advanced",
 		"existing_config": "choose how to handle your existing setup",
 		"model_selection": "use arrow keys to select, enter to confirm",
-		"api_keys":       "paste your key and press enter, s to skip",
+		"api_keys":        "paste your key and press enter, s to skip",
 		"test_connection": "press enter to continue",
-		"channels":       "space to toggle, enter to confirm",
-		"integrations":   "space to toggle, enter to confirm",
-		"gateway":        "configure port and bind address",
-		"dependencies":   "wait for installation to complete",
-		"summary":        "review your settings, enter to confirm",
-		"tutorial":       "press enter or s to finish",
-		"complete":       "press enter to start chatting",
+		"channels":        "space to toggle, enter to confirm",
+		"integrations":    "space to toggle, enter to confirm",
+		"gateway":         "configure port and bind address",
+		"dependencies":    "wait for installation to complete",
+		"summary":         "review your settings, enter to confirm",
+		"tutorial":        "press enter or s to finish",
+		"complete":        "press enter to start chatting",
 	}
 	if hint, ok := hints[steps[step].Name]; ok {
 		return hint

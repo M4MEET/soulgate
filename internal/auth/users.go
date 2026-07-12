@@ -89,12 +89,12 @@ type store struct {
 // UserManager manages users and teams with thread-safe in-memory storage backed
 // by a JSON file at configDir/users.json.
 type UserManager struct {
-	mu    sync.RWMutex
-	users map[string]*User // id -> user
-	byKey map[string]*User // api_key -> user
+	mu     sync.RWMutex
+	users  map[string]*User // id -> user
+	byKey  map[string]*User // api_key -> user
 	byName map[string]*User // username -> user
-	teams map[string]*Team // id -> team
-	path  string           // persistence path
+	teams  map[string]*Team // id -> team
+	path   string           // persistence path
 }
 
 // NewUserManager loads users and teams from configDir/security/users.json.

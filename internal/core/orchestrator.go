@@ -44,7 +44,7 @@ type Orchestrator struct {
 	execBroker          *exec.Broker
 	netBroker           *net.Broker
 	secretBroker        *secrets.SecretBroker // encrypted secret store
-	approvalBroker      *approval.Broker // async approval queue for require_approval decisions
+	approvalBroker      *approval.Broker      // async approval queue for require_approval decisions
 	integrationsReg     *integrations.Registry
 	integrationsStore   *integrations.Store
 	memoryStore         *MemoryStore
@@ -58,7 +58,7 @@ type Orchestrator struct {
 	pluginManager       *plugins.Manager
 	canvasManager       *canvas.Manager
 	canvasPreviewMgr    *canvas.PreviewManager
-	heartbeat           *Heartbeat                // Optional periodic health-check
+	heartbeat           *Heartbeat // Optional periodic health-check
 	toolRegistry        *ToolRegistry
 	directives          *Directives
 	loopDetector        *LoopDetector
@@ -253,36 +253,36 @@ func NewOrchestrator(workspace *config.Workspace) (*Orchestrator, error) {
 	})
 
 	orch := &Orchestrator{
-		workspace:         workspace,
-		audit:             auditLogger,
-		session:           session,
-		provider:          provider,
+		workspace:          workspace,
+		audit:              auditLogger,
+		session:            session,
+		provider:           provider,
 		policyEngine:       policyEngine,
 		scopedPolicyEngine: scopedPolicyEngine,
-		fileBroker:        fileBroker,
-		execBroker:        execBroker,
-		netBroker:         netBroker,
-		approvalBroker:    approvalBroker,
-		secretBroker:      secretBroker,
-		integrationsReg:   integrationsReg,
-		integrationsStore: integrationsStore,
-		memoryStore:       memoryStore,
-		agentManager:      NewAgentManager(workspace.ConfigDir),
-		processManager:    process.NewManagerWithWorkspace(workspace.Root),
-		cronScheduler:     cron.NewScheduler(workspace.ConfigDir),
-		watchManager:      watchMgr,
-		browserManager:    browser.NewManager(),
-		vectorStore:       vectorStore,
-		mcpManager:        mcpMgr,
-		pluginManager:     pluginMgr,
-		canvasManager:     canvasMgr,
-		canvasPreviewMgr:  canvas.NewPreviewManager(),
-		toolRegistry:      NewToolRegistry(),
-		directives:        DefaultDirectives(),
-		loopDetector:      NewLoopDetector(),
-		branchManager:     NewBranchManager(workspace.ConfigDir),
-		costTracker:       costTracker,
-		fallbackChain:     NewFallbackChain(workspace.Config.Model.FallbackChain),
+		fileBroker:         fileBroker,
+		execBroker:         execBroker,
+		netBroker:          netBroker,
+		approvalBroker:     approvalBroker,
+		secretBroker:       secretBroker,
+		integrationsReg:    integrationsReg,
+		integrationsStore:  integrationsStore,
+		memoryStore:        memoryStore,
+		agentManager:       NewAgentManager(workspace.ConfigDir),
+		processManager:     process.NewManagerWithWorkspace(workspace.Root),
+		cronScheduler:      cron.NewScheduler(workspace.ConfigDir),
+		watchManager:       watchMgr,
+		browserManager:     browser.NewManager(),
+		vectorStore:        vectorStore,
+		mcpManager:         mcpMgr,
+		pluginManager:      pluginMgr,
+		canvasManager:      canvasMgr,
+		canvasPreviewMgr:   canvas.NewPreviewManager(),
+		toolRegistry:       NewToolRegistry(),
+		directives:         DefaultDirectives(),
+		loopDetector:       NewLoopDetector(),
+		branchManager:      NewBranchManager(workspace.ConfigDir),
+		costTracker:        costTracker,
+		fallbackChain:      NewFallbackChain(workspace.Config.Model.FallbackChain),
 	}
 	if orch.policyEngine != nil {
 		orch.policyEngine.SetBypassChecker(orch.IsTrustMode)
