@@ -1129,11 +1129,12 @@ function MetricsTab({ detail }: { detail: AgentDetailData }) {
 
 // ── Agent Detail Full Page ───────────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'activity' | 'configuration' | 'metrics';
+type DetailTab = 'overview' | 'activity' | 'messages' | 'configuration' | 'metrics';
 
 const DETAIL_TABS: { id: DetailTab; label: string; icon: React.ElementType }[] = [
   { id: 'overview',       label: 'Overview',      icon: Bot },
   { id: 'activity',       label: 'Live Control',   icon: Activity },
+  { id: 'messages',       label: 'Messages',       icon: MessageSquare },
   { id: 'configuration',  label: 'Configuration',  icon: Settings },
   { id: 'metrics',        label: 'Metrics',        icon: BarChart2 },
 ];
@@ -1273,6 +1274,7 @@ function AgentDetailPage({
       >
         {tab === 'overview'      && <OverviewTab detail={detail} />}
         {tab === 'activity'      && <ActivityTab agentId={detail.id} />}
+        {tab === 'messages'      && <MessagesTab detail={detail} />}
         {tab === 'configuration' && <ConfigurationTab detail={detail} onSaved={load} />}
         {tab === 'metrics'       && <MetricsTab detail={detail} />}
       </div>

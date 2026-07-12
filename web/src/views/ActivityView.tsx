@@ -666,9 +666,26 @@ export default function ActivityView() {
               </span>
             )}
           </div>
-          <button onClick={refresh} className="p-1.5 rounded-lg hover:bg-zinc-700/40 text-zinc-500 hover:text-zinc-300 transition-colors">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-1">
+            {channels.length > 1 && (
+              <div className="flex items-center gap-1">
+                <Filter size={12} className="text-zinc-500" />
+                <select
+                  value={channelFilter}
+                  onChange={e => setChannelFilter(e.target.value)}
+                  className="text-[11px] bg-zinc-800/60 border border-zinc-700/40 rounded-lg px-1.5 py-1 text-zinc-300 focus:outline-none focus:border-indigo-500/50"
+                >
+                  <option value="">All channels</option>
+                  {channels.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button onClick={refresh} className="p-1.5 rounded-lg hover:bg-zinc-700/40 text-zinc-500 hover:text-zinc-300 transition-colors">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable content */}

@@ -40,7 +40,8 @@ export interface AgentData {
   name: string;
   role: string;
   task: string;
-  status: 'running' | 'completed' | 'stopped' | 'error';
+  // Mirrors AgentStatus in internal/core/agents.go ('error' kept for legacy payloads)
+  status: 'running' | 'standby' | 'completed' | 'failed' | 'stopped' | 'error';
   created_at: string;
   last_activity?: string;
   message_count?: number;
