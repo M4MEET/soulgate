@@ -1,0 +1,27 @@
+# Gitleaks configuration for SoulGate
+# https://github.com/gitleaks/gitleaks
+
+title = "SoulGate secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    '''go\.sum$''',
+    '''go\.mod$''',
+    '''\.git/''',
+    # Documentation files with example/placeholder keys
+    '''DEMO\.md$''',
+    '''SECURITY\.md$''',
+  ]
+  regexes = [
+    # Obvious placeholder patterns used in help text and examples
+    '''sk-proj-abc123''',
+    '''abcdef123456''',
+    '''0123456789abcdef''',
+    '''test_key_1234567890''',
+    # AWS documentation example key
+    '''AKIAIOSFODNN7EXAMPLE''',
+  ]

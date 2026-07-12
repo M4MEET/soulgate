@@ -6,7 +6,10 @@
 secrets/
 credentials/
 
-# SoulGate workspace data
+# SoulGate workspace data (runtime state — never commit)
+.soulgate/state/
+.soulgate/cache/
+.soulgate/security/approvals.json
 .soulgate/config.yml
 .soulgate/agents.yaml
 .soulgate/policy.yml
@@ -26,6 +29,7 @@ credentials/
 
 # Build artifacts
 /bin/
+/dist/
 /soulgate
 *.exe
 *.dll
@@ -97,6 +101,15 @@ go/
 
 # Sessions data
 sessions/
+
+# Accidental agent writes & runtime artifacts
+/Users/
+/Library/
+coding_jokes.txt
+test_result.txt
+start-telegram.sh
+TELEGRAM_SETUP.md
+AGENTS.md
 
 # Project builds
 projects/*/
