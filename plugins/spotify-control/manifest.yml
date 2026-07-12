@@ -1,0 +1,13 @@
+name: spotify-control
+version: 1.0.0
+description: Control Spotify on macOS using AppleScript for play/pause/next/previous, volume, current track, and search/open.
+runtime: script
+tools:
+  - name: control
+    description: Control Spotify on macOS. Input JSON supports action=open|play|pause|playpause|next|previous|volume|status|search. For volume pass level 0-100. For search pass query.
+    command: python3 main.py
+    input_schema: null
+requires:
+  bins:
+    - osascript
+    - open
