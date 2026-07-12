@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/M4MEET/soulgate/internal/tools/toolpath"
 )
 
 const (
@@ -176,8 +178,11 @@ func Edit(ctx context.Context, workspaceRoot, apiKey string, opts EditOptions) (
 		return nil, fmt.Errorf("image_edit: no OpenAI API key available; set OPENAI_API_KEY or configure openai.api_key")
 	}
 
-	// Resolve source image path.
-	srcPath := filepath.Join(workspaceRoot, filepath.Clean(opts.Path))
+	// Resolve source image path. Path comes from the model — enforce the boundary.
+	srcPath, err := toolpath.Resolve(workspaceRoot, opts.Path)
+	if err != nil {
+		return nil, fmt.Errorf("image_edit: invalid source path: %w", err)
+	}
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return nil, fmt.Errorf("image_edit: cannot open source image %q: %w", opts.Path, err)
@@ -436,7 +441,10 @@ func downloadImageToWorkspace(ctx context.Context, imageURL, workspaceRoot, relP
 		return 0, fmt.Errorf("failed to read image data: %w", err)
 	}
 
-	destPath := filepath.Join(workspaceRoot, filepath.Clean(relPath))
+	destPath, err := toolpath.Resolve(workspaceRoot, relPath)
+	if err != nil {
+		return 0, fmt.Errorf("invalid image output path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return 0, fmt.Errorf("failed to create output directory: %w", err)
 	}

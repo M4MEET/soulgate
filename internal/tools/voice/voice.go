@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/M4MEET/soulgate/internal/tools/toolpath"
 )
 
 const (
@@ -138,8 +140,11 @@ func Speak(ctx context.Context, workspaceRoot, apiKey string, opts SpeakOptions)
 		return nil, fmt.Errorf("voice_speak: failed to read audio response: %w", err)
 	}
 
-	// Write to workspace.
-	destPath := filepath.Join(workspaceRoot, filepath.Clean(opts.Output))
+	// Write to workspace. Output comes from the model — enforce the boundary.
+	destPath, err := toolpath.Resolve(workspaceRoot, opts.Output)
+	if err != nil {
+		return nil, fmt.Errorf("voice_speak: invalid output path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return nil, fmt.Errorf("voice_speak: failed to create output directory: %w", err)
 	}
@@ -169,7 +174,10 @@ func Transcribe(ctx context.Context, workspaceRoot, apiKey string, opts Transcri
 	}
 
 	// Resolve and validate the audio file path.
-	audioPath := filepath.Join(workspaceRoot, filepath.Clean(opts.Path))
+	audioPath, err := toolpath.Resolve(workspaceRoot, opts.Path)
+	if err != nil {
+		return nil, fmt.Errorf("voice_transcribe: invalid audio path: %w", err)
+	}
 	info, err := os.Stat(audioPath)
 	if err != nil {
 		return nil, fmt.Errorf("voice_transcribe: cannot access audio file %q: %w", opts.Path, err)

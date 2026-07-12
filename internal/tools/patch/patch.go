@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/M4MEET/soulgate/internal/tools/toolpath"
 )
 
 // PatchResult summarises the outcome of Apply.
@@ -155,21 +157,8 @@ func isCoreProtected(relPath string) bool {
 }
 
 func validatePath(root, rel string) error {
-	cleaned := filepath.Clean(rel)
-	if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
-		return fmt.Errorf("path %q escapes workspace", rel)
-	}
-
-	rootClean := filepath.Clean(root)
-	abs := filepath.Clean(filepath.Join(rootClean, cleaned))
-	workspaceRel, err := filepath.Rel(rootClean, abs)
-	if err != nil {
-		return fmt.Errorf("path %q escapes workspace", rel)
-	}
-	if workspaceRel == ".." || strings.HasPrefix(workspaceRel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("path %q escapes workspace", rel)
-	}
-	return nil
+	_, err := toolpath.Resolve(root, rel)
+	return err
 }
 
 func parsePatch(text string) ([]filePatch, error) {
