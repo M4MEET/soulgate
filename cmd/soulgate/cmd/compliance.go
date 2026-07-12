@@ -17,12 +17,17 @@ var retentionCmd = &cobra.Command{
 	Use:   "retention",
 	Short: "Data retention management",
 	Long:  `Manage data retention policies for audit logs, sessions, cost data, and memory.`,
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var retentionRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Execute the retention policy",
 	Long:  `Delete data that exceeds the configured retention limits.`,
+	Args:  cobra.NoArgs,
 	RunE:  runRetentionRun,
 }
 
@@ -37,12 +42,17 @@ var complianceCmd = &cobra.Command{
 	Use:   "compliance",
 	Short: "Compliance and data governance",
 	Long:  `Export audit data for compliance reporting and manage GDPR data erasure requests.`,
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var complianceExportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export compliance data",
 	Long:  `Export audit events, sessions, cost data, and policy rules for compliance reporting.`,
+	Args:  cobra.NoArgs,
 	RunE:  runComplianceExport,
 }
 

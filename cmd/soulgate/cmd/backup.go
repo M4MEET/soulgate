@@ -26,6 +26,7 @@ Examples:
   soulgate backup                          # Backup to soulgate-backup-YYYY-MM-DD.tar.gz
   soulgate backup --output my-backup.tar.gz
   soulgate backup --include-sessions=false  # Skip session recordings`,
+	Args: cobra.NoArgs,
 	RunE: runBackup,
 }
 

@@ -65,6 +65,7 @@ Subcommands:
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the gateway as a background daemon",
+	Args:  cobra.NoArgs,
 	RunE:  runDaemonStart,
 }
 
@@ -72,6 +73,7 @@ var daemonStartCmd = &cobra.Command{
 var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the running daemon",
+	Args:  cobra.NoArgs,
 	RunE:  runDaemonStop,
 }
 
@@ -211,16 +213,21 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 
 	alive, pid, err := daemonAlive()
 	if err != nil {
-		fmt.Printf("Status:  stopped (no PID file or unreadable)\n")
+		// PID file exists but is unreadable or contains garbage.
+		fmt.Printf("Status:   not running (invalid PID file)\n")
 		fmt.Printf("PID file: %s\n", pidPath)
 		fmt.Printf("Log:      %s\n", logPath)
 		return nil
 	}
 
-	if alive {
+	switch {
+	case alive:
 		fmt.Printf("Status:   running\n")
 		fmt.Printf("PID:      %d\n", pid)
-	} else {
+	case pid == 0:
+		// No PID file — the daemon has never been started (or was cleanly stopped).
+		fmt.Printf("Status:   not running\n")
+	default:
 		fmt.Printf("Status:   stopped (stale PID %d)\n", pid)
 	}
 	fmt.Printf("PID file: %s\n", pidPath)

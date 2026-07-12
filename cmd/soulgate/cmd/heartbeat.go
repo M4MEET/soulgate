@@ -34,6 +34,7 @@ var heartbeatRunCmd = &cobra.Command{
 
 The AI will check for things that need attention and print any findings.
 A response of "OK" means nothing requires action.`,
+	Args: cobra.NoArgs,
 	RunE: runHeartbeatRun,
 }
 

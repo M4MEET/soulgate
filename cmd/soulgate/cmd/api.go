@@ -31,7 +31,8 @@ The API runs the same agentic loop as the CLI/TUI — tools, memory, plugins, au
 Endpoints:
   POST /api/chat     Send a message, get an AI response
   GET  /api/health   Health check`,
-	Run: runAPI,
+	Args: cobra.NoArgs,
+	Run:  runAPI,
 }
 
 func init() {

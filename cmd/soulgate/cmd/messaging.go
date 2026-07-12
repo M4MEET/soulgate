@@ -21,19 +21,18 @@ import (
 var messagingCmd = &cobra.Command{
 	Use:   "messaging",
 	Short: "Messaging platform integrations",
-	Long: `Connect SoulGate to messaging platforms via plugins.
+	Long: `Legacy messaging channel commands.
 
-Messaging channels are provided by plugins. Install a messaging plugin
-(e.g., telegram, whatsapp, discord) to enable that platform.
+Messaging platforms are now handled by connectors, which auto-start with the
+gateway. Prefer:
 
-Example:
-  # Start all registered messaging channels
+  soulgate connector telegram|slack|discord|...   # Configure and run a connector
+  soulgate connector --help                       # See all supported platforms
+  soulgate gateway start                          # Gateway auto-starts configured connectors
+
+Example (legacy plugin channels):
   soulgate messaging start
-
-  # Send a message through a specific channel
   soulgate messaging send telegram <chat-id> <message>
-
-  # List available messaging channels
   soulgate messaging list`,
 }
 
@@ -41,6 +40,7 @@ var messagingStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start all messaging channels",
 	Long:  "Start listening for messages on all registered messaging channel plugins",
+	Args:  cobra.NoArgs,
 	RunE:  runMessagingStart,
 }
 

@@ -43,6 +43,7 @@ with a running gateway that has --auth enabled.
 
 Example:
   soulgate token create --name ci-pipeline`,
+	Args: cobra.NoArgs,
 	RunE: runTokenCreate,
 }
 

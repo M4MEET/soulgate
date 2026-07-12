@@ -31,6 +31,7 @@ version is available.
 Example:
   soulgate update
   soulgate update --check`,
+	Args: cobra.NoArgs,
 	RunE: runUpdate,
 }
 

@@ -27,6 +27,7 @@ Examples:
 var scheduleAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a new scheduled task",
+	Args:  cobra.NoArgs,
 	RunE:  runScheduleAdd,
 }
 

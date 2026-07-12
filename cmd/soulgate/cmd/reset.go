@@ -28,6 +28,7 @@ Examples:
   soulgate reset --scope sessions          # Clear chat history
   soulgate reset --scope sessions --yes    # Skip confirmation
   soulgate reset --scope all --yes         # Full reset`,
+	Args: cobra.NoArgs,
 	RunE: runReset,
 }
 

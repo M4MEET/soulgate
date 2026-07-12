@@ -11,6 +11,7 @@ This is a shortcut for:
   soulgate tui --onboarding
 
 Use this when you want to rerun first-time setup guidance.`,
+	Args: cobra.NoArgs,
 	RunE: runOnboarding,
 }
 

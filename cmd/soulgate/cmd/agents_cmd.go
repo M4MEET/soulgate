@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	agentsconfig "github.com/M4MEET/soulgate/internal/agents/config"
 	"github.com/spf13/cobra"
@@ -59,6 +61,11 @@ func init() {
 func runAgentsList(cmd *cobra.Command, args []string) error {
 	config, err := agentsconfig.LoadAgentsConfig(agentsConfigPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Println("No agents configured yet.")
+			fmt.Printf("\nTo define agents, create %s (see 'soulgate agents --help' for the format).\n", agentsConfigPath)
+			return nil
+		}
 		return fmt.Errorf("failed to load agents config: %w", err)
 	}
 

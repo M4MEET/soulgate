@@ -27,6 +27,7 @@ Examples:
 var soulInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a default SOUL.md file",
+	Args:  cobra.NoArgs,
 	RunE:  runSoulInit,
 }
 
@@ -39,12 +40,14 @@ var soulShowCmd = &cobra.Command{
 var soulEditCmd = &cobra.Command{
 	Use:   "edit",
 	Short: "Open SOUL.md in your default editor",
+	Args:  cobra.NoArgs,
 	RunE:  runSoulEdit,
 }
 
 var soulResetCmd = &cobra.Command{
 	Use:   "reset",
 	Short: "Reset SOUL.md to default template",
+	Args:  cobra.NoArgs,
 	RunE:  runSoulReset,
 }
 
