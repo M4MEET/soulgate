@@ -531,6 +531,25 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 		SchemaResource:  "computer:*",
 	},
 
+	"message": {
+		Action:         "messaging.send",
+		SchemaResource: "messaging:*",
+		ResourceFromInput: func(input json.RawMessage) (string, error) {
+			var p struct {
+				Channel        string `json:"channel"`
+				ConversationID string `json:"conversation_id"`
+			}
+			_ = json.Unmarshal(input, &p)
+			if p.Channel == "" {
+				return "messaging:send", nil
+			}
+			if p.ConversationID == "" {
+				return p.Channel + ":*", nil
+			}
+			return p.Channel + ":" + p.ConversationID, nil
+		},
+	},
+
 	// No-permission tools
 	"search_available_tools": {NoPermissionRequired: true},
 	"llm_task":               {NoPermissionRequired: true},
@@ -543,6 +562,9 @@ var toolPermissionDefs = map[string]ToolPermissionDef{
 	"agent_stop":             {NoPermissionRequired: true},
 	"agent_delegate":         {NoPermissionRequired: true},
 	"agent_message":          {NoPermissionRequired: true},
+	"sessions_list":          {NoPermissionRequired: true},
+	"sessions_history":       {NoPermissionRequired: true},
+	"heartbeat_respond":      {NoPermissionRequired: true},
 	"agent_memory_write":     {NoPermissionRequired: true},
 	"agent_memory_read":      {NoPermissionRequired: true},
 	"agent_memory_delete":    {NoPermissionRequired: true},

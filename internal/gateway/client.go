@@ -42,6 +42,12 @@ func (c *Client) ID() string {
 }
 
 // Role returns the client role
+// Metadata returns the metadata the client supplied at connect time
+// (e.g. "channel" for connector clients).
+func (c *Client) Metadata() protocol.Metadata {
+	return c.metadata
+}
+
 func (c *Client) Role() protocol.ClientRole {
 	return c.role
 }

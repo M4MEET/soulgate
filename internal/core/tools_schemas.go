@@ -354,6 +354,87 @@ func (o *Orchestrator) getAllToolSchemas() []model.ToolSchema {
 	})
 
 	tools = append(tools, model.ToolSchema{
+		Name:        "sessions_list",
+		Description: "List sessions: gateway chat threads and background agents, with status and message counts.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"kind": {
+					"type": "string",
+					"enum": ["thread", "agent"],
+					"description": "Filter by session kind. Omit for all."
+				},
+				"include_archived": {
+					"type": "boolean",
+					"description": "Include archived threads. Default false."
+				}
+			}
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "sessions_history",
+		Description: "Read the transcript of a gateway thread or the activity log of a background agent. Use sessions_list to discover ids.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"description": "Thread id (thread_...) or agent id/name"
+				},
+				"limit": {
+					"type": "integer",
+					"description": "Max entries to return (default 50, max 200)"
+				}
+			},
+			"required": ["id"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "message",
+		Description: "Send a message to a user through a connected channel (telegram, slack, discord, ...). Requires a running gateway with that connector active.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"channel": {
+					"type": "string",
+					"description": "Channel type, e.g. telegram, slack, discord"
+				},
+				"conversation_id": {
+					"type": "string",
+					"description": "Conversation/chat id on that channel. Omit to use the channel's active conversation."
+				},
+				"text": {
+					"type": "string",
+					"description": "Message text to send"
+				}
+			},
+			"required": ["channel", "text"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
+		Name:        "heartbeat_respond",
+		Description: "Respond to a heartbeat check: status 'ok' if all clear, or 'attention' with a message to notify the user.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"status": {
+					"type": "string",
+					"enum": ["ok", "attention"],
+					"description": "'ok' = all clear (silent), 'attention' = notify the user"
+				},
+				"message": {
+					"type": "string",
+					"description": "What needs attention (required when status is 'attention')"
+				}
+			},
+			"required": ["status"]
+		}`),
+	})
+
+	tools = append(tools, model.ToolSchema{
 		Name:        "delegate_task",
 		Description: "Delegate a complex sub-task to an isolated sub-agent. The sub-agent runs with its own context window — tool calls and intermediate results stay in its context, only the final result is returned. Use this for tasks that involve many tool calls to avoid filling the main context.",
 		InputSchema: json.RawMessage(`{

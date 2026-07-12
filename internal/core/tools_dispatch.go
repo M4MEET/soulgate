@@ -111,6 +111,18 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, runID string, toolCa
 	case "agent_message":
 		return o.handleAgentMessage(ctx, toolCall.Input)
 
+	case "sessions_list":
+		return o.handleSessionsList(ctx, toolCall.Input)
+
+	case "sessions_history":
+		return o.handleSessionsHistory(ctx, toolCall.Input)
+
+	case "message":
+		return o.handleMessage(ctx, toolCall.Input)
+
+	case "heartbeat_respond":
+		return o.handleHeartbeatRespond(ctx, toolCall.Input)
+
 	case "agent_memory_write":
 		return o.handleAgentMemoryWrite(ctx, toolCall.Input)
 	case "agent_memory_read":

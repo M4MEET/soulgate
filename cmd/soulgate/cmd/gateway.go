@@ -408,6 +408,9 @@ func runGatewayStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create gateway: %w", err)
 	}
 
+	// Give the orchestrator's `message` tool a transport to connected channels.
+	orch.SetChannelMessenger(gw.SendChannelMessage)
+
 	// Auto-spawn saved connectors from config
 	if len(workspace.Config.Connectors) > 0 {
 		// Spawn after a short delay so the gateway is listening

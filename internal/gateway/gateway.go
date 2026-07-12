@@ -1696,17 +1696,7 @@ func (g *Gateway) handleCmdChannelSend(ctx context.Context, sender *Client, fram
 		}
 	}
 
-	// Find channel client
-	g.roleMux.RLock()
-	var targetChannel *Client
-	for _, channel := range g.channels {
-		// TODO: Match by channel name/type in metadata
-		// For now, send to first available channel
-		targetChannel = channel
-		break
-	}
-	g.roleMux.RUnlock()
-
+	targetChannel := g.findChannelClient(frame.Channel)
 	if targetChannel == nil {
 		return fmt.Errorf("no channel found: %s", frame.Channel)
 	}
@@ -1715,6 +1705,68 @@ func (g *Gateway) handleCmdChannelSend(ctx context.Context, sender *Client, fram
 	g.broadcastToUIs(frame)
 
 	return targetChannel.Send(frame)
+}
+
+// findChannelClient returns the connected channel client whose metadata
+// "channel" matches name (e.g. "telegram"). An empty name returns the first
+// available channel; no match falls back to nil.
+func (g *Gateway) findChannelClient(name string) *Client {
+	g.roleMux.RLock()
+	defer g.roleMux.RUnlock()
+
+	var first *Client
+	for _, ch := range g.channels {
+		if first == nil {
+			first = ch
+		}
+		if name == "" {
+			return ch
+		}
+		if v, ok := ch.Metadata()["channel"].(string); ok && v == name {
+			return ch
+		}
+	}
+	if name == "" {
+		return first
+	}
+	return nil
+}
+
+// SendChannelMessage delivers text to a connected channel connector. It is
+// exposed to the orchestrator as the `message` tool's transport.
+func (g *Gateway) SendChannelMessage(channel, conversationID, text string) error {
+	target := g.findChannelClient(channel)
+	if target == nil {
+		return fmt.Errorf("channel %q is not connected (active: %s)", channel, strings.Join(g.connectedChannelNames(), ", "))
+	}
+
+	frame := &protocol.CmdChannelSendFrame{
+		Type:           protocol.FrameCmdChannelSend,
+		Channel:        channel,
+		ConversationID: conversationID,
+		Text:           text,
+		Timestamp:      time.Now().UnixMilli(),
+	}
+
+	g.broadcastToUIs(frame)
+	return target.Send(frame)
+}
+
+// connectedChannelNames lists the channel types currently connected.
+func (g *Gateway) connectedChannelNames() []string {
+	g.roleMux.RLock()
+	defer g.roleMux.RUnlock()
+
+	var names []string
+	for _, ch := range g.channels {
+		if v, ok := ch.Metadata()["channel"].(string); ok && v != "" {
+			names = append(names, v)
+		}
+	}
+	if len(names) == 0 {
+		names = append(names, "none")
+	}
+	return names
 }
 
 // handleCmdApprove handles approval commands

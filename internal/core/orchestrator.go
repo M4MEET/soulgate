@@ -58,7 +58,8 @@ type Orchestrator struct {
 	pluginManager       *plugins.Manager
 	canvasManager       *canvas.Manager
 	canvasPreviewMgr    *canvas.PreviewManager
-	heartbeat           *Heartbeat // Optional periodic health-check
+	heartbeat           *Heartbeat                                       // Optional periodic health-check
+	channelMessenger    func(channel, conversationID, text string) error // Gateway hook for the `message` tool
 	toolRegistry        *ToolRegistry
 	directives          *Directives
 	loopDetector        *LoopDetector

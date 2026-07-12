@@ -173,6 +173,25 @@ func (h *Heartbeat) RunNow() (string, error) {
 	return h.run()
 }
 
+// RecordResponse stores an explicit model response from the heartbeat_respond
+// tool. status "attention" forwards the message to the notification callback;
+// "ok" just records a clean check.
+func (h *Heartbeat) RecordResponse(status, message string) {
+	h.mu.Lock()
+	if status == "ok" {
+		h.lastResult = "OK"
+	} else {
+		h.lastResult = message
+	}
+	cb := h.callback
+	h.saveState()
+	h.mu.Unlock()
+
+	if status == "attention" && message != "" && cb != nil {
+		cb(message)
+	}
+}
+
 // Status returns a point-in-time snapshot of the heartbeat state.
 func (h *Heartbeat) Status() HeartbeatStatus {
 	h.mu.Lock()
@@ -219,8 +238,9 @@ func (h *Heartbeat) run() (string, error) {
 
 	prompt := "[Heartbeat check] " + instructions +
 		"\nCheck if anything needs the user's attention. " +
-		"If nothing urgent, respond with just 'OK'. " +
-		"If something needs attention, describe it briefly."
+		"Prefer the heartbeat_respond tool: status 'ok' if all clear, " +
+		"or 'attention' with a brief message. " +
+		"Otherwise respond with just 'OK', or describe the issue briefly."
 
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatTimeout)
 	defer cancel()
