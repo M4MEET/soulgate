@@ -50,14 +50,8 @@ export default function SessionsView({ sessions }: Props) {
     s.conversation_id?.toLowerCase().includes(query.toLowerCase())
   );
 
-  // Demo sessions if none
-  const display = filtered.length === 0 && query === '' && sessions.length === 0
-    ? [
-        { id: 'abc123def456', conversation_id: 'conv_01', channel: 'web',      message_count: 14, created_at: new Date(Date.now() - 7200000).toISOString(), last_activity: new Date(Date.now() - 300000).toISOString() },
-        { id: 'xyz789uvw012', conversation_id: 'conv_02', channel: 'telegram', message_count: 6,  created_at: new Date(Date.now() - 86400000).toISOString(), last_activity: new Date(Date.now() - 3600000).toISOString() },
-        { id: 'pqr345stu678', conversation_id: 'conv_03', channel: 'api',      message_count: 3,  created_at: new Date(Date.now() - 172800000).toISOString(), last_activity: new Date(Date.now() - 86400000).toISOString() },
-      ] as SessionData[]
-    : filtered;
+  // No demo data — only show real sessions
+  const display = filtered;
 
   return (
     <div className="flex-1 overflow-y-auto p-6 bg-zinc-950" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}>

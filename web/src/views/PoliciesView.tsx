@@ -747,10 +747,26 @@ export default function PoliciesView() {
     toast.success('Policies exported');
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    toast.success(`Imported ${file.name} (demo mode — not applied)`);
+    try {
+      const text = await file.text();
+      const imported = JSON.parse(text);
+      if (Array.isArray(imported)) {
+        for (const rule of imported) {
+          if (rule.name && rule.action) {
+            await createPolicy(rule);
+          }
+        }
+        toast.success(`Imported ${imported.length} rules from ${file.name}`);
+        load();
+      } else {
+        toast.error('Invalid format — expected JSON array of rules');
+      }
+    } catch {
+      toast.error('Failed to parse import file');
+    }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
