@@ -1368,10 +1368,32 @@ func buildGatewayAPI(orch *core.Orchestrator, ws *config.Workspace, ts *threadSt
 	}
 }
 
+// connectorRequiredKeys lists the config keys each connector needs before it
+// can be spawned. Spawning without them produces a process that exits
+// immediately, so we fail fast with a clear message instead.
+var connectorRequiredKeys = map[string][]string{
+	"telegram":   {"token"},
+	"discord":    {"token"},
+	"slack":      {"app_token", "bot_token"},
+	"signal":     {"phone"},
+	"teams":      {"app_id", "app_password"},
+	"matrix":     {"homeserver", "access_token", "user_id"},
+	"irc":        {"nick"},
+	"twitch":     {"nick"},
+	"mattermost": {"server"},
+}
+
 // spawnConnectorProcess launches a connector as a background process.
 // It locates the soulgate binary and runs `soulgate connector <type>` with
-// the appropriate environment variables set.
+// credentials passed as environment variables or CLI flags, depending on
+// what the connector command reads.
 func spawnConnectorProcess(connectorType string, cfg map[string]string, port int) (string, error) {
+	for _, key := range connectorRequiredKeys[connectorType] {
+		if cfg[key] == "" {
+			return "", fmt.Errorf("%s connector requires '%s' — configure it before starting", connectorType, key)
+		}
+	}
+
 	// Find the soulgate binary
 	exe, err := os.Executable()
 	if err != nil {
@@ -1392,33 +1414,22 @@ func spawnConnectorProcess(connectorType string, cfg map[string]string, port int
 
 	switch connectorType {
 	case "telegram":
-		token := cfg["token"]
-		if token == "" {
-			return "", fmt.Errorf("telegram connector requires 'token' (bot token)")
-		}
-		env = append(env, "TELEGRAM_BOT_TOKEN="+token)
+		env = append(env, "TELEGRAM_BOT_TOKEN="+cfg["token"])
 
 	case "discord":
-		token := cfg["token"]
-		if token == "" {
-			return "", fmt.Errorf("discord connector requires 'token' (bot token)")
-		}
-		env = append(env, "DISCORD_BOT_TOKEN="+token)
+		env = append(env, "DISCORD_BOT_TOKEN="+cfg["token"])
 
 	case "slack":
-		appToken := cfg["app_token"]
-		botToken := cfg["bot_token"]
-		if appToken == "" || botToken == "" {
-			return "", fmt.Errorf("slack connector requires 'app_token' and 'bot_token'")
-		}
-		env = append(env, "SLACK_APP_TOKEN="+appToken, "SLACK_BOT_TOKEN="+botToken)
+		env = append(env, "SLACK_APP_TOKEN="+cfg["app_token"], "SLACK_BOT_TOKEN="+cfg["bot_token"])
 
 	default:
-		// For other connectors, pass all config as env vars with
-		// SOULGATE_CONNECTOR_ prefix
+		// Other connectors read CLI flags, not env vars: config key
+		// 'app_id' becomes flag --app-id, 'phone' becomes --phone, etc.
 		for k, v := range cfg {
-			envKey := "SOULGATE_CONNECTOR_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
-			env = append(env, envKey+"="+v)
+			if v == "" {
+				continue
+			}
+			args = append(args, "--"+strings.ReplaceAll(k, "_", "-"), v)
 		}
 	}
 
@@ -1432,10 +1443,18 @@ func spawnConnectorProcess(connectorType string, cfg map[string]string, port int
 		return "", fmt.Errorf("failed to start %s connector: %w", connectorType, err)
 	}
 
-	// Detach — don't wait for the process
+	// Reap the process in the background, but catch immediate exits
+	// (bad flags, missing binary deps) so we don't report a dead
+	// connector as started.
+	done := make(chan error, 1)
 	go func() {
-		_ = cmd.Wait()
+		done <- cmd.Wait()
 	}()
+	select {
+	case waitErr := <-done:
+		return "", fmt.Errorf("%s connector exited immediately: %v", connectorType, waitErr)
+	case <-time.After(750 * time.Millisecond):
+	}
 
 	return fmt.Sprintf("%s connector started (pid %d)", connectorType, cmd.Process.Pid), nil
 }
