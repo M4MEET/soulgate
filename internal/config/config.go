@@ -283,12 +283,12 @@ func DefaultConfig() *Config {
 		Model: ModelConfig{
 			DefaultProvider: "openai",
 			OpenAI: OpenAIConfig{
-				Model:       "gpt-4.1",
+				Model:       "gpt-5.2",
 				MaxTokens:   4096,
 				Temperature: 0.7,
 			},
 			Anthropic: AnthropicConfig{
-				Model:       "claude-3-5-sonnet-20241022",
+				Model:       "claude-sonnet-5",
 				MaxTokens:   4096,
 				Temperature: 0.7,
 			},

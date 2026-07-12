@@ -16,8 +16,8 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, ".", cfg.Workspace.Root)
 	assert.Equal(t, ".soulgate", cfg.Workspace.ConfigDir)
 	assert.Equal(t, "openai", cfg.Model.DefaultProvider)
-	assert.Equal(t, "gpt-4.1", cfg.Model.OpenAI.Model)
-	assert.Equal(t, "claude-3-5-sonnet-20241022", cfg.Model.Anthropic.Model)
+	assert.Equal(t, "gpt-5.2", cfg.Model.OpenAI.Model)
+	assert.Equal(t, "claude-sonnet-5", cfg.Model.Anthropic.Model)
 	assert.Equal(t, true, cfg.Audit.Enabled)
 	assert.Equal(t, false, cfg.HTTPClient.AllowPrivateIPs)
 	assert.Equal(t, false, cfg.HTTPClient.AllowInsecureTLS)
@@ -299,12 +299,12 @@ func TestModelConfigs(t *testing.T) {
 	cfg := DefaultConfig()
 
 	// OpenAI config
-	assert.Equal(t, "gpt-4.1", cfg.Model.OpenAI.Model)
+	assert.Equal(t, "gpt-5.2", cfg.Model.OpenAI.Model)
 	assert.Empty(t, cfg.Model.OpenAI.APIKey) // Should be empty by default
 	assert.Empty(t, cfg.Model.OpenAI.BaseURL)
 
 	// Anthropic config
-	assert.Equal(t, "claude-3-5-sonnet-20241022", cfg.Model.Anthropic.Model)
+	assert.Equal(t, "claude-sonnet-5", cfg.Model.Anthropic.Model)
 	assert.Empty(t, cfg.Model.Anthropic.APIKey)
 	assert.Empty(t, cfg.Model.Anthropic.BaseURL)
 }

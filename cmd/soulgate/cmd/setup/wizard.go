@@ -85,7 +85,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 				}
 			}
 
-			modelName = promptString(reader, "Model name", "gpt-4o-mini", "GPT-4o-mini is faster and cheaper than GPT-4")
+			modelName = promptString(reader, "Model name", "gpt-5-mini", "GPT-5-mini is fast and economical")
 
 		case "anthropic":
 			printSubsection("Anthropic Configuration")
@@ -99,7 +99,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 				}
 			}
 
-			modelName = promptString(reader, "Model name", "claude-3-5-sonnet-20241022", "Latest Claude 3.5 Sonnet model")
+			modelName = promptString(reader, "Model name", "claude-sonnet-5", "Latest Claude Sonnet model")
 
 		case "ollama":
 			printSubsection("Ollama Configuration")

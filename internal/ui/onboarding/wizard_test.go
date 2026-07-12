@@ -22,12 +22,12 @@ func TestSaveAPIKeysAnthropicSelection(t *testing.T) {
 
 	state := NewOnboardingState(workspace)
 	state.SelectedProvider = "anthropic"
-	state.SelectedModel = "claude-sonnet-4"
+	state.SelectedModel = "claude-sonnet-5"
 	state.AnthropicKey = "sk-ant-test-key-1234567890"
 
 	require.NoError(t, state.SaveAPIKeys())
 	require.Equal(t, "anthropic", workspace.Config.Model.DefaultProvider)
-	require.Equal(t, "claude-sonnet-4-20250514", workspace.Config.Model.Anthropic.Model)
+	require.Equal(t, "claude-sonnet-5", workspace.Config.Model.Anthropic.Model)
 	require.Equal(t, "sk-ant-test-key-1234567890", workspace.Config.Model.Anthropic.APIKey)
 
 	// Ensure save path exists.

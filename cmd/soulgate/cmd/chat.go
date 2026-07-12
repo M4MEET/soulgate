@@ -197,8 +197,8 @@ func promptChatConfiguration(workspace *config.Workspace) error {
 	fmt.Println(colorBold("Select AI Provider:"))
 	fmt.Println()
 	fmt.Println(colorCyan("  ┌─ Ready to Use ──────────────────────────────────────┐"))
-	fmt.Println("  " + colorGreen(" 1") + ".  OpenAI        " + colorGray("GPT-4o, GPT-4o-mini, o1, o3"))
-	fmt.Println("  " + colorGreen(" 2") + ".  Anthropic     " + colorGray("Claude 3.5 Sonnet, Opus, Haiku"))
+	fmt.Println("  " + colorGreen(" 1") + ".  OpenAI        " + colorGray("GPT-5.2, GPT-5-mini, o-series"))
+	fmt.Println("  " + colorGreen(" 2") + ".  Anthropic     " + colorGray("Claude Sonnet 5, Opus 4.8, Haiku 4.5"))
 	fmt.Println("  " + colorGreen(" 3") + ".  Groq          " + colorGray("Ultra-fast (Llama, Mixtral, Gemma)"))
 	fmt.Println("  " + colorGreen(" 4") + ".  OpenRouter    " + colorGray("100+ models via one API"))
 	fmt.Println("  " + colorGreen(" 5") + ".  Together AI   " + colorGray("Open-source models, fine-tuning"))
@@ -230,20 +230,20 @@ func promptChatConfiguration(workspace *config.Workspace) error {
 	switch choice {
 	case "1":
 		provider = "openai"
-		modelName = "gpt-4o-mini"
+		modelName = "gpt-5-mini"
 		apiKeyEnvVar = "OPENAI_API_KEY"
 		fmt.Println()
 		fmt.Println("  " + colorGreen("✓") + " Selected: " + colorCyan("OpenAI"))
-		fmt.Println("  " + colorGray("Default model: gpt-4o-mini"))
+		fmt.Println("  " + colorGray("Default model: gpt-5-mini"))
 		fmt.Println()
 
 	case "2":
 		provider = "anthropic"
-		modelName = "claude-3-5-sonnet-20241022"
+		modelName = "claude-sonnet-5"
 		apiKeyEnvVar = "ANTHROPIC_API_KEY"
 		fmt.Println()
 		fmt.Println("  " + colorGreen("✓") + " Selected: " + colorCyan("Anthropic"))
-		fmt.Println("  " + colorGray("Default model: claude-3-5-sonnet-20241022"))
+		fmt.Println("  " + colorGray("Default model: claude-sonnet-5"))
 		fmt.Println()
 
 	case "3":
@@ -259,12 +259,12 @@ func promptChatConfiguration(workspace *config.Workspace) error {
 
 	case "4":
 		provider = "openrouter"
-		modelName = "anthropic/claude-3.5-sonnet"
+		modelName = "anthropic/claude-sonnet-5"
 		apiKeyEnvVar = "OPENROUTER_API_KEY"
 		baseURL = "https://openrouter.ai/api/v1"
 		fmt.Println()
 		fmt.Println("  " + colorGreen("✓") + " Selected: " + colorCyan("OpenRouter"))
-		fmt.Println("  " + colorGray("Default model: anthropic/claude-3.5-sonnet"))
+		fmt.Println("  " + colorGray("Default model: anthropic/claude-sonnet-5"))
 		fmt.Println("  " + colorGray("Access 100+ models - get key: https://openrouter.ai"))
 		fmt.Println()
 

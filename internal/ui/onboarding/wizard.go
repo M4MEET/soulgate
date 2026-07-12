@@ -384,14 +384,14 @@ func GetModelsForProvider(provider string) []ModelOption {
 	switch strings.ToLower(provider) {
 	case "openai":
 		return []ModelOption{
-			{ID: "gpt-4.1", Name: "GPT-4.1", Provider: "openai", Model: "gpt-4.1", Description: "Latest flagship — complex coding & analysis", Icon: "🧠", Recommended: true},
-			{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openai", Model: "gpt-4.1-mini", Description: "Fast & economical", Icon: "⚡", Recommended: false},
+			{ID: "gpt-5.2", Name: "GPT-5.2", Provider: "openai", Model: "gpt-5.2", Description: "Latest flagship — complex coding & analysis", Icon: "🧠", Recommended: true},
+			{ID: "gpt-5-mini", Name: "GPT-5 Mini", Provider: "openai", Model: "gpt-5-mini", Description: "Fast & economical", Icon: "⚡", Recommended: false},
 			{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Model: "gpt-4o", Description: "Multimodal reasoning", Icon: "👁", Recommended: false},
 		}
 	case "anthropic":
 		return []ModelOption{
-			{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "anthropic", Model: "claude-sonnet-4-20250514", Description: "Balanced — great for most tasks", Icon: "🎭", Recommended: true},
-			{ID: "claude-opus-4", Name: "Claude Opus 4", Provider: "anthropic", Model: "claude-opus-4-20250514", Description: "Most capable — deep reasoning", Icon: "🎪", Recommended: false},
+			{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", Provider: "anthropic", Model: "claude-sonnet-5", Description: "Balanced — great for most tasks", Icon: "🎭", Recommended: true},
+			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Provider: "anthropic", Model: "claude-opus-4-8", Description: "Most capable — deep reasoning", Icon: "🎪", Recommended: false},
 		}
 	case "google":
 		return []ModelOption{
