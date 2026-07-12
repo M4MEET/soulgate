@@ -195,8 +195,12 @@ Connect your AI to any messaging platform. Each connector runs as a lightweight 
 | **Canvas** | create, update, list, preview (HTML/React/SVG/Mermaid artifacts) |
 | **Memory** | key-value (write/get/search) + vector embeddings (index/recall/forget) |
 | **Agents** | create, list, stop, delegate, message |
+| **Sessions** | sessions_list, sessions_history (inspect chat threads & agent activity) |
+| **Channels** | message (send to telegram/slack/... through the gateway) |
 | **Code** | code_run (Python/Node/Go/Bash/Ruby), code_install |
-| **Other** | pdf_read, cron scheduling, LLM task, model switching, introspect, configure |
+| **Git** | status, diff, commit, log, branch, stash |
+| **Secrets** | set, list, delete, inject (encrypted at rest, never shown to the model) |
+| **Other** | pdf_read, cron scheduling, heartbeat_respond, LLM task, model switching, introspect, configure |
 
 ---
 
@@ -226,8 +230,8 @@ Legacy type names (`plugin`, `mcp`, `connector`, `extension`) are still accepted
 
 | Provider | Models | Env Variable |
 |----------|--------|-------------|
-| **OpenAI** | GPT-4.1, o3 | `OPENAI_API_KEY` |
-| **Anthropic** | Claude Opus 4, Sonnet 4 | `ANTHROPIC_API_KEY` |
+| **OpenAI** | GPT-5.2, GPT-5-mini | `OPENAI_API_KEY` |
+| **Anthropic** | Claude Sonnet 5, Opus 4.8 | `ANTHROPIC_API_KEY` |
 | **Groq** | Llama 3.3 70B | `GROQ_API_KEY` |
 | **Google** | Gemini 2.5 Flash | `GOOGLE_API_KEY` |
 | **Mistral** | Mistral Large | `MISTRAL_API_KEY` |
@@ -238,7 +242,7 @@ Legacy type names (`plugin`, `mcp`, `connector`, `extension`) are still accepted
 | **Together** | Llama, Mixtral | `TOGETHER_API_KEY` |
 | **Perplexity** | Sonar | `PERPLEXITY_API_KEY` |
 | **Cohere** | Command R+ | `COHERE_API_KEY` |
-| **Azure** | GPT-4.1 | `AZURE_OPENAI_API_KEY` |
+| **Azure** | Azure-hosted OpenAI models | `AZURE_OPENAI_API_KEY` |
 
 Switch models at runtime from the Web UI settings or via the `switch_model` tool.
 
