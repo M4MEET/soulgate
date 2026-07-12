@@ -3,8 +3,9 @@
 .env.*
 *.key
 *.pem
-secrets/
-credentials/
+/secrets/
+/credentials/
+.soulgate/security/secrets.json
 
 # SoulGate workspace data (runtime state — never commit)
 .soulgate/state/

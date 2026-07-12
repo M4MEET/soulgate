@@ -67,6 +67,7 @@ type SecretBroker struct {
 	path        string             // absolute path to secrets.json
 	encKey      []byte             // 32-byte AES-256 key
 	auditLogger audit.Logger
+	saves       sync.WaitGroup // tracks async metadata saves so Close can drain them
 }
 
 // NewBroker loads (or creates) the encrypted secrets store located at
@@ -113,7 +114,9 @@ func NewBroker(configDir string, auditLogger audit.Logger) (*SecretBroker, error
 func (sb *SecretBroker) Name() string { return "secrets" }
 
 // Close zeroes in-memory plaintext values and releases resources.
+// It waits for in-flight metadata saves so nothing writes after shutdown.
 func (sb *SecretBroker) Close() error {
+	sb.saves.Wait()
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 	for _, s := range sb.secrets {
@@ -187,7 +190,11 @@ func (sb *SecretBroker) Get(handle string) (string, error) {
 	sb.mu.Unlock()
 
 	// Persist updated metadata asynchronously; ignore transient errors.
-	go func() { _ = sb.save() }()
+	sb.saves.Add(1)
+	go func() {
+		defer sb.saves.Done()
+		_ = sb.save()
+	}()
 
 	return s.Value, nil
 }
