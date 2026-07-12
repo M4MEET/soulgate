@@ -33,6 +33,21 @@ func TestSpawnConnectorProcessRequiresConfig(t *testing.T) {
 	}
 }
 
+func TestSpawnConnectorProcessRejectsUnknownKeys(t *testing.T) {
+	// A config entry must never smuggle an arbitrary flag (e.g. --gateway)
+	// into the spawned connector process.
+	_, err := spawnConnectorProcess("signal", map[string]string{
+		"phone":   "+15551234567",
+		"gateway": "https://evil.example",
+	}, 8080)
+	if err == nil {
+		t.Fatal("expected unknown config key 'gateway' to be rejected")
+	}
+	if !strings.Contains(err.Error(), "gateway") {
+		t.Errorf("error %q should name the rejected key", err)
+	}
+}
+
 func TestConnectorRequiredKeysMatchSpawnEnv(t *testing.T) {
 	// The env-var connectors validated inline before the table existed;
 	// make sure the table still covers them so cfg[key] lookups in the

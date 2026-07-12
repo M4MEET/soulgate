@@ -1383,6 +1383,23 @@ var connectorRequiredKeys = map[string][]string{
 	"mattermost": {"server"},
 }
 
+// connectorFlagKeys is the allowlist of config keys that may be forwarded to
+// flag-based connectors, mirroring the flags each `soulgate connector <type>`
+// command defines. Unknown keys are rejected so a config entry can never
+// smuggle an unintended flag (e.g. --gateway) into the spawned process.
+var connectorFlagKeys = map[string]map[string]bool{
+	"signal":     {"phone": true, "signal_cli": true},
+	"whatsapp":   {"data_dir": true},
+	"teams":      {"app_id": true, "app_password": true, "listen": true},
+	"matrix":     {"homeserver": true, "access_token": true, "user_id": true, "since_token_path": true},
+	"imessage":   {"poll_interval": true, "chat_db": true},
+	"irc":        {"server": true, "nick": true, "channel": true, "tls": true, "password": true},
+	"twitch":     {"oauth_token": true, "nick": true, "channel": true},
+	"nostr":      {"private_key": true, "relay": true},
+	"mattermost": {"server": true, "token": true, "bot_username": true},
+	"feishu":     {"app_id": true, "app_secret": true, "listen": true, "verify_token": true},
+}
+
 // spawnConnectorProcess launches a connector as a background process.
 // It locates the soulgate binary and runs `soulgate connector <type>` with
 // credentials passed as environment variables or CLI flags, depending on
@@ -1425,11 +1442,17 @@ func spawnConnectorProcess(connectorType string, cfg map[string]string, port int
 	default:
 		// Other connectors read CLI flags, not env vars: config key
 		// 'app_id' becomes flag --app-id, 'phone' becomes --phone, etc.
+		// Only allowlisted keys are forwarded, always in --key=value form,
+		// so config values can never be parsed as additional flags.
+		allowed := connectorFlagKeys[connectorType]
 		for k, v := range cfg {
 			if v == "" {
 				continue
 			}
-			args = append(args, "--"+strings.ReplaceAll(k, "_", "-"), v)
+			if !allowed[k] {
+				return "", fmt.Errorf("%s connector: unsupported config key %q", connectorType, k)
+			}
+			args = append(args, "--"+strings.ReplaceAll(k, "_", "-")+"="+v)
 		}
 	}
 
