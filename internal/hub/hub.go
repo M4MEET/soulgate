@@ -158,51 +158,77 @@ func (h *Hub) migrateRegistryPackages(reg *PackageRegistry) {
 }
 
 // Search returns packages whose name, description, or tags contain query.
+// Results merge the remote registry with locally installed packages and
+// workspace skills, de-duplicated by type:name with remote entries winning
+// (they carry richer metadata). If the remote registry is unreachable, local
+// results are returned instead of an error. An empty query matches everything.
 func (h *Hub) Search(query string) ([]Package, error) {
-	reg, err := h.FetchRegistry()
-	if err != nil {
-		return nil, err
-	}
-
-	if query == "" {
-		return reg.Packages, nil
-	}
-
 	q := strings.ToLower(query)
+
 	var results []Package
-	for _, pkg := range reg.Packages {
-		if strings.Contains(strings.ToLower(pkg.Name), q) ||
-			strings.Contains(strings.ToLower(pkg.Description), q) ||
-			containsTag(pkg.Tags, q) {
-			results = append(results, pkg)
+	seen := make(map[string]bool)
+
+	if reg, err := h.FetchRegistry(); err == nil {
+		for _, pkg := range reg.Packages {
+			if matchesQuery(pkg, q) {
+				results = append(results, pkg)
+				seen[fmt.Sprintf("%s:%s", pkg.Type, pkg.Name)] = true
+			}
 		}
 	}
+
+	for _, pkg := range h.localPackages() {
+		key := fmt.Sprintf("%s:%s", pkg.Type, pkg.Name)
+		if !seen[key] && matchesQuery(pkg, q) {
+			results = append(results, pkg)
+			seen[key] = true
+		}
+	}
+
 	return results, nil
 }
 
+// matchesQuery reports whether pkg matches the lowercased query.
+// An empty query matches everything.
+func matchesQuery(pkg Package, q string) bool {
+	if q == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(pkg.Name), q) ||
+		strings.Contains(strings.ToLower(pkg.Description), q) ||
+		containsTag(pkg.Tags, q)
+}
+
 // Info returns details for a package identified by "type:name" or "type/name".
+// It consults the remote registry first; if the package isn't there (or the
+// registry is unreachable) it falls back to locally installed metadata.
 func (h *Hub) Info(typeAndName string) (*Package, error) {
 	pkgType, kind, name, err := parseTypeAndName(typeAndName)
 	if err != nil {
 		return nil, err
 	}
 
-	reg, err := h.FetchRegistry()
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range reg.Packages {
-		p := &reg.Packages[i]
-		if p.Name == name && p.Type == pkgType {
-			if pkgType == TypeTool && kind != "" && p.Kind != kind {
-				continue
+	reg, regErr := h.FetchRegistry()
+	if regErr == nil {
+		for i := range reg.Packages {
+			p := &reg.Packages[i]
+			if p.Name == name && p.Type == pkgType {
+				if pkgType == TypeTool && kind != "" && p.Kind != kind {
+					continue
+				}
+				return p, nil
 			}
-			return p, nil
 		}
 	}
 
-	return nil, fmt.Errorf("hub: package %q not found in registry", typeAndName)
+	if pkg := h.localPackage(pkgType, kind, name); pkg != nil {
+		return pkg, nil
+	}
+
+	if regErr != nil {
+		return nil, fmt.Errorf("hub: package %q not installed locally and registry unavailable: %w", typeAndName, regErr)
+	}
+	return nil, fmt.Errorf("hub: package %q not found in registry or installed locally", typeAndName)
 }
 
 // Install downloads and installs a package identified by "type:name" or "type/name".
@@ -307,9 +333,16 @@ func (h *Hub) Uninstall(typeAndName string) error {
 	return err
 }
 
-// List returns all packages recorded in the installed manifest.
+// List returns all installed packages, reconciling the installed manifest
+// with the package directories actually present on disk. Directories missing
+// from the manifest are added; manifest entries whose directory no longer
+// exists are dropped. The healed manifest is written back when it changed.
 func (h *Hub) List() ([]InstalledPackage, error) {
-	return h.loadInstalled()
+	pkgs, err := h.loadInstalled()
+	if err != nil {
+		return nil, err
+	}
+	return h.reconcileInstalled(pkgs), nil
 }
 
 // Update re-installs all packages that appear in the remote registry.
@@ -625,6 +658,220 @@ func (h *Hub) saveInstalled(pkgs []InstalledPackage) error {
 		return fmt.Errorf("hub: marshal installed manifest: %w", err)
 	}
 	return os.WriteFile(h.installedPath(), data, 0600)
+}
+
+// ---- local state reconciliation ----
+
+// reconcileInstalled syncs the installed manifest with the package
+// directories on disk under .soulgate/hub/{skills,tools,agents}/. Packages
+// found on disk but missing from the manifest are added; manifest entries
+// whose directory is gone are dropped. When anything changed, the healed
+// manifest is saved (best effort, like the migration in loadInstalled).
+func (h *Hub) reconcileInstalled(pkgs []InstalledPackage) []InstalledPackage {
+	changed := false
+
+	// Drop manifest entries whose directory no longer exists.
+	kept := make([]InstalledPackage, 0, len(pkgs))
+	seen := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		if _, err := os.Stat(h.packageDir(p.Type, p.Name)); os.IsNotExist(err) {
+			changed = true
+			continue
+		}
+		kept = append(kept, p)
+		seen[fmt.Sprintf("%s:%s", p.Type, p.Name)] = true
+	}
+
+	// Add package directories on disk that are missing from the manifest.
+	for _, pkgType := range []PackageType{TypeSkill, TypeTool, TypeAgent} {
+		typeDir := filepath.Join(h.workDir, ".soulgate", "hub", string(pkgType)+"s")
+		entries, err := os.ReadDir(typeDir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			key := fmt.Sprintf("%s:%s", pkgType, e.Name())
+			if seen[key] {
+				continue
+			}
+			dir := filepath.Join(typeDir, e.Name())
+			installedAt := time.Now()
+			if info, infoErr := e.Info(); infoErr == nil {
+				installedAt = info.ModTime()
+			}
+			var kind ToolKind
+			if pkgType == TypeTool {
+				kind = detectToolKind(dir)
+			}
+			kept = append(kept, InstalledPackage{
+				Name:        e.Name(),
+				Type:        pkgType,
+				Kind:        kind,
+				Version:     localVersion(dir),
+				InstalledAt: installedAt,
+				UpdatedAt:   installedAt,
+			})
+			seen[key] = true
+			changed = true
+		}
+	}
+
+	if changed {
+		_ = h.saveInstalled(kept)
+	}
+	return kept
+}
+
+// detectToolKind infers a tool's kind from the marker files its installer
+// would have written into the package directory.
+func detectToolKind(dir string) ToolKind {
+	markers := []struct {
+		file string
+		kind ToolKind
+	}{
+		{"manifest.yml", KindPlugin},
+		{"mcp.yml", KindMCP},
+		{"setup.md", KindConnector},
+		{"extension.sh", KindScript},
+	}
+	for _, m := range markers {
+		if _, err := os.Stat(filepath.Join(dir, m.file)); err == nil {
+			return m.kind
+		}
+	}
+	return ""
+}
+
+// localVersion reads a package version from manifest.yml or agent.yml in the
+// package directory, or returns "unknown" when none is available.
+func localVersion(dir string) string {
+	for _, name := range []string{"manifest.yml", "agent.yml"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		var meta struct {
+			Version string `yaml:"version"`
+		}
+		if yaml.Unmarshal(data, &meta) == nil && meta.Version != "" {
+			return meta.Version
+		}
+	}
+	return "unknown"
+}
+
+// localDescription reads a package description from the package directory:
+// the first non-heading line of SKILL.md, or the description field of
+// manifest.yml/agent.yml.
+func (h *Hub) localDescription(pkgType PackageType, name string) string {
+	dir := h.packageDir(pkgType, name)
+	if desc := skillDescription(filepath.Join(dir, "SKILL.md")); desc != "" {
+		return desc
+	}
+	for _, f := range []string{"manifest.yml", "agent.yml"} {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			continue
+		}
+		var meta struct {
+			Description string `yaml:"description"`
+		}
+		if yaml.Unmarshal(data, &meta) == nil && meta.Description != "" {
+			return meta.Description
+		}
+	}
+	return ""
+}
+
+// skillDescription returns the first non-empty, non-heading line of a
+// SKILL.md file, or "" when the file is missing or has no such line.
+func skillDescription(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return line
+	}
+	return ""
+}
+
+// localPackage builds a registry-style Package from local install metadata,
+// or nil when the package is not installed locally.
+func (h *Hub) localPackage(pkgType PackageType, kind ToolKind, name string) *Package {
+	installed, err := h.List()
+	if err != nil {
+		return nil
+	}
+	for _, ip := range installed {
+		if ip.Type != pkgType || ip.Name != name {
+			continue
+		}
+		if pkgType == TypeTool && kind != "" && ip.Kind != kind {
+			continue
+		}
+		return &Package{
+			Name:        ip.Name,
+			Type:        ip.Type,
+			Kind:        ip.Kind,
+			Version:     ip.Version,
+			Description: h.localDescription(ip.Type, ip.Name),
+		}
+	}
+	return nil
+}
+
+// localPackages returns all locally installed packages (post-reconcile) plus
+// workspace skills, as registry-style packages.
+func (h *Hub) localPackages() []Package {
+	var pkgs []Package
+	if installed, err := h.List(); err == nil {
+		for _, ip := range installed {
+			pkgs = append(pkgs, Package{
+				Name:        ip.Name,
+				Type:        ip.Type,
+				Kind:        ip.Kind,
+				Version:     ip.Version,
+				Description: h.localDescription(ip.Type, ip.Name),
+			})
+		}
+	}
+	pkgs = append(pkgs, h.workspaceSkills()...)
+	return pkgs
+}
+
+// workspaceSkills returns skills defined directly in the workspace skills/
+// directory (directories containing a SKILL.md).
+func (h *Hub) workspaceSkills() []Package {
+	skillsDir := filepath.Join(h.workDir, "skills")
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil
+	}
+	var pkgs []Package
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		skillMD := filepath.Join(skillsDir, e.Name(), "SKILL.md")
+		if _, err := os.Stat(skillMD); err != nil {
+			continue
+		}
+		pkgs = append(pkgs, Package{
+			Name:        e.Name(),
+			Type:        TypeSkill,
+			Version:     "local",
+			Description: skillDescription(skillMD),
+		})
+	}
+	return pkgs
 }
 
 // ---- path helpers ----

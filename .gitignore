@@ -10,6 +10,8 @@
 # SoulGate workspace data (runtime state — never commit)
 .soulgate/state/
 .soulgate/cache/
+.soulgate/hub/installed.json
+.soulgate/hub/activity.jsonl
 .soulgate/security/approvals.json
 .soulgate/config.yml
 .soulgate/agents.yaml

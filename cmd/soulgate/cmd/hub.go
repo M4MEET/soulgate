@@ -163,8 +163,10 @@ func runHubSearch(query string) error {
 		if pkg.Description != "" {
 			fmt.Printf("                   %s\n", colorMuted(pkg.Description))
 		}
-		if pkg.Version != "" {
+		if pkg.Version != "" && pkg.Version != "unknown" && pkg.Version != "local" {
 			fmt.Printf("                   %s\n", colorMuted("v"+pkg.Version))
+		} else if pkg.Version == "local" {
+			fmt.Printf("                   %s\n", colorMuted("workspace skill"))
 		}
 		fmt.Println()
 	}
@@ -221,7 +223,7 @@ func runHubList() error {
 			colorAccent(label),
 			colorBold(p.Name),
 		)
-		if p.Version != "" {
+		if p.Version != "" && p.Version != "unknown" {
 			fmt.Printf("    v%s", p.Version)
 		}
 		fmt.Printf("  installed %s\n", p.InstalledAt.Format("2006-01-02"))
