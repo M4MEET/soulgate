@@ -120,7 +120,7 @@ System overview with provider status, cost tracking, token usage, health checks,
 
 ### Tools
 
-45+ built-in tools — files, shell, browser, voice, image gen, memory, and more. Enable/disable tools per session.
+85+ built-in tools — files, shell, browser, computer control, voice, image gen, git, secrets, sessions, memory, and more. Enable/disable tools per session.
 
 <p align="center">
   <img src="assets/screenshots/tools.png" width="800" alt="Tools View" />
